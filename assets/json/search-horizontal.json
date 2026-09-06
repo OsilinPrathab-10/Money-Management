@@ -1,0 +1,27 @@
+{
+  "suggestions": {
+    "Pages": [
+      { "name": "Dashboard", "url": "dashboard", "icon": "ri-dashboard-line" },
+      { "name": "Clients", "url": "client-management", "icon": "ri-group-line" },
+      { "name": "Loan Applications", "url": "loan/loan-applications", "icon": "ri-file-list-3-line" },
+      { "name": "Repayments", "url": "emi/repayments", "icon": "ri-calendar-check-line" }
+    ]
+  },
+  "navigation": {
+    "pages": [
+      { "name": "Dashboard", "url": "dashboard", "icon": "ri-dashboard-line" },
+      { "name": "Clients", "url": "client-management", "icon": "ri-group-line" },
+      { "name": "KYC Verification", "url": "verification/kyc-verification", "icon": "ri-shield-check-line" },
+      { "name": "Loan Applications", "url": "loan/loan-applications", "icon": "ri-file-list-3-line" },
+      { "name": "Loan Accounts", "url": "loan/loan-accounts", "icon": "ri-bank-line" },
+      { "name": "Loan Setup", "url": "loan/loan-products", "icon": "ri-settings-4-line" },
+      { "name": "Repayments", "url": "emi/repayments", "icon": "ri-calendar-check-line" },
+      { "name": "Payment Receipts", "url": "emi/receipts", "icon": "ri-receipt-line" },
+      { "name": "EMI Calculator", "url": "emi/emi-calculator", "icon": "ri-calculator-line" },
+      { "name": "Agent Management", "url": "app/agents", "icon": "ri-user-settings-line" },
+      { "name": "User Management", "url": "user-management", "icon": "ri-user-star-line" },
+      { "name": "Staff Management", "url": "staff", "icon": "ri-team-line" },
+      { "name": "Location Management", "url": "location-management", "icon": "ri-map-pin-line" }
+    ]
+  }
+}

@@ -1,0 +1,6 @@
+/node_modules
+/vendor
+.env
+Archive.zip
+.DS_Store
+/storage/*.key

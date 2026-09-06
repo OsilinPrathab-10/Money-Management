@@ -1,0 +1,17 @@
+{
+  "menu": [
+    {
+      "url": "client/dashboard",
+      "name": "Dashboard",
+      "icon": "menu-icon tf-icons ri-home-smile-line",
+      "slug": "client.dashboard"
+    },
+    {
+      "url": "client/logout",
+      "name": "Logout",
+      "icon": "menu-icon tf-icons ri-logout-box-r-line",
+      "slug": "client.logout",
+      "modal": "logoutModal"
+    }
+  ]
+}

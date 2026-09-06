@@ -1,0 +1,8 @@
+{
+    "noto sans": {
+        "normal": "NotoSans-Regular.ttf",
+        "bold": "NotoSans-Bold.ttf",
+        "italic": "NotoSans-Regular.ttf",
+        "bold_italic": "NotoSans-Bold.ttf"
+    }
+}

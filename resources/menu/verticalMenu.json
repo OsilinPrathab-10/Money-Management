@@ -1,0 +1,504 @@
+{
+  "menu": [
+    {
+      "icon": "menu-icon icon-base ri ri-home-smile-2-line",
+      "url": "dashboard",
+      "name": "Dashboard",
+      "slug": "dashboard",
+      "roles": [
+        "Admin"
+      ]
+    },
+    {
+      "icon": "menu-icon icon-base ri ri-home-smile-2-line",
+      "url": "app/agents/dashboard",
+      "name": "Dashboard",
+      "slug": "agent-dashboard",
+      "roles": [
+        "Agent"
+      ]
+    },
+   
+    {
+      "icon": "menu-icon icon-base ri ri-bar-chart-box-line",
+      "url": "verification/credit-score-history",
+      "name": "CIBIL / Credit score",
+      "slug": "verification-credit-score-history",
+      "roles": [
+        "CreditVerifier"
+      ]
+    },
+    {
+      "url": "client-management",
+      "icon": "menu-icon icon-base ri ri-group-line",
+      "name": "Clients",
+      "roles": [
+        "Admin",
+        "Agent"
+      ],
+      "slug": [
+        "client-management",
+        "client-view-",
+        "client-loan-emis",
+        "client-loan-document-view",
+        "client-loan-document-download"
+      ]
+    },
+    {
+      "url": "verification/kyc-verification",
+      "name": "KYC Verification",
+      "icon": "menu-icon icon-base ri ri-shield-check-line",
+      "roles": [
+        "Admin",
+        "Staff"
+      ],
+      "slug": [
+        "verification-kyc-verification",
+        "verification-kyc-view"
+      ]
+    },
+    {
+      "url": "loan/loan-applications",
+      "name": "Loan Applications",
+      "icon": "menu-icon icon-base ri ri-file-list-3-line",
+      "roles": [
+        "Admin",
+        "Agent"
+      ],
+      "slug": [
+        "loan-applications",
+        "loan-application-view"
+      ]
+    },
+    {
+      "url": "loan/loan-accounts",
+      "name": "Loan Accounts",
+      "icon": "menu-icon icon-base ri ri-bank-line",
+      "roles": [
+        "Admin"
+      ],
+      "slug": [
+        "loan-accounts",
+        "loan-account-view"
+      ]
+    },
+    {
+      "name": "Loan Setup",
+      "icon": "menu-icon icon-base ri ri-settings-4-line",
+      "roles": [
+        "Admin"
+      ],
+      "slug": [
+        "loan-products",
+        "loan-product-view",
+        "loan-types",
+        "loan-configuration"
+      ],
+      "submenu": [
+        {
+          "url": "loan/loan-types",
+          "name": "Loan Types",
+          "slug": "loan-types",
+          "roles": [
+            "Admin"
+          ]
+        },
+        {
+          "url": "loan/loan-products",
+          "name": "Loan Products",
+          "slug": [
+            "loan-products",
+            "loan-product-view"
+          ]
+        },
+        {
+          "url": "loan/loan-configuration",
+          "name": "Loan Configuration",
+          "slug": "loan-configuration",
+          "roles": [
+            "Admin"
+          ]
+        }
+      ]
+    },
+     {
+      "name": "Loan Repayments",
+      "icon": "menu-icon icon-base ri ri-calendar-check-line",
+      "roles": [
+        "Admin",
+        "Staff",
+        "Agent"
+      ],
+      "slug": [
+        "emi-repayments",
+        "emi-details",
+        "client-loan-emi-details",
+        "payment-receipts",
+        "pending-emis",
+        "create-receipt",
+        "view-receipt",
+        "print-receipt",
+        "emi-calculator"
+      ],
+      "submenu": [
+        {
+          "url": "emi/repayments",
+          "name": "EMI/Interest Repayments",
+          "slug": [
+            "emi-repayments",
+            "emi-details",
+            "client-loan-emi-details"
+          ]
+        },
+        {
+          "url": "emi/receipts",
+          "name": "Payment Receipts",
+          "slug": "payment-receipts"
+        },
+        {
+          "url": "emi/emi-calculator",
+          "name": "EMI/Interest Calc",
+          "slug": "emi-calculator"
+        }
+      ]
+    },
+ 
+    {
+      "name": "Reports & Analytics",
+      "icon": "menu-icon icon-base ri ri-bar-chart-grouped-line",
+      "slug": "reports",
+      "roles": [
+        "Admin"
+      ],
+      "submenu": [
+        {
+          "url": "reports/clients",
+          "name": "Clients",
+          "slug": "reports-clients"
+        },
+        {
+          "url": "reports/applications",
+          "name": "Applications",
+          "slug": "reports-applications"
+        },
+        {
+          "url": "reports/loans",
+          "name": "Loans",
+          "slug": "reports-loans"
+        },
+        {
+          "url": "reports/emi",
+          "name": "EMI/Interest Loan",
+          "slug": "reports-emi"
+        }
+      ]
+    },
+    {
+      "url": "reports/revenue",
+      "icon": "menu-icon icon-base ri ri-money-rupee-circle-line",
+      "name": "Revenue",
+      "slug": "reports-revenue",
+      "roles": [
+        "Admin"
+      ]
+    },
+    {
+      "menuHeader": "Managements"
+    },
+    {
+      "url": "user-management",
+      "icon": "menu-icon icon-base ri ri-user-settings-line",
+      "name": "User Management",
+      "slug": "user-management",
+      "roles": [
+        "Admin"
+      ]
+    },
+    {
+      "name": "HRM Management",
+      "icon": "menu-icon icon-base ri ri-team-line",
+      "roles": [
+        "Admin"
+      ],
+      "slug": [
+        "admin.staff.index",
+        "agent-management",
+        "agent-management.index",
+        "agent-management.data",
+        "agent-management.view-account",
+        "agent-management.view-work",
+        "agent-management.view-visits",
+        "agent-management.view-assigned-client",
+        "agent-management.visit-details",
+        "agent-management.attendance",
+        "agent-collections"
+      ],
+      "submenu": [
+        {
+          "url": "staff",
+          "name": "Staff Management",
+          "slug": "admin.staff.index"
+        },
+        {
+          "url": "app/agents",
+          "name": "Agent Management",
+          "slug": [
+            "agent-management.index",
+            "agent-management.data",
+            "agent-management.view",
+            "agent-management.view-account",
+            "agent-management.view-work",
+            "agent-management.view-visits",
+            "agent-management.view-assigned-client",
+            "agent-management.visit-details"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Agent Collections",
+      "icon": "menu-icon icon-base ri ri-wallet-line",
+      "url": "app/agents/agent-collections",
+      "roles": [
+        "Admin"
+      ],
+      "slug": [
+        "agent-collections",
+        "agent-collections.list",
+        "agent-collections.show"
+      ]
+    },
+    {
+      "name": "My Collections",
+      "icon": "menu-icon icon-base ri ri-wallet-line",
+      "url": "app/agents/agent-collections",
+      "roles": [
+        "Agent"
+      ],
+      "slug": [
+        "agent-collections",
+        "agent-collections.list",
+        "agent-collections.show"
+      ]
+    },
+    {
+      "name": "Location Management",
+      "icon": "menu-icon icon-base ri ri-map-pin-line",
+      "slug": "location-management",
+      "url": "location-management",
+      "roles": [
+        "Admin"
+      ]
+    },
+    {
+      "name": "Roles & Permissions",
+      "icon": "menu-icon icon-base ri ri-key-2-line",
+      "slug": "role",
+      "roles": [
+        "Admin"
+      ],
+      "submenu": [
+        {
+          "url": "roles",
+          "name": "User Roles",
+          "slug": "role-users"
+        },
+        {
+          "url": "permission",
+          "name": "Role Permissions",
+          "slug": "role-permissions"
+        }
+      ]
+    },
+    {
+      "name": "Notifications",
+      "url": "notifications",
+      "icon": "menu-icon icon-base ri ri-notification-line",
+      "slug": "notifications",
+      "roles": [
+        "Admin"
+      ]
+    },
+    {
+      "name": "Templates",
+      "icon": "menu-icon icon-base ri ri-file-text-line",
+      "slug": [
+        "templates-email",
+        "email-template-index",
+        "email-template-create",
+        "email-template-edit",
+        "templates-sms",
+        "sms-template-index",
+        "sms-template-create",
+        "sms-template-edit",
+        "templates-whatsapp",
+        "whatsapp-template-index",
+        "whatsapp-template-create",
+        "whatsapp-template-edit",
+        "whatsapp-template-view"
+      ],
+      "roles": [
+        "Admin"
+      ],
+      "submenu": [
+        {
+          "url": "templates/email",
+          "name": "Email Templates",
+          "slug": [
+            "templates-email",
+            "email-template-index",
+            "email-template-create",
+            "email-template-edit"
+          ]
+        },
+        {
+          "url": "templates/sms",
+          "name": "SMS Templates",
+          "slug": [
+            "templates-sms",
+            "sms-template-index",
+            "sms-template-create",
+            "sms-template-edit"
+          ]
+        },
+        {
+          "url": "templates/whatsapp",
+          "name": "WhatsApp Templates",
+          "slug": [
+            "templates-whatsapp",
+            "whatsapp-template-index",
+            "whatsapp-template-create",
+            "whatsapp-template-edit",
+            "whatsapp-template-view",
+            "templates/whatsapp"
+          ]
+        }
+      ]
+    },
+    {
+      "url": "admin/website",
+      "name": "Website Setup",
+      "icon": "menu-icon icon-base ri ri-global-line",
+      "slug": "website",
+      "roles": [
+        "Admin"
+      ],
+      "submenu": [
+        {
+          "url": "admin/homepage-setup",
+          "name": "Homepage Setup",
+          "slug": "website-homepage"
+        },
+        {
+          "url": "admin/appearance",
+          "name": "Appearance",
+          "slug": "website-appearance"
+        }
+      ]
+    },
+    {
+      "name": "Setup & Configuration",
+      "icon": "menu-icon icon-base ri ri-settings-5-line",
+      "slug": [
+        "setup-configuration",
+        "feature-activation",
+        "setup-configuration-smtp-settings",
+        "smtp-settings",
+        "smtp-settings-update",
+        "smtp-settings-test",
+        "payment-methods",
+        "payment-methods-update",
+        "page-configuration",
+        "faq-index",
+        "loan-document-templates",
+        "setup-configuration-api-configuration",
+        "faq-create",
+        "faq-edit"
+      ],
+      "roles": [
+        "Admin"
+      ],
+      "submenu": [
+        {
+          "url": "setup-configuration/feature-activation",
+          "name": "Feature Activation",
+          "slug": "feature-activation"
+        },
+        {
+          "url": "setup-configuration/api-configuration",
+          "name": "API Configuration",
+          "slug": "setup-configuration-api-configuration"
+        },
+        {
+          "url": "setup-configuration/smtp-settings",
+          "name": "SMTP Settings",
+          "slug": "smtp-settings"
+        },
+        {
+          "url": "setup-configuration/payment-methods",
+          "name": "Payment Methods",
+          "slug": "payment-methods"
+        },
+        {
+          "url": "setup-configuration/page-configuration",
+          "name": "Pages Configuration",
+          "slug": "page-configuration"
+        },
+        {
+          "url": "setup-configuration/faq",
+          "name": "FAQ",
+          "slug": [
+            "faq-index",
+            "faq-create",
+            "faq-edit"
+          ]
+        },
+        {
+          "url": "setup-configuration/loan-document-templates",
+          "name": "Loan Document Template",
+          "slug": "loan-document-templates"
+        }
+      ]
+    },
+    {
+      "name": "System",
+      "icon": "menu-icon icon-base ri ri-cpu-line",
+      "slug": [
+        "system",
+        "system-cache-clear",
+        "system-login-log",
+        "system-collection-log"
+      ],
+      "roles": [
+        "Admin"
+      ],
+      "submenu": [
+        {
+          "url": "system/server-status",
+          "name": "Server Status",
+          "slug": "system-server-status"
+        },
+        {
+          "url": "system/database-backup",
+          "name": "Database Backup",
+          "slug": "system-database-backup"
+        },
+        {
+          "url": "system/cache/clear",
+          "name": "Cache Clear",
+          "slug": "system-cache-clear"
+        },
+        {
+          "url": "system/login-log",
+          "name": "Login Log",
+          "slug": "system-login-log"
+        },
+        {
+          "url": "system/collection-log",
+          "name": "Collection Log",
+          "slug": "system-collection-log"
+        }
+      ]
+    }
+  ]
+}

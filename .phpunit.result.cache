@@ -1,0 +1,1 @@
+{"version":2,"defects":{"Tests\\Feature\\HelperAliasTest::test_helper_alias_resolves_to_app_helpers_class":8},"times":{"Tests\\Feature\\HelperAliasTest::test_helper_alias_resolves_to_app_helpers_class":0.016}}

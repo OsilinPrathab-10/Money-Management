@@ -1,0 +1,440 @@
+se App\Http\Controllers\Controller;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Razorpay\Api\Api;
+use Razorpay\Api\Errors\SignatureVerificationError;
+use App\Models\Payment;
+use App\Models\LoanAccount;
+use App\Models\Emi;
+use App\Models\EmiCollection;
+use App\Models\EmiAgentAssignment;
+use App\Services\RazorpayWebhookService;
+
+class RazorpayPaymentControllerApi extends Controller
+{
+    protected $webhookService;
+
+    public function __construct(RazorpayWebhookService $webhookService)
+    {
+        $this->webhookService = $webhookService;
+    }
+
+    /**
+     * --------------------------------
+     * CREATE RAZORPAY ORDER
+
+
+@@ -102,404 +106,15 @@ public function createEmiOrder(Request $request)
+     */
+    public function razorpayWebhook(Request $request)
+    {
+        Log::info('Razorpay Webhook Received', [
+            'event' => $request->event,
+            'payload' => $request->all(),
+            'signature' => $request->header('X-Razorpay-Signature'),
+        ]);
+
+        try {
+            $content = $request->getContent();
+            Log::info('Razorpay Webhook Payload', [
+                'event' => $request->input('event'),
+                'payload_sample' => substr($content, 0, 500) . '...', // Log first 500 chars to avoid huge logs but see content
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Razorpay Webhook Raw Log Failed', ['error' => $e->getMessage()]);
+        }
+
+        // 1. Capture details
+        $rawContent = $request->getContent();
+        $signature = $request->header('X-Razorpay-Signature');
+        $payload = $request->all();
+
+        // 1️⃣ Verify webhook signature
+        try {
+            $api = new Api(
+                env('RAZORPAY_KEY_ID'),
+                env('RAZORPAY_KEY_SECRET')
+            );
+
+            $api->utility->verifyWebhookSignature(
+                $request->getContent(),
+                $signature,
+                env('RAZORPAY_WEBHOOK_SECRET')
+            );
+        } catch (SignatureVerificationError $e) {
+            Log::error('Razorpay webhook signature verification failed', [
+                'signature_received' => $signature,
+                'secret_configured' => substr(env('RAZORPAY_WEBHOOK_SECRET'), 0, 5) . '***', // Partial log for safety
+                'error' => $e->getMessage()
+            ]);
+            return response('Invalid signature', 400);
+        }
+
+        $event = $request->event;
+
+        // 2️⃣ PAYMENT LINK PAID EVENT
+        if ($event === 'payment_link.paid') {
+            Log::info('Processing payment_link.paid webhook event', [
+                'payment_link_id' => $request->payload['payment_link']['entity']['id'] ?? null,
+            ]);
+
+            DB::beginTransaction();
+
+            try {
+                $paymentLinkEntity = $request->payload['payment_link']['entity'];
+                $paymentEntity = $request->payload['payment']['entity'] ?? null;
+                
+                if (!$paymentEntity) {
+                    Log::error('Payment entity missing in payment_link.paid event', [
+                        'payload' => $request->all(),
+                    ]);
+                    DB::rollBack();
+                    return response('Payment entity missing', 400);
+                }
+
+                $notes = $paymentLinkEntity['notes'] ?? [];
+                $collectionId = $notes['collection_id'] ?? null;
+
+                Log::info('Payment link paid - processing', [
+                    'collection_id' => $collectionId,
+                    'payment_id' => $paymentEntity['id'] ?? null,
+                    'notes' => $notes,
+                ]);
+
+                if ($collectionId) {
+                    $collection = EmiCollection::find($collectionId);
+                    
+                    if ($collection) {
+                        // Update collection status
+                        $collection->update([
+                            'status' => 'completed',
+                            'remarks' => trim(($collection->remarks ?? '') . " | Payment ID: {$paymentEntity['id']} | Via payment_link.paid webhook")
+                        ]);
+                        
+                        // Determine payment type from notes
+                        $paymentType = $notes['payment_type'] ?? 'overdue';
+                        $isPartialPayment = ($paymentType === 'partial');
+                        
+                        Log::info('Processing payment based on type (payment_link.paid)', [
+                            'payment_type' => $paymentType,
+                            'is_partial' => $isPartialPayment,
+                            'amount' => $collection->amount,
+                        ]);
+                        
+                        // Check if this is a multi-EMI payment
+                        $emiIds = isset($notes['emi_ids']) ? explode(',', $notes['emi_ids']) : null;
+                        
+                        if ($emiIds && count($emiIds) > 1) {
+                            // Multi-EMI payment - distribute across EMIs
+                            Log::info('Multi-EMI payment detected in webhook', [
+                                'emi_ids' => $emiIds,
+                                'amount' => $collection->amount,
+                            ]);
+                            
+                            // Fetch all EMIs
+                            $emis = Emi::whereIn('id', $emiIds)
+                                ->orderBy('due_date', 'asc')
+                                ->get();
+                            
+                            // Use distribution helper from EmiCollectionControllerApi
+                            $controller = app(\App\Http\Controllers\Agent\EmiCollectionControllerApi::class);
+                            $reflection = new \ReflectionClass($controller);
+                            $method = $reflection->getMethod('distributePaymentAcrossEmis');
+                            $method->setAccessible(true);
+                            
+                            $result = $method->invoke(
+                                $controller,
+                                $emis,
+                                $collection->amount,
+                                $collection->agent_id,
+                                'payment_link',
+                                $paymentType,
+                                null
+                            );
+                            
+                            Log::info('Multi-EMI payment distributed via webhook', [
+                                'collection_ids' => $result['collection_ids'],
+                                'updated_emi_ids' => $result['updated_emi_ids'],
+                            ]);
+                            
+                            // Delete the original placeholder collection
+                            $collection->delete();
+                            
+                        } else {
+                            // Single EMI payment (existing logic)
+                            $emi = $collection->emi;
+                            
+                            if ($isPartialPayment) {
+                                // Use LoanPaymentService for partial payments
+                                $paymentService = app(\App\Services\LoanPaymentService::class);
+                                
+                                $result = $paymentService->processPartialPayment(
+                                    $emi->loan_account_id,
+                                    $collection->amount,
+                                    now()->format('Y-m-d'),
+                                    'payment_link',
+                                    $paymentEntity['id'],
+                                    "Payment link payment (webhook)"
+                                );
+                                
+                                if (!$result['success']) {
+                                    throw new \Exception($result['message']);
+                                }
+                                
+                                Log::info('Partial payment processed via LoanPaymentService (webhook)', [
+                                    'collection_id' => $collection->id,
+                                    'result' => $result,
+                                ]);
+                                
+                            } else {
+                                // Direct EMI update for overdue/full payments
+                                $emi->paid_amount += $collection->amount;
+                                $emi->pending_amount = $emi->total_due - $emi->paid_amount;
+                                
+                                if ($emi->pending_amount <= 1) {
+                                    $emi->status = 'paid';
+                                    $emi->paid_date = now();
+                                    $emi->pending_amount = 0;
+                                } else {
+                                    $emi->status = 'partial';
+                                }
+                                
+                                $emi->payment_reference = $paymentEntity['id'];
+                                $emi->payment_method = $paymentEntity['method'] ?? 'razorpay';
+                                $emi->save();
+                                
+                                Log::info('Overdue/full payment processed directly (webhook)', [
+                                    'emi_id' => $emi->id,
+                                    'emi_status' => $emi->status,
+                                ]);
+                            }
+                            
+                            // Refresh EMI
+                            $emi->refresh();
+                            
+                            // Update assignment if paid
+                            if ($emi->status === 'paid') {
+                                EmiAgentAssignment::where('emi_id', $emi->id)
+                                    ->where('agent_id', $collection->agent_id)
+                                    ->update([
+                                        'status' => 'resolved',
+                                    'resolved_at' => now(),
+                                ]);
+                            }
+                        }
+                        
+                        Log::info('Payment link collection completed via payment_link.paid', [
+                            'collection_id' => $collection->id,
+                        ]);
+                        
+                        DB::commit();
+                        return response('Payment link processed', 200);
+                    } else {
+                        Log::warning('Collection not found for payment_link.paid', [
+                            'collection_id' => $collectionId,
+                        ]);
+                    }
+                }
+
+                DB::commit();
+                return response('OK', 200);
+
+            } catch (\Exception $e) {
+                DB::rollBack();
+                Log::error('payment_link.paid processing failed', [
+                    'error' => $e->getMessage(),
+                    'trace' => $e->getTraceAsString(),
+                ]);
+                return response('Webhook error', 500);
+            }
+        }
+
+        // 3️⃣ PAYMENT CAPTURED
+        if ($event === 'payment.captured') {
+
+            DB::beginTransaction();
+
+            try {
+                $entity = $request->payload['payment']['entity'];
+
+                Log::info('Processing payment.captured webhook', [
+                    'order_id' => $entity['order_id'] ?? null,
+                    'payment_id' => $entity['id'] ?? null,
+                    'notes' => $entity['notes'] ?? [],
+                ]);
+
+                $payment = Payment::where('order_id', $entity['order_id'])
+                    ->lockForUpdate()
+                    ->first();
+
+                // Check if this is a payment link payment (has collection_id in notes)
+                $collectionId = $entity['notes']['collection_id'] ?? null;
+                
+                if ($collectionId && !$payment) {
+                    // This is a payment link payment
+                    Log::info('Payment link payment detected in payment.captured', [
+                        'collection_id' => $collectionId,
+                        'payment_id' => $entity['id'],
+                    ]);
+                    
+                    $collection = \App\Models\EmiCollection::findOrFail($collectionId);
+                    
+                    // Update collection status
+                    $collection->update([
+                        'status' => 'completed',
+                        'remarks' => trim(($collection->remarks ?? '') . " | Payment ID: {$entity['id']}")
+                    ]);
+                    
+                    // Update EMI
+                    $emi = $collection->emi;
+                    $emi->paid_amount += $collection->amount;
+                    $emi->pending_amount = $emi->total_due - $emi->paid_amount;
+                    
+                    if ($emi->pending_amount <= 1) {
+                        $emi->status = 'paid';
+                        $emi->paid_date = now();
+                        $emi->pending_amount = 0;
+                    } else {
+                        $emi->status = 'partial';
+                    }
+                    
+                    $emi->payment_reference = $entity['id'];
+                    $emi->payment_method = $entity['method'] ?? 'razorpay';
+                    $emi->save();
+                    
+                    // Update assignment
+                    \App\Models\EmiAgentAssignment::where('emi_id', $emi->id)
+                        ->where('agent_id', $collection->agent_id)
+                        ->update([
+                            'status' => 'resolved',
+                            'resolved_at' => now(),
+                        ]);
+                    
+                    Log::info('Payment link collection completed via payment.captured', [
+                        'collection_id' => $collection->id,
+                        'emi_id' => $emi->id,
+                        'emi_status' => $emi->status,
+                    ]);
+                    
+                    DB::commit();
+                    return response('Payment link processed', 200);
+                }
+
+                if (!$payment) {
+                    Log::warning('Payment not found for webhook', [
+                        'order_id' => $entity['order_id'],
+                    ]);
+                    DB::commit();
+                    return response('Payment not found', 200);
+                }
+
+                // ✅ Idempotency
+                if ($payment->status === 'success') {
+                    DB::commit();
+                    return response('Already processed', 200);
+                }
+
+                // ✅ Amount check
+                if ((int) $payment->amount_paise !== (int) $entity['amount']) {
+                    throw new \Exception('Amount mismatch');
+                }
+
+                // 3️⃣ Update payment
+                $payment->update([
+                    'payment_id' => $entity['id'],
+                    'status'     => 'success',
+                    'payload'    => $entity,
+                ]);
+        // 2. Delegate to Service
+        $result = $this->webhookService->handleWebhook($payload, $signature, $rawContent);
+
+                // 4️⃣ Apply LMS logic
+                $this->applyBusinessLogic($payment, $entity);
+
+                DB::commit();
+                return response('Webhook processed', 200);
+
+            } catch (\Exception $e) {
+                DB::rollBack();
+                Log::error('Webhook processing failed', [
+                    'error' => $e->getMessage(),
+                    'trace' => $e->getTraceAsString(),
+                ]);
+                return response('Webhook error', 500);
+            }
+        }
+
+        // 4️⃣ PAYMENT FAILED
+        if ($event === 'payment.failed') {
+            Payment::where(
+                'order_id',
+                $request->payload['payment']['entity']['order_id']
+            )->update(['status' => 'failed']);
+        }
+
+        return response('OK', 200);
+    }
+
+    /**
+     * --------------------------------
+     * COMMON LMS BUSINESS LOGIC
+     * (UNCHANGED)
+     * --------------------------------
+     */
+    private function applyBusinessLogic(Payment $payment, array $entity)
+    {
+        $method = $entity['method'] ?? null;
+
+        switch ($payment->payment_type) {
+
+            case 'EMI':
+                $emi = Emi::findOrFail($payment->emi_id);
+
+                $emi->update([
+                    'payment_reference' => $payment->payment_id,
+                    'payment_method'    => $method,
+                    'paid_amount'       => round($entity['amount'] / 100, 2),
+                    'pending_amount'    => 0,
+                    'status'            => 'paid',
+                    'paid_date'         => now(),
+                ]);
+
+                app(\App\Services\LoanPaymentService::class)
+                    ->syncLoanTotals($emi->loan_account_id);
+                break;
+
+            case 'PARTIAL':
+                app(\App\Services\LoanPaymentService::class)
+                    ->processPartialPayment(
+                        $payment->loan_account_id,
+                        $payment->amount,
+                        now(),
+                        $method,
+                        $payment->payment_id,
+                        'Partial payment via Razorpay'
+                    );
+                break;
+
+            case 'PREPAYMENT':
+                app(\App\Services\LoanPaymentService::class)
+                    ->processPrepayment(
+                        $payment->loan_account_id,
+                        $payment->amount,
+                        now(),
+                        $method,
+                        $payment->payment_id,
+                        'Prepayment via Razorpay'
+                    );
+                break;
+
+            case 'FORECLOSURE':
+                app(\App\Services\LoanPaymentService::class)
+                    ->foreclose($payment->loan_account_id);
+                break;
+        }
+        // 3. Return Response
+        return response($result['message'], $result['status']);
+    }
+}

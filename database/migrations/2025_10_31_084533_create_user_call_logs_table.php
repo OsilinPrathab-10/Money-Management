@@ -1,0 +1,36 @@
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    /**
+     * Run the migrations.
+     */
+    public function up(): void
+    {
+        Schema::create('user_call_logs', function (Blueprint $table) {
+            $table->id();
+            $table->foreignId('user_id')->constrained('users')->onDelete('cascade');
+
+            $table->string('device_log_id')->nullable();
+            $table->string('name')->nullable();
+            $table->string('phone_number')->index();
+            $table->enum('call_type', ['incoming', 'outgoing', 'missed', 'rejected'])->default('incoming');
+            $table->integer('duration')->default(0);
+            $table->timestamp('call_time')->nullable();
+            $table->string('phone_account_id')->nullable();
+            $table->timestamps();
+        });
+    }
+
+    /**
+     * Reverse the migrations.
+     */
+    public function down(): void
+    {
+        Schema::dropIfExists('user_call_logs');
+    }
+};
