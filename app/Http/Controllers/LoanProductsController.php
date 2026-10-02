@@ -24,9 +24,9 @@ class LoanProductsController extends Controller
         $loanTypes = LoanType::where('status', 1)->get();
         return view('admin.loan-management.loan-products', compact('loanTypes'));
     }
-    public function store(Request $request)
+    public function store(Request $request): JsonResponse
     {
-        $request->validate([
+        $validated = $request->validate([
             'loanName' => 'required|string|max:255',
             'loanType' => 'required|exists:loan_types,id',
             'loanCode' => 'nullable|string|max:50|unique:loan_products,loan_code',
@@ -40,49 +40,60 @@ class LoanProductsController extends Controller
             'processingFee' => 'nullable|numeric|min:0',
             'documentCharges' => 'nullable|numeric|min:0',
             'otherCharges' => 'nullable|numeric|min:0',
+            'bankingCharges' => 'nullable|numeric|min:0',
             'penaltyRate' => 'nullable|numeric|min:0',
             'gracePeriod' => 'nullable|integer|min:0',
-            'requireCollateral' => 'boolean',
-            'defaultTerm' => 'nullable|integer|min:1',
+            'requireCollateral' => 'required|in:0,1',
+            'defaultTerm' => 'nullable|integer|min:0',
             'description' => 'required|string|min:5',
         ]);
-
 
         DB::beginTransaction();
         try {
             $loan = new LoanProduct();
-            $loan->loan_name = $request->input('loanName');
-            $loan->loan_type_id = $request->input('loanType');
+            $loan->loan_name = $validated['loanName'];
+            $loan->loan_type_id = $validated['loanType'];
 
             if ($request->filled('loanCode')) {
                 $loan->loan_code = $request->input('loanCode');     
             } else {
                 $loan->loan_code = $this->generateLoanCode();
             }
-            $loan->loan_amount_min = $request->input('loanAmountMin');
-            $loan->loan_amount_max = $request->input('loanAmountMax');
-            $loan->interest_rate = $request->input('interestRate');
-            $loan->interest_type = $request->input('interestType');
-            $loan->term_unit = $request->input('termUnit');
-            $loan->min_tenture = $request->input('minTenure');
-            $loan->max_tenture = $request->input('maxTenure');
-            $loan->processing_fee = $request->input('processingFee');
-            $loan->document_charges = $request->input('documentCharges');
-            $loan->other_charges = $request->input('otherCharges');
-            $loan->penalty_rate = $request->input('penaltyRate') ?? 0;
-            $loan->grace_period_days = $request->input('gracePeriod') ?? 0;
-            $loan->require_collateral = (bool) $request->input('requireCollateral');
-            $loan->default_term = $request->input('defaultTerm');
-            $loan->description = $request->input('description');
+            $loan->loan_amount_min = $validated['loanAmountMin'];
+            $loan->loan_amount_max = $validated['loanAmountMax'];
+            $loan->interest_rate = $validated['interestRate'];
+            $loan->interest_type = $validated['interestType'];
+            $loan->term_unit = $validated['termUnit'];
+            $loan->min_tenture = $validated['minTenure'];
+            $loan->max_tenture = $validated['maxTenure'];
+            $loan->processing_fee = $request->filled('processingFee') ? $request->input('processingFee') : null;
+            $loan->document_charges = $request->filled('documentCharges') ? $request->input('documentCharges') : null;
+            $loan->other_charges = $request->filled('otherCharges') ? $request->input('otherCharges') : null;
+            $loan->banking_charges = $request->filled('bankingCharges') ? $request->input('bankingCharges') : null;
+            $loan->penalty_rate = $request->filled('penaltyRate') ? $request->input('penaltyRate') : 0;
+            $loan->grace_period_days = $request->filled('gracePeriod') ? $request->input('gracePeriod') : 0;
+            $loan->require_collateral = (bool) $request->input('requireCollateral', 0);
+            $loan->default_term = $request->filled('defaultTerm') ? $request->input('defaultTerm') : null;
+            $loan->description = $validated['description'];
             // Ensure newly created products are visible in user app by default
             $loan->status = 'active';
             $loan->save();
 
             DB::commit();
-            return redirect()->route('loan-products')->with('success', 'Loan created successfully.');
-        } catch (\Exception $e) {
+            return response()->json([
+                'success' => true,
+                'message' => 'Loan product created successfully.'
+            ]);
+        } catch (\Throwable $e) {
             DB::rollBack();
-            return redirect()->back()->withInput()->withErrors(['error' => 'Failed to create loan product. Please try again.']);
+            Log::error('Loan product creation failed', [
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to create loan product. Please try again.'
+            ], 500);
         }
     }
 
@@ -105,10 +116,11 @@ class LoanProductsController extends Controller
             'processingFee' => 'nullable|numeric|min:0',
             'documentCharges' => 'nullable|numeric|min:0',
             'otherCharges' => 'nullable|numeric|min:0',
+            'bankingCharges' => 'nullable|numeric|min:0',
             'penaltyRate' => 'nullable|numeric|min:0',
             'gracePeriod' => 'nullable|integer|min:0',
-            'requireCollateral' => 'boolean',
-            'defaultTerm' => 'nullable|integer|min:1',
+            'requireCollateral' => 'nullable|in:0,1',
+            'defaultTerm' => 'nullable|integer|min:0',
             'description' => 'required|string|min:5',
         ]);
 
@@ -128,13 +140,16 @@ class LoanProductsController extends Controller
             $loanProduct->term_unit = $validated['termUnit'];
             $loanProduct->min_tenture = $validated['minTenure'];
             $loanProduct->max_tenture = $validated['maxTenure'];
-            $loanProduct->processing_fee = $validated['processingFee'] ?? null;
-            $loanProduct->document_charges = $validated['documentCharges'] ?? null;
-            $loanProduct->other_charges = $validated['otherCharges'] ?? null;
-            $loanProduct->penalty_rate = $validated['penaltyRate'] ?? 0;
-            $loanProduct->grace_period_days = $validated['gracePeriod'] ?? 0;
-            $loanProduct->require_collateral = (bool) ($validated['requireCollateral'] ?? $loanProduct->require_collateral);
-            $loanProduct->default_term = $validated['defaultTerm'] ?? null;
+            $loanProduct->processing_fee = $request->filled('processingFee') ? $request->input('processingFee') : null;
+            $loanProduct->document_charges = $request->filled('documentCharges') ? $request->input('documentCharges') : null;
+            $loanProduct->other_charges = $request->filled('otherCharges') ? $request->input('otherCharges') : null;
+            $loanProduct->banking_charges = $request->filled('bankingCharges') ? $request->input('bankingCharges') : null;
+            $loanProduct->penalty_rate = $request->filled('penaltyRate') ? $request->input('penaltyRate') : 0;
+            $loanProduct->grace_period_days = $request->filled('gracePeriod') ? $request->input('gracePeriod') : 0;
+            if ($request->has('requireCollateral')) {
+                $loanProduct->require_collateral = (bool) $request->input('requireCollateral');
+            }
+            $loanProduct->default_term = $request->filled('defaultTerm') ? $request->input('defaultTerm') : null;
             $loanProduct->description = $validated['description'];
             $loanProduct->save();
 
@@ -177,10 +192,11 @@ class LoanProductsController extends Controller
     {
         $columns = [
             0 => 'id',
-            1 => 'id',
-            2 => 'loan_code',
-            3 => 'loan_name',
+            1 => 'loan_code',
+            2 => 'loan_name',
+            3 => 'loan_type_id',
             4 => 'status',
+            5 => 'id',
         ];
 
         // Total records without filtering
@@ -190,29 +206,41 @@ class LoanProductsController extends Controller
         // DataTables parameters
         $limit = $request->input('length');
         $start = $request->input('start');
-        $order = $columns[$request->input('order.0.column')] ?? 'id';
+        $columnIndex = $request->input('order.0.column');
+        $order = $columns[$columnIndex] ?? 'id';
         $dir = $request->input('order.0.dir') ?? 'desc';
 
         // Build query
-        $query = LoanProduct::select(['id', 'loan_code', 'loan_name', 'status']);
+        $query = LoanProduct::with('loanType');
 
         // Search handling
         if (!empty($request->input('search.value'))) {
             $search = $request->input('search.value');
 
             $query->where(function ($q) use ($search) {
-                $q->where('loan_code', 'LIKE', "%{$search}%")
-                    ->orWhere('loan_name', 'LIKE', "%{$search}%")
-                    ->orWhere('status', 'LIKE', "%{$search}%");
+                $q->where('loan_products.loan_code', 'LIKE', "%{$search}%")
+                    ->orWhere('loan_products.loan_name', 'LIKE', "%{$search}%")
+                    ->orWhere('loan_products.status', 'LIKE', "%{$search}%")
+                    ->orWhereHas('loanType', function ($tq) use ($search) {
+                        $tq->where('name', 'LIKE', "%{$search}%");
+                    });
             });
 
             $totalFiltered = $query->count();
         }
 
-        // Apply pagination and ordering
+        // Apply ordering
+        if ($order === 'loan_type_id') {
+            $query->leftJoin('loan_types', 'loan_products.loan_type_id', '=', 'loan_types.id')
+                ->select('loan_products.*')
+                ->orderBy('loan_types.name', $dir);
+        } else {
+            $query->orderBy('loan_products.' . $order, $dir);
+        }
+
+        // Apply pagination
         $loanProducts = $query->offset($start)
             ->limit($limit)
-            ->orderBy($order, $dir)
             ->get();
 
         $data = $loanProducts->map(function ($product, $index) use ($start) {
@@ -221,6 +249,8 @@ class LoanProductsController extends Controller
                 'id' => $product->getRouteKey(),
                 'loan_code' => $product->loan_code ?? 'N/A',
                 'name' => $product->loan_name,
+                'loan_type' => $product->loanType->name ?? 'N/A',
+                'icon' => $product->loan_type_icon_url,
                 'status' => ucfirst($product->status),
             ];
         });
@@ -300,8 +330,8 @@ class LoanProductsController extends Controller
     // Generate unique loan code
     private function generateLoanCode()
     {
-        // Get the last loan product
-        $lastLoan = LoanProduct::orderBy('id', 'desc')->first();
+        // Get the last loan product including soft-deleted ones
+        $lastLoan = LoanProduct::withTrashed()->orderBy('id', 'desc')->first();
 
         if ($lastLoan && $lastLoan->loan_code) {
             // Extract number from last code (e.g., LP001 -> 001)
@@ -319,8 +349,8 @@ class LoanProductsController extends Controller
         // Generate new code with format LP001, LP002, etc.
         $loanCode = 'LP' . str_pad($newNumber, 3, '0', STR_PAD_LEFT);
 
-        // Check if code already exists (safety check)
-        while (LoanProduct::where('loan_code', $loanCode)->exists()) {
+        // Check if code already exists (safety check including soft-deleted records)
+        while (LoanProduct::withTrashed()->where('loan_code', $loanCode)->exists()) {
             $newNumber++;
             $loanCode = 'LP' . str_pad($newNumber, 3, '0', STR_PAD_LEFT);
         }

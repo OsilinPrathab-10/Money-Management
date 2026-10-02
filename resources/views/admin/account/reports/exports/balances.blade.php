@@ -25,16 +25,18 @@
   <meta charset="utf-8">
   <title>{{ $pageTitle }}</title>
   <style>
-    body { font-family: DejaVu Sans, sans-serif; font-size: 11px; color: #333; }
-    h2 { font-size: 16px; }
-    .muted { color: #666; margin-bottom: 12px; }
-    table { border-collapse: collapse; width: 100%; }
-    th, td { border: 1px solid #999; padding: 6px 8px; }
-    th { background: #f3f4f6; }
+    @page { size: A4 landscape; margin: 10mm; }
+    body { font-family: DejaVu Sans, sans-serif; font-size: 10px; color: #333; margin: 0; }
+    h2 { font-size: 16px; margin-bottom: 8px; }
+    .muted { color: #666; font-size: 10px; margin-bottom: 12px; }
+    table { border-collapse: collapse; width: 100%; margin-bottom: 16px; table-layout: fixed; word-wrap: break-word; }
+    th, td { border: 1px solid #999; padding: 6px 8px; font-size: 9px; vertical-align: top; word-break: break-word; mso-number-format: "\@"; }
+    th { background: #666cff; color: #ffffff; font-weight: bold; }
     .num { text-align: right; }
   </style>
 </head>
 <body>
+  @include('admin.reports.partials.download-branding')
   <h2>{{ $pageTitle }}</h2>
   <p class="muted">{{ __('As of') }}: <strong>{{ $asOf }}</strong></p>
   <table>

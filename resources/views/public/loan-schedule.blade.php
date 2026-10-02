@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{ \App\Helpers\SettingsHelper::get('admin_title', config('app.name', 'Shanmuga Finance')) }} - Repayment Schedule</title>
+    <title>{{ \App\Helpers\SettingsHelper::get('admin_title', \App\Models\CompanyDetail::first()->company_name ?? config('app.name', 'Codepluse Gen PVT Ltd')) }} - Repayment Schedule</title>
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -502,6 +502,15 @@
         $progressPercent = $totalEmis > 0 ? round(($paidEmis / $totalEmis) * 100) : 0;
         
         $totalPaidAmount = $loan->emis->where('status', 'paid')->sum('total_amount');
+
+        // The public link lists dues only: unpaid instalments up to the end of the
+        // current month (so past-month overdues stay visible). Paid and
+        // future-month instalments are not shown.
+        $dueEmis = $dueEmis ?? $loan->currentlyDueEmis();
+        $endOfMonth = \Carbon\Carbon::now()->endOfMonth();
+        $overdueCount = $dueEmis->filter(fn ($e) => $e->due_date && \Carbon\Carbon::parse($e->due_date)->startOfDay()->lt(\Carbon\Carbon::now()->startOfMonth()))->count();
+        $currentDueCount = $dueEmis->count() - $overdueCount;
+        $totalDueAmount = $dueEmis->sum(fn ($e) => max(0, (float) $e->total_amount - (float) $e->paid_amount));
         
         // Setup status mapping
         $statusColors = [
@@ -514,11 +523,30 @@
     @endphp
 
     <div class="container">
-        <!-- Top Bar -->
         <header class="brand-header">
-            <a href="#" class="brand-logo align-items-center gap-1">
-                <i class="ri-hand-coin-line m-0"></i>
-                <span class="ms-2" style="font-family: 'Outfit', sans-serif; font-size: 1.35rem; font-weight: 750; color: white; letter-spacing: -0.25px;">{{ \App\Helpers\SettingsHelper::get('admin_subtitle', 'Finance Made Simple') }}</span>
+            @php
+                $adminLogo = \App\Helpers\SettingsHelper::get('admin_logo');
+                $company = \App\Models\CompanyDetail::first();
+                $companyName = \App\Helpers\SettingsHelper::get('admin_title', $company->company_name ?? config('app.name', 'Codepluse Gen PVT Ltd'));
+                $companySlogan = $company->company_slogan ?? \App\Helpers\SettingsHelper::get('admin_subtitle', '');
+                $logoExists = $adminLogo && \Illuminate\Support\Facades\Storage::disk('public')->exists($adminLogo);
+                if (!$logoExists && !empty($company->logo_path) && \Illuminate\Support\Facades\Storage::disk('public')->exists($company->logo_path)) {
+                    $adminLogo = $company->logo_path;
+                    $logoExists = true;
+                }
+            @endphp
+            <a href="#" class="brand-logo d-flex align-items-center">
+                @if($logoExists)
+                    <img src="{{ asset('storage/' . $adminLogo) }}" alt="{{ $companyName }}" style="max-height: 52px; max-width: 180px; object-fit: contain;" class="rounded bg-white p-1.5 shadow-sm me-2_5">
+                @else
+                    <i class="ri-bank-card-line me-2"></i>
+                @endif
+                <div class="d-flex flex-column">
+                    <span class="fs-4 fw-bold text-white lh-1">{{ $companyName }}</span>
+                    @if(!empty($companySlogan))
+                        <small class="text-white-50 mt-1" style="font-size: 0.8rem; font-weight: 500; letter-spacing: 0.3px;">{{ $companySlogan }}</small>
+                    @endif
+                </div>
             </a>
             <div class="secure-badge">
                 <i class="ri-shield-check-fill"></i>
@@ -586,14 +614,18 @@
             <!-- Filter Tabs -->
             <div class="filter-tabs">
                 <button class="filter-btn active" data-filter="all">
-                    <i class="ri-list-check"></i> All ({{ $totalEmis }})
+                    <i class="ri-list-check"></i> All Dues ({{ $dueEmis->count() }})
                 </button>
-                <button class="filter-btn" data-filter="paid">
-                    <i class="ri-checkbox-circle-line"></i> Paid ({{ $paidEmis }})
+                <button class="filter-btn" data-filter="overdue">
+                    <i class="ri-error-warning-line"></i> Overdue ({{ $overdueCount }})
                 </button>
-                <button class="filter-btn" data-filter="pending">
-                    <i class="ri-time-line"></i> Pending ({{ $totalEmis - $paidEmis }})
+                <button class="filter-btn" data-filter="current">
+                    <i class="ri-time-line"></i> Due This Month ({{ $currentDueCount }})
                 </button>
+                <span class="ms-auto d-flex align-items-center text-muted" style="font-size: 0.78rem; font-weight: 600;">
+                    <i class="ri-information-line me-1"></i>
+                    Showing dues up to {{ $endOfMonth->format('M Y') }} only
+                </span>
             </div>
 
             <div class="table-responsive">
@@ -604,15 +636,19 @@
                             <th>Due Date</th>
                             <th class="text-end">{{ $isKandhuvatti ? 'Total Due' : 'EMI Amount' }}</th>
                             <th class="text-center" style="width: 150px;">Status</th>
-                            <th>Paid On</th>
+                            <th class="text-end">Balance</th>
                         </tr>
                     </thead>
                     <tbody>
-                        @foreach($loan->emis->sortBy('instalment_number') as $emi)
+                        @forelse($dueEmis as $emi)
                             @php
                                 $emiStatus = strtolower($emi->status);
                                 $hasInProgress = $emi->collections->where('status', 'in_progress')->isNotEmpty();
-                                $finalStatus = ($hasInProgress && $emiStatus != 'paid') ? 'unverified' : $emiStatus;
+                                $dueDate = $emi->due_date ? \Carbon\Carbon::parse($emi->due_date)->startOfDay() : null;
+                                $isOverdue = $dueDate && $dueDate->lt(\Carbon\Carbon::now()->startOfMonth());
+
+                                $finalStatus = $hasInProgress ? 'unverified' : ($isOverdue ? 'overdue' : $emiStatus);
+                                $emiBalance = max(0, (float) $emi->total_amount - (float) $emi->paid_amount);
                                 
                                 $badgeMap = [
                                     'paid' => 'badge-paid',
@@ -639,7 +675,7 @@
                                 $statusIcon = $iconMap[$finalStatus] ?? 'ri-time-fill';
                                 $statusLabel = $labelMap[$finalStatus] ?? ucfirst($emi->status);
                             @endphp
-                            <tr data-status="{{ $emiStatus == 'paid' ? 'paid' : 'pending' }}">
+                            <tr data-status="{{ $isOverdue ? 'overdue' : 'current' }}">
                                 <td class="fw-bold text-dark">#{{ $emi->instalment_number }}</td>
                                 <td>
                                     <span class="d-inline-flex align-items-center gap-1.5">
@@ -654,32 +690,49 @@
                                         {{ $statusLabel }}
                                     </span>
                                 </td>
-                                <td class="text-slate">
-                                    @if($emi->paid_date)
-                                        <span class="d-inline-flex align-items-center gap-1">
-                                            <i class="ri-checkbox-circle-line text-success"></i>
-                                            {{ $emi->paid_date->format('d-m-Y') }}
-                                        </span>
-                                    @else
-                                        <span class="text-muted">-</span>
-                                    @endif
+                                <td class="fw-bold text-end text-danger">₹{{ number_format($emiBalance, 2) }}</td>
+                            </tr>
+                        @empty
+                            <tr>
+                                <td colspan="5" class="text-center py-5">
+                                    <i class="ri-checkbox-circle-fill text-success d-block mb-2" style="font-size: 2.25rem;"></i>
+                                    <span class="fw-bold d-block" style="color: var(--dark);">No dues pending</span>
+                                    <small class="text-muted">Nothing is outstanding up to {{ $endOfMonth->format('F Y') }}.</small>
                                 </td>
                             </tr>
-                        @endforeach
+                        @endforelse
                     </tbody>
+                    @if($dueEmis->isNotEmpty())
+                        <tfoot>
+                            <tr>
+                                <td colspan="4" class="fw-bold text-end" style="color: var(--dark);">Total Payable Now</td>
+                                <td class="fw-bold text-end text-danger">₹{{ number_format($totalDueAmount, 2) }}</td>
+                            </tr>
+                        </tfoot>
+                    @endif
                 </table>
             </div>
         </section>
 
         <!-- Footer -->
+        @php
+            $loanCompany = \App\Models\CompanyDetail::first();
+            $loanCompanyMobile = $loanCompany->company_mobile ?? '';
+        @endphp
         <footer class="footer-custom">
             <div class="footer-logo">
-                <i class="ri-hand-coin-line text-primary"></i>
+                @if($loanLogoUrl)
+                    <img src="{{ $loanLogoUrl }}" alt="Logo" style="height: 28px; border-radius: 6px;">
+                @else
+                    <i class="ri-hand-coin-line text-primary"></i>
+                @endif
                 <span>{{ \App\Helpers\SettingsHelper::get('admin_subtitle', 'Finance Made Simple') }}</span>
             </div>
-            <p class="mb-1">&copy; {{ date('Y') }} {{ \App\Helpers\SettingsHelper::get('admin_title', config('app.name', 'Shanmuga Finance')) }}. All rights reserved.</p>
+            <p class="mb-1">&copy; {{ date('Y') }} {{ \App\Helpers\SettingsHelper::get('admin_title', $loanCompany->company_name ?? config('app.name', 'Codepluse Gen PVT Ltd')) }}. All rights reserved.</p>
+            @if($loanCompanyMobile)
+                <p class="mb-1"><i class="ri-phone-line me-1"></i>Contact: <a href="tel:{{ $loanCompanyMobile }}" class="text-primary" style="font-weight: 600;">{{ $loanCompanyMobile }}</a></p>
+            @endif
             <p class="text-slate-400">For inquiries or support, please contact your authorized agent or reach out to our service office.</p>
-            <p class="text-slate-400">{{ get_setting('company_name', config('app.name')) }} <a href="{{ get_setting('company_website', url('/')) }}" target="_blank" class="text-primary">{{ get_setting('company_website', url('/')) }}</a></p>
         </footer>
     </div>
 
@@ -701,16 +754,9 @@
 
                     tableRows.forEach(row => {
                         const rowStatus = row.getAttribute('data-status');
-                        
-                        if (filterValue === 'all') {
-                            row.style.display = '';
-                        } else if (filterValue === 'paid' && rowStatus === 'paid') {
-                            row.style.display = '';
-                        } else if (filterValue === 'pending' && rowStatus === 'pending') {
-                            row.style.display = '';
-                        } else {
-                            row.style.display = 'none';
-                        }
+                        // Rows without a status (e.g. the empty-state row) always stay.
+                        const show = filterValue === 'all' || rowStatus === null || rowStatus === filterValue;
+                        row.style.display = show ? '' : 'none';
                     });
                 });
             });
@@ -718,3 +764,4 @@
     </script>
 </body>
 </html>
+ 

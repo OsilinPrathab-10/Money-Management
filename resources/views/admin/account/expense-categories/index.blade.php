@@ -3,11 +3,11 @@
 @section('title', __('Expense categories'))
 
 @section('content')
-<div class="container-xxl flex-grow-1 container-p-y">
+<div class="account-module">
   <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-4">
     <div>
       <h4 class="mb-1">{{ __('Expense categories') }}</h4>
-      <p class="text-muted mb-0">{{ __('Mapped to expense GL accounts (typically 5000–6999).') }}</p>
+      <p class="text-muted mb-0">{{ __('Organize expense types for Day Book and reports.') }}</p>
     </div>
     <div class="d-flex align-items-center gap-2 flex-wrap">
       @php
@@ -74,7 +74,6 @@
           <tr>
             <th>{{ __('Code') }}</th>
             <th>{{ __('Name') }}</th>
-            <th>{{ __('GL') }}</th>
             <th>{{ __('Active') }}</th>
             <th class="text-end">{{ __('Actions') }}</th>
           </tr>
@@ -84,7 +83,6 @@
             <tr>
               <td><code>{{ $e->category_code }}</code></td>
               <td>{{ $e->category_name }}</td>
-              <td>{{ $e->gl_account?->account_name ?? '—' }}</td>
               <td>{{ $e->is_active ? __('Yes') : __('No') }}</td>
               <td class="text-end">
                 @include('admin.account.shared.table-actions', [
@@ -94,7 +92,7 @@
               </td>
             </tr>
           @empty
-            <tr><td colspan="5" class="text-center text-muted py-4">{{ __('No categories yet.') }}</td></tr>
+            <tr><td colspan="4" class="text-center text-muted py-4">{{ __('No categories yet.') }}</td></tr>
           @endforelse
         </tbody>
       </table>

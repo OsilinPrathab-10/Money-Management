@@ -14,7 +14,7 @@ use App\Models\EmiFollowup;
 
 class Emi extends Model
 {
-    use HasObfuscatedRouteKey;
+    use HasObfuscatedRouteKey, \Illuminate\Database\Eloquent\SoftDeletes;
     protected $fillable = [
         'loan_account_id',
         'instalment_number',
@@ -92,6 +92,34 @@ class Emi extends Model
     {
         return $query->whereDate('due_date', '<', now()->toDateString())
             ->whereIn('status', ['pending', 'overdue', 'partial'])
+            ->where('pending_amount', '>', 0);
+    }
+
+    /**
+     * Current-month unpaid EMIs that are not yet past due (Pending).
+     * Excludes partials (those stay in the Partial tab).
+     */
+    public function scopePendingCurrentMonth($query)
+    {
+        $today = now()->toDateString();
+        $monthEnd = now()->endOfMonth()->toDateString();
+
+        return $query->whereDate('due_date', '>=', $today)
+            ->whereDate('due_date', '<=', $monthEnd)
+            ->whereIn('status', ['pending', 'overdue'])
+            ->where('pending_amount', '>', 0);
+    }
+
+    /**
+     * Future EMIs due after the current month (Upcoming).
+     * Excludes partials (those stay in the Partial tab).
+     */
+    public function scopeUpcoming($query)
+    {
+        $monthEnd = now()->endOfMonth()->toDateString();
+
+        return $query->whereDate('due_date', '>', $monthEnd)
+            ->whereIn('status', ['pending', 'overdue'])
             ->where('pending_amount', '>', 0);
     }
 

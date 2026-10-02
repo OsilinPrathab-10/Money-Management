@@ -3,7 +3,7 @@
 @section('title', $pageTitle ?? __('Coming Soon'))
 
 @section('content')
-<div class="container-xxl flex-grow-1 container-p-y text-center d-flex flex-column justify-content-center align-items-center" style="min-height: 60vh;">
+<div class="account-module text-center d-flex flex-column justify-content-center align-items-center" style="min-height: 60vh;">
   
   <div class="mb-4">
     <div class="avatar avatar-xl bg-label-primary rounded-circle shadow-sm mx-auto d-flex align-items-center justify-content-center" style="width: 80px; height: 80px;">

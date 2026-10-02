@@ -56,10 +56,12 @@ class LoanAccountsController extends Controller
 
         $activeLoans = $activeQuery->count();
         $closedLoans = $closedQuery->count();
+        $loanTypes = \App\Models\LoanType::orderBy('name')->get();
 
         return view('admin.loan-management.loan-accounts.loan-accounts', compact(
             'activeLoans',
-            'closedLoans'
+            'closedLoans',
+            'loanTypes'
         ));
     }
 
@@ -78,7 +80,8 @@ class LoanAccountsController extends Controller
         // Build base query
         $query = LoanAccount::with([
             'client.location',
-            'loanApplication.product',
+            'loanApplication.product.loanType',
+            'product.loanType',
             'emis'
         ]);
 
@@ -98,6 +101,47 @@ class LoanAccountsController extends Controller
             $query->where('status', $request->status);
         }
 
+        // Filter by loan_mode (Standard EMI vs Open Loan)
+        if ($request->filled('loan_mode')) {
+            if ($request->loan_mode === 'interest_only') {
+                $query->where(function ($q) {
+                    $q->where('loan_mode', 'interest_only')
+                      ->orWhereHas('loanApplication', function ($aq) {
+                          $aq->where('loan_mode', 'interest_only');
+                      });
+                });
+            } elseif ($request->loan_mode === 'emi') {
+                $query->where(function ($q) {
+                    $q->where(function ($mq) {
+                        $mq->whereNull('loan_mode')->orWhere('loan_mode', '!=', 'interest_only');
+                    })->where(function ($mq) {
+                        $mq->whereDoesntHave('loanApplication', function ($aq) {
+                            $aq->where('loan_mode', 'interest_only');
+                        });
+                    });
+                });
+            }
+        }
+
+        // Filter by loan_type_id
+        if ($request->filled('loan_type_id')) {
+            $query->where(function ($q) use ($request) {
+                $q->whereHas('product', function ($pq) use ($request) {
+                    $pq->where('loan_type_id', $request->loan_type_id);
+                })->orWhereHas('loanApplication.product', function ($pq) use ($request) {
+                    $pq->where('loan_type_id', $request->loan_type_id);
+                });
+            });
+        }
+
+        // Apply account number filter
+        if ($request->filled('account_number')) {
+            $query->where(function ($q) use ($request) {
+                $q->where('account_number', 'LIKE', "%{$request->account_number}%")
+                  ->orWhere('customer_loan_account_number', 'LIKE', "%{$request->account_number}%");
+            });
+        }
+
         // Date range filtering
         if ($request->has('from_date') && !empty($request->from_date)) {
             $query->whereDate('disbursed_at', '>=', $request->from_date);
@@ -112,8 +156,8 @@ class LoanAccountsController extends Controller
         $totalFiltered = $totalData;
 
         // DataTables parameters
-        $limit = $request->input('length');
-        $start = $request->input('start');
+        $limit = (int) $request->input('length', 10);
+        $start = (int) $request->input('start', 0);
         $order = $columns[$request->input('order.0.column')] ?? 'created_at';
         $dir = $request->input('order.0.dir') ?? 'desc';
 
@@ -123,6 +167,7 @@ class LoanAccountsController extends Controller
 
             $query->where(function ($q) use ($search) {
                 $q->where('account_number', 'LIKE', "%{$search}%")
+                  ->orWhere('customer_loan_account_number', 'LIKE', "%{$search}%")
                   ->orWhere('application_number', 'LIKE', "%{$search}%")
                   ->orWhere('loan_amount', 'LIKE', "%{$search}%")
                   ->orWhere('status', 'LIKE', "%{$search}%")
@@ -138,10 +183,10 @@ class LoanAccountsController extends Controller
         }
 
         // Apply pagination and ordering
-        $loanAccounts = $query->offset($start)
-            ->limit($limit)
-            ->orderBy($order, $dir)
-            ->get();
+        if ($limit > 0) {
+            $query->offset($start)->limit($limit);
+        }
+        $loanAccounts = $query->orderBy($order, $dir)->get();
 
         // Calculate EMI amount and format data
         $data = $loanAccounts->map(function ($loan, $index) use ($start, $totalData) {
@@ -157,13 +202,16 @@ class LoanAccountsController extends Controller
                 'id' => $loan->getRouteKey(),
                 'sno' => $totalData - $start - $index,
                 'account_number' => $loan->account_number,
+                'customer_loan_account_number' => $loan->customer_loan_account_number,
                 'application_number' => $loan->application_number ?? 'N/A',
                 'client_name' => $loan->client->client_name ?? 'N/A',
                 'zone' => $loan->client->location->name ?? 'N/A',
                 'client_phone' => $loan->client->client_phone ?? 'N/A',
                 'customer_id' => $loan->client->client_phone ?? 'N/A',
                 'client_id' => $loan->client ? $loan->client->getRouteKey() : null,
-                'loan_name' => optional($loan->loanApplication->product)->loan_name ?? 'N/A',
+                'loan_name' => optional($loan->loanApplication->product ?? $loan->product)->loan_name ?? 'N/A',
+                'loan_type_name' => optional(optional($loan->loanApplication->product ?? $loan->product)->loanType)->name ?? '',
+                'loan_mode' => $loan->loan_mode ?? optional($loan->loanApplication)->loan_mode ?? 'emi',
                 'loan_amount' => $loan->loan_amount,
                 'loan_amount_formatted' => '₹' . number_format($loan->loan_amount, 0),
                 'total_payable' => $loan->total_payable,
@@ -215,20 +263,31 @@ class LoanAccountsController extends Controller
         }
 
         $client = $loanAccount->client ?? ($loanAccount->loanApplication ? $loanAccount->loanApplication->client : null);
+
+        // Open loans gain a cycle only once its due date arrives, so top up here
+        // rather than waiting for the nightly loans:sync-open-cycles run.
+        if (app(\App\Services\OpenLoanCycleService::class)->syncDueCycles($loanAccount) > 0) {
+            $loanAccount->load(['emis' => fn ($query) => $query->orderBy('instalment_number', 'asc')]);
+        }
+
         $emis = $loanAccount->emis->sortBy('instalment_number');
 
         // Get available document templates based on loan status and product
         $availableTemplates = $this->documentService->getAvailableDocuments($loanAccount);
-
-        // Get saved client loan documents
         $savedDocuments = $loanAccount->clientLoanDocuments;
+        $documentRows = $this->documentService->buildDocumentRows($availableTemplates, $savedDocuments);
+        $bankAccounts = \App\Models\Account\BankAccount::where('is_active', true)
+            ->orderBy('account_name')
+            ->get();
 
         return view('admin.loan-management.loan-accounts.view-loan-account', compact(
             'loanAccount',
             'client',
             'emis',
             'availableTemplates',
-            'savedDocuments' // Pass saved documents to view
+            'savedDocuments',
+            'documentRows',
+            'bankAccounts'
         ));
     }
 
@@ -301,7 +360,7 @@ class LoanAccountsController extends Controller
     /**
      * Get foreclosure information for a loan account
      */
-    public function foreclosureInfo($id)
+    public function foreclosureInfo(Request $request, $id)
     {
         $loanAccount = LoanAccount::with('emis')->findOrFail($id);
 
@@ -325,10 +384,14 @@ class LoanAccountsController extends Controller
 
         $amounts = app(LoanPaymentService::class)->calculateForeclosureAmounts($loanAccount, [
             'charges_percentage' => $chargesPercentage,
+            'discount_amount' => (float) $request->input('discount_amount', 0),
+            'discount_percentage' => (float) $request->input('discount_percentage', 0),
         ]);
 
         $outstandingAmount = $amounts['outstanding_amount'];
-        $interestOutstanding = $amounts['interest_outstanding'];
+        $grossInterest = $amounts['interest_outstanding'];
+        $discountAmount = $amounts['discount_amount'];
+        $interestOutstanding = $amounts['net_interest'];
         $foreclosureCharges = $amounts['foreclosure_charges'];
         $totalAmount = $amounts['total_amount'];
 
@@ -355,8 +418,8 @@ class LoanAccountsController extends Controller
             [
                 'key' => 'interest_outstanding',
                 'label' => $interestLabel,
-                'amount' => $interestOutstanding,
-                'formatted' => number_format($interestOutstanding, 0),
+                'amount' => $grossInterest,
+                'formatted' => number_format($grossInterest, 0),
             ],
             [
                 'key' => 'foreclosure_charges',
@@ -367,6 +430,15 @@ class LoanAccountsController extends Controller
             ],
         ];
 
+        if ($discountAmount > 0) {
+            array_splice($breakdown, 2, 0, [[
+                'key' => 'interest_discount',
+                'label' => 'Less: interest discount',
+                'amount' => -$discountAmount,
+                'formatted' => '-' . number_format($discountAmount, 0),
+            ]]);
+        }
+
         return response()->json([
             'eligibility_months'   => $eligibilityMonths,
             'charges_percentage'   => $chargesPercentage,
@@ -374,6 +446,9 @@ class LoanAccountsController extends Controller
             'is_eligible'          => $isEligible,
             'has_partial_emi'      => $hasPartialEmi,
             'outstanding_amount'   => $outstandingAmount,
+            'gross_interest'       => $grossInterest,
+            'discount_amount'      => $discountAmount,
+            'discount_percentage'  => $amounts['discount_percentage'],
             'interest_outstanding' => $interestOutstanding,
             'foreclosure_charges'  => $foreclosureCharges,
             'total_amount'         => $totalAmount,
@@ -513,7 +588,12 @@ class LoanAccountsController extends Controller
      */
     public function emiPartialMinAmount(Request $request, $emi_id)
     {
-        $emi = Emi::with('loanAccount')->findOrFail($emi_id);
+        $decodedId = \App\Support\HashId::decode((string) $emi_id);
+        if ($decodedId === null && ctype_digit((string) $emi_id)) {
+            $decodedId = (int) $emi_id;
+        }
+
+        $emi = Emi::with('loanAccount')->findOrFail($decodedId ?? $emi_id);
         $partialService = app(PartialPaymentConfigService::class);
         $rules = $partialService->rulesForEmi($emi);
 
@@ -533,15 +613,44 @@ class LoanAccountsController extends Controller
             'eligibility_months' => 'nullable|integer|min:1',
             'charges_percentage' => 'nullable|numeric|min:0|max:100',
             'override_mode' => 'nullable|boolean',
-            'foreclosure_notes' => 'nullable|string'
+            'extra_charge' => 'nullable|numeric|min:0|max:100',
+            'discount_type' => 'nullable|in:amount,percentage',
+            'discount_value' => 'nullable|numeric|min:0',
+            'foreclosure_notes' => 'nullable|string',
+            'payment_method' => 'required|in:in_hand,cash,upi,bank_transfer',
+            'internal_bank_account_id' => 'nullable|integer|exists:bank_accounts,id',
+            'payment_reference' => 'nullable|string|max:255',
         ]);
 
-        // Prepare options for service
+        $discountType = $validated['discount_type'] ?? 'amount';
+        $discountValue = (float) ($validated['discount_value'] ?? 0);
+
+        if ($discountType === 'percentage' && $discountValue > 100) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Interest discount cannot exceed 100%.',
+            ], 422);
+        }
+
+        $paymentMethod = strtolower((string) $validated['payment_method']);
+        if (in_array($paymentMethod, ['upi', 'bank_transfer'], true) && empty($validated['internal_bank_account_id'])) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Please select a collection bank account for UPI / Bank Transfer.',
+            ], 422);
+        }
+
         $options = [
             'override_mode' => $request->boolean('override_mode'),
             'eligibility_months' => $validated['eligibility_months'] ?? null,
             'charges_percentage' => $validated['charges_percentage'] ?? null,
+            'extra_charge' => $validated['extra_charge'] ?? 0,
+            'discount_amount' => $discountType === 'amount' ? $discountValue : 0,
+            'discount_percentage' => $discountType === 'percentage' ? $discountValue : 0,
             'foreclosure_notes' => $validated['foreclosure_notes'] ?? null,
+            'payment_method' => $paymentMethod,
+            'internal_bank_account_id' => $validated['internal_bank_account_id'] ?? null,
+            'payment_reference' => $validated['payment_reference'] ?? null,
         ];
 
         // Call service
@@ -552,7 +661,8 @@ class LoanAccountsController extends Controller
         if ($result['success']) {
             return response()->json([
                 'success' => true,
-                'message' => $result['message']
+                'message' => $result['message'],
+                'data' => $result['data'] ?? null,
             ]);
         } else {
             return response()->json([
@@ -589,9 +699,8 @@ class LoanAccountsController extends Controller
 
             // Return response
             if ($result['success']) {
-                // Use fresh() to reload from DB after the payment service has updated outstanding_amount
-                $loanAccount = LoanAccount::with(['client', 'loanApplication'])->findOrFail($id)->fresh();
-                $client = $loanAccount->client ?? $loanAccount->loanApplication?->client;
+                $loanAccount = LoanAccount::with(['client'])->find($id);
+                $client = $loanAccount->client;
                 $mobileNo = $client->mobile_no ?? $client->client_phone ?? '';
                 $cleanMobile = preg_replace('/[^0-9]/', '', $mobileNo);
                 if (strlen($cleanMobile) === 10) {

@@ -49,19 +49,18 @@ $grays: (
 // scss-docs-end gray-colors-map
 
 // scss-docs-start color-variables
-$blue: #26c6f9 !default;
+$blue: #666cff !default;
 $indigo: #666cff !default;
 $purple: #6f42c1 !default;
 $pink: #e83e8c !default;
 $red: #ff4d49 !default;
 $orange: #fdb528 !default;
 $yellow: #ffd950 !default;
-$green: #72e128 !default;
+$green: #20c30e !default;
 $teal: #20c997 !default;
 $cyan: #28c3d7 !default;
 
 // scss-docs-end color-variables
-
 // The contrast ratio to reach against white, to determine if color changes from "light" to "dark". Acceptable values for WCAG 2.0 are 3, 4.5 and 7. See https://www.w3.org/TR/WCAG20/#visual-audio-contrast-contrast
 
 $min-contrast-ratio: 1.6 !default;
@@ -81,7 +80,6 @@ $dark: #312d4b !default;
 $gray: $gray-100 !default; // (C)
 
 // scss-docs-end theme-color-variables
-
 // scss-docs-start theme-colors-map
 $theme-colors: (
   "primary": $primary,

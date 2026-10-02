@@ -4,160 +4,6 @@
   $configData = Helper::appClasses();
   $adminTitle = SettingsHelper::get('admin_title', config('variables.templateName'));
   $user = auth()->user();
-  $userRoles = $user->getRoleNames()->toArray();
-  $accountPermissionCandidatesFromSlug = function ($slug): array {
-      if (!is_string($slug) || !str_starts_with($slug, 'account.')) {
-          return [];
-      }
-
-      $base = substr($slug, strlen('account.'));
-      $candidates = [];
-
-      switch ($base) {
-          case 'index':
-              $candidates = ['manage-account-dashboard'];
-              break;
-          case 'loan-accounts':
-              $candidates = ['view-account-loan-accounts'];
-              break;
-          case 'emis':
-              $candidates = ['view-account-emis'];
-              break;
-          case 'bank-accounts':
-              $candidates = [
-                  'manage-bank-accounts',
-                  'manage-any-bank-accounts',
-                  'manage-own-bank-accounts',
-                  'create-bank-accounts',
-                  'edit-bank-accounts',
-                  'delete-bank-accounts',
-              ];
-              break;
-          case 'chart-of-accounts':
-              $candidates = [
-                  'manage-chart-of-accounts',
-                  'manage-any-chart-of-accounts',
-                  'manage-own-chart-of-accounts',
-                  'create-chart-of-accounts',
-                  'edit-chart-of-accounts',
-                  'view-chart-of-accounts',
-                  'delete-chart-of-accounts',
-              ];
-              break;
-          case 'revenues':
-              $candidates = [
-                  'manage-revenues',
-                  'manage-any-revenues',
-                  'manage-own-revenues',
-                  'create-revenues',
-                  'edit-revenues',
-                  'delete-revenues',
-                  'approve-revenues',
-                  'post-revenues',
-              ];
-              break;
-          case 'expenses':
-              $candidates = [
-                  'manage-expenses',
-                  'manage-any-expenses',
-                  'manage-own-expenses',
-                  'create-expenses',
-                  'edit-expenses',
-                  'delete-expenses',
-                  'approve-expenses',
-                  'post-expenses',
-              ];
-              break;
-          case 'reports':
-              $candidates = [
-                  'manage-account-reports',
-                  'print-invoice-aging',
-                  'print-bill-aging',
-                  'print-tax-summary',
-                  'print-customer-balance',
-                  'print-vendor-balance',
-                  'view-customer-detail-report',
-                  'view-vendor-detail-report',
-                  'print-customer-detail-report',
-                  'print-vendor-detail-report',
-              ];
-              break;
-          case 'day-book':
-              $candidates = ['manage-account-day-book'];
-              break;
-          case 'ledger':
-              $candidates = ['manage-account-ledger'];
-              break;
-          case 'profit-loss':
-              $candidates = ['manage-account-profit-loss'];
-              break;
-          case 'bank-transactions':
-              $candidates = [
-                  'manage-bank-transactions',
-                  'reconcile-bank-transactions',
-              ];
-              break;
-          case 'bank-transfers':
-              $candidates = [
-                  'manage-bank-transfers',
-                  'process-bank-transfers',
-              ];
-              break;
-          case 'customers':
-              $candidates = [
-                  'manage-customers',
-                  'manage-any-customers',
-                  'manage-own-customers',
-              ];
-              break;
-          case 'customer-payments':
-              $candidates = [
-                  'manage-customer-payments',
-                  'manage-any-customer-payments',
-                  'manage-own-customer-payments',
-              ];
-              break;
-          case 'debit-notes':
-              $candidates = [
-                  'manage-debit-notes',
-                  'manage-any-debit-notes',
-                  'manage-own-debit-notes',
-              ];
-              break;
-          case 'credit-notes':
-              $candidates = [
-                  'manage-credit-notes',
-                  'manage-any-credit-notes',
-                  'manage-own-credit-notes',
-              ];
-              break;
-          case 'account-types':
-              $candidates = [
-                  'manage-account-types',
-                  'manage-any-account-types',
-                  'manage-own-account-types',
-              ];
-              break;
-          case 'revenue-categories':
-              $candidates = [
-                  'manage-revenue-categories',
-                  'create-revenue-categories',
-                  'edit-revenue-categories',
-                  'delete-revenue-categories',
-              ];
-              break;
-          case 'expense-categories':
-              $candidates = [
-                  'manage-expense-categories',
-                  'create-expense-categories',
-                  'edit-expense-categories',
-                  'delete-expense-categories',
-              ];
-              break;
-      }
-
-      return array_values(array_unique($candidates));
-  };
 @endphp
 
 <aside id="layout-menu" class="layout-menu menu-vertical menu"
@@ -167,7 +13,7 @@
   <!-- ! Hide app brand if navbar-full -->
   @if (!isset($navbarFull))
     <div class="app-brand demo" style="height: 80px;">
-      <a href="{{ auth()->user()->hasRole('CreditVerifier') ? route('verification-credit-score-history') : url('/dashboard') }}" class="app-brand-link gap-xl-0 gap-2">
+      <a href="{{ auth()->user()->hasRole('CreditVerifier') ? route('verification-credit-score-history') : (auth()->user()->hasRole('Agent') && !auth()->user()->hasRole('Admin') ? route('agent-dashboard') : url('/dashboard')) }}" class="app-brand-link gap-xl-0 gap-2">
         <span class="app-brand-logo demo">@include('_partials.macros', ['width' => '200', 'height' => '65'])</span>
 
         <span class="app-brand-text demo menu-text fw-semibold ms-3" style="font-size: 1.4rem;">{{ $adminTitle }}</span>
@@ -189,56 +35,8 @@
   <div class="menu-inner-shadow"></div>
 
   <ul class="menu-inner py-1">
-    @foreach ($menuData[0]->menu as $menu)
-      @if (isset($menu->roles) && !collect($menu->roles)->intersect($userRoles)->count())
-          @php
-            // If roles don't match, fall back to permission-based access for Accounting menus.
-            // This lets Admin assign permissions to Staff without depending on hard-coded role names in JSON.
-            $permissionAllowed = false;
-
-            $slugsToCheck = [];
-            if (isset($menu->slug)) {
-              if (is_string($menu->slug)) {
-                $slugsToCheck[] = $menu->slug;
-              } elseif (is_array($menu->slug)) {
-                foreach ($menu->slug as $s) {
-                  if (is_string($s)) $slugsToCheck[] = $s;
-                }
-              }
-            }
-
-            if (isset($menu->submenu) && is_array($menu->submenu)) {
-              foreach ($menu->submenu as $sub) {
-                if (isset($sub->slug)) {
-                  if (is_string($sub->slug)) {
-                    $slugsToCheck[] = $sub->slug;
-                  } elseif (is_array($sub->slug)) {
-                    foreach ($sub->slug as $ss) {
-                      if (is_string($ss)) $slugsToCheck[] = $ss;
-                    }
-                  }
-                }
-              }
-            }
-
-            foreach ($slugsToCheck as $slug) {
-              $candidates = $accountPermissionCandidatesFromSlug($slug);
-              if (!empty($candidates) && $user?->hasAnyPermission($candidates)) {
-                $permissionAllowed = true;
-                break;
-              }
-            }
-          @endphp
-
-          @if (!$permissionAllowed)
-            @continue
-          @endif
-      @endif
-      {{-- CreditVerifier: only show menu entries that explicitly list CreditVerifier (or have roles that include this user) --}}
-      @if ($user->hasRole('CreditVerifier') && !isset($menu->roles) && !isset($menu->menuHeader))
-          @continue
-      @endif
-      {{-- adding active and open class if child is active --}}
+    @foreach (($menuData[0]->menu ?? []) as $menu)
+      {{-- Menu tree is pre-filtered by MenuAccessService (role menus + optional user override). --}}
 
       {{-- menu headers --}}
       @if (isset($menu->menuHeader))
@@ -302,7 +100,7 @@
 
           {{-- submenu --}}
           @isset($menu->submenu)
-            @include('layouts.sections.menu.submenu', ['menu' => $menu->submenu, 'userRoles' => $userRoles])
+            @include('layouts.sections.menu.submenu', ['menu' => $menu->submenu])
           @endisset
         </li>
       @endif
@@ -311,12 +109,10 @@
 
 </aside>
 @include('admin.account.shared.modal-add-bank')
-@include('admin.account.shared.modal-add-revenue-category')
-@include('admin.account.shared.modal-add-expense-category')
-@include('admin.account.shared.modal-add-account-type')
 @include('admin.account.shared.modal-add-revenue-draft')
 @include('admin.account.shared.modal-add-expense-draft')
-@include('admin.account.shared.modal-add-chart-of-account')
+@include('admin.account.shared.modal-add-revenue-category')
+@include('admin.account.shared.modal-add-expense-category')
 
 <script>
 // Live Clock and Date Widget

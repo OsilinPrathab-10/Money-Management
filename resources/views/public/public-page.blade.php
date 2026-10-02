@@ -152,7 +152,7 @@
                     Back to Login
                 </a>
                 <div class="footer-text">
-                    &copy; {{ date('Y') }} <a href="{{ get_setting('company_website', url('/')) }}" target="_blank" style="color: #667eea; text-decoration: none; font-weight: 500;">{{ get_setting('company_name', config('app.name')) }}</a> - All rights reserved.
+                    &copy; {{ date('Y') }} <a href="https://codepluse.com/" target="_blank" style="color: #667eea; text-decoration: none; font-weight: 500;">Codepluse Gen pvt Ltd</a> - All rights reserved.
                 </div>
             </div>
         </div>

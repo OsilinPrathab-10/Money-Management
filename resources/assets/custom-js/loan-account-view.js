@@ -38,9 +38,36 @@ $(function () {
         eligibilityInput: $('#modalEligibilityMonths'),
         chargesInput: $('#modalChargesPercentage'),
         extraChargeInput: $('#modalExtraCharge'),
+        discountSection: $('#foreclosureDiscountSection'),
+        discountType: $('#foreclosureDiscountType'),
+        discountValue: $('#foreclosureDiscountValue'),
+        discountPrefix: $('#foreclosureDiscountPrefix'),
+        discountRow: $('#discountRow'),
+        discountAmt: $('#discountAmt'),
         reasonGroup: $('#foreclosureReasonGroup'),
-        reasonInput: $('#foreclosureReason')
+        reasonInput: $('#foreclosureReason'),
+        paymentMethod: $('#foreclosurePaymentMethod'),
+        paymentReference: $('#foreclosurePaymentReference'),
+        bankSelect: $('#foreclosure_internal_bank_account_id'),
+        collectionSection: $('#foreclosureCollectionSection')
     };
+
+    const foreclosureBankGroup = {
+        methodSelectId: 'foreclosurePaymentMethod',
+        bankSelectId: 'foreclosure_internal_bank_account_id',
+        bankContainerId: 'foreclosureBankAccountContainer',
+        bankDetailsCardId: 'foreclosureBankDetailsCard',
+        qrContainerId: 'foreclosureQrCodeDisplayContainer',
+        qrBankNameId: 'foreclosureQrBankName',
+        qrUpiIdId: 'foreclosureQrUpiId',
+        qrImageWrapperId: 'foreclosureQrCodeImageWrapper',
+        bankTransferContainerId: 'foreclosureBankTransferDetailsContainer',
+        bankTransferContentId: 'foreclosureBankTransferDetailsContent'
+    };
+
+    if (window.BankPaymentFields && typeof window.BankPaymentFields.initGroup === 'function') {
+        window.BankPaymentFields.initGroup(foreclosureBankGroup);
+    }
 
     // Reset Modal State
     function resetModalState() {
@@ -50,12 +77,28 @@ $(function () {
         ui.overrideTitle.addClass('d-none');
         ui.overrideDesc.addClass('d-none');
         ui.breakdownSection.removeClass('d-none');
+        ui.discountSection.removeClass('d-none');
+        ui.collectionSection.removeClass('d-none');
         ui.confirmationSection.addClass('d-none');
         ui.confirmCheck.prop('checked', false);
         ui.eligibilityInput.val('');
         ui.chargesInput.val('');
         ui.reasonGroup.addClass('d-none');
         ui.reasonInput.val('');
+        ui.discountType.val('amount');
+        ui.discountValue.val('').removeAttr('max');
+        ui.discountPrefix.text('₹');
+        ui.discountRow.addClass('d-none');
+        ui.paymentMethod.val('in_hand');
+        ui.paymentReference.val('');
+        if (ui.bankSelect.length) {
+            ui.bankSelect.val('');
+        }
+        if (window.BankPaymentFields && typeof window.BankPaymentFields.handleMethodChange === 'function') {
+            window.BankPaymentFields.handleMethodChange(foreclosureBankGroup);
+        } else {
+            ui.paymentMethod.trigger('change');
+        }
         isOverrideMode = false;
 
         // Reset buttons visibility
@@ -68,7 +111,10 @@ $(function () {
     function updateConfirmButtonState() {
         const checkboxChecked = ui.confirmCheck.is(':checked');
         const hasReason = ui.reasonInput.val().trim().length > 0;
-        ui.confirmBtn.prop('disabled', !(checkboxChecked && hasReason));
+        const paymentMethod = (ui.paymentMethod.val() || '').toLowerCase();
+        const bankId = ui.bankSelect.val();
+        const bankOk = paymentMethod === 'in_hand' || paymentMethod === 'cash' || !!bankId;
+        ui.confirmBtn.prop('disabled', !(checkboxChecked && hasReason && paymentMethod && bankOk));
     }
 
     // Load foreclosure info
@@ -84,7 +130,7 @@ $(function () {
                 resetModalState();
 
                 currentOutstanding = roundRupee(data.outstanding_amount);
-                currentInterestOutstanding = roundRupee(data.interest_outstanding);
+                currentInterestOutstanding = roundRupee(data.gross_interest ?? data.interest_outstanding);
                 currentChargesPercent = parseFloat(data.charges_percentage) || 0;
                 currentForeclosureCharges = roundRupee(data.foreclosure_charges);
                 currentTotalForeclosure = roundRupee(data.total_amount);
@@ -115,6 +161,8 @@ $(function () {
                         .html('<i class="icon-base ri ri-close-circle-line me-2"></i><div><strong>Foreclosure Blocked</strong><br><small>Ongoing EMI is partially paid. Foreclosure is not allowed for partially paid ongoing EMI. Please clear the pending EMI amount fully before attempting foreclosure.</small></div>');
 
                     ui.breakdownSection.addClass('d-none');
+                    ui.discountSection.addClass('d-none');
+                    ui.collectionSection.addClass('d-none');
                     ui.overrideBtn.addClass('d-none');
                     ui.closeBtn.removeClass('d-none');
                     ui.cancelBtn.addClass('d-none');
@@ -129,6 +177,8 @@ $(function () {
                     ui.closeBtn.addClass('d-none');
                     ui.cancelBtn.removeClass('d-none');
                     ui.breakdownSection.removeClass('d-none');
+                    ui.discountSection.removeClass('d-none');
+                    ui.collectionSection.removeClass('d-none');
 
                     // Show confirmation for eligible state
                     ui.confirmationSection.removeClass('d-none');
@@ -142,6 +192,8 @@ $(function () {
                         .html('<i class="icon-base ri ri-close-circle-line me-2"></i><div><strong>Not eligible</strong><br><small>Only ' + data.paid_emis_count + ' of ' + data.eligibility_months + ' ' + unit + ' paid</small></div>');
 
                     ui.breakdownSection.addClass('d-none');
+                    ui.discountSection.addClass('d-none');
+                    ui.collectionSection.addClass('d-none');
                     ui.overrideBtn.removeClass('d-none');
                     ui.confirmBtn.prop('disabled', true);
                 }
@@ -162,6 +214,8 @@ $(function () {
         ui.eligibilityAlert.addClass('d-none'); // Hide alert
         ui.overrideSection.removeClass('d-none');
         ui.breakdownSection.removeClass('d-none');
+        ui.discountSection.removeClass('d-none');
+        ui.collectionSection.removeClass('d-none');
         ui.extraChargeInput.val('0');
         updateBreakdown(currentOutstanding, currentChargesPercent, 0);
         isOverrideMode = true;
@@ -187,6 +241,18 @@ $(function () {
         updateBreakdown(currentOutstanding, currentChargesPercent, extraCharge);
     });
 
+    // Dynamic Calculation on Discount Change
+    ui.discountValue.on('input', function () {
+        updateBreakdown(currentOutstanding, currentChargesPercent, parseFloat(ui.extraChargeInput.val()) || 0);
+    });
+
+    ui.discountType.on('change', function () {
+        const isPercentage = $(this).val() === 'percentage';
+        ui.discountPrefix.text(isPercentage ? '%' : '₹');
+        ui.discountValue.attr('max', isPercentage ? 100 : null);
+        updateBreakdown(currentOutstanding, currentChargesPercent, parseFloat(ui.extraChargeInput.val()) || 0);
+    });
+
     // Handle Cancel Button (Closes modal)
     ui.cancelBtn.on('click', function () {
         foreclosureModal.hide();
@@ -204,12 +270,31 @@ $(function () {
     });
 
     ui.reasonInput.on('input', updateConfirmButtonState);
+    ui.paymentMethod.on('change', updateConfirmButtonState);
+    ui.bankSelect.on('change', updateConfirmButtonState);
+
+    // Discount applies to interest only and can never exceed it.
+    // Mirrors LoanPaymentService::calculateForeclosureAmounts.
+    function resolveDiscount(interest) {
+        const value = parseFloat(ui.discountValue.val()) || 0;
+        if (value <= 0) {
+            return 0;
+        }
+
+        const raw = ui.discountType.val() === 'percentage'
+            ? (interest * Math.min(value, 100)) / 100
+            : value;
+
+        return Math.min(roundRupee(raw), interest);
+    }
 
     // Helper to update breakdown text (amounts rounded to nearest rupee)
     function updateBreakdown(outstanding, percentage, extraChargePercent = 0) {
         currentChargesPercent = percentage;
         const principal = roundRupee(outstanding);
-        const interest = roundRupee(currentInterestOutstanding);
+        const grossInterest = roundRupee(currentInterestOutstanding);
+        const discount = resolveDiscount(grossInterest);
+        const interest = roundRupee(grossInterest - discount);
         const charges = roundRupee(principal * (percentage / 100));
         const extraPercent = parseFloat(extraChargePercent) || 0;
         const extraCharges = roundRupee(principal * (extraPercent / 100));
@@ -219,21 +304,41 @@ $(function () {
         currentTotalForeclosure = total;
 
         $('#outstandingAmt').text(formatRupee(principal));
-        $('#interestOutstandingAmt').text(formatRupee(interest));
+        $('#interestOutstandingAmt').text(formatRupee(grossInterest));
         $('#chargesPercent').text(percentage);
         $('#foreclosureCharges').text(formatRupee(charges));
         $('#extraChargeAmt').text(formatRupee(extraCharges));
         $('#totalForeclosureAmt').text(formatRupee(total));
+
+        if (discount > 0) {
+            ui.discountRow.removeClass('d-none');
+            ui.discountAmt.text('-' + formatRupee(discount));
+        } else {
+            ui.discountRow.addClass('d-none');
+        }
     }
 
     // Confirm Foreclosure
     ui.confirmBtn.on('click', function () {
         const extraCharge = parseFloat(ui.extraChargeInput.val()) || 0;
+        const paymentMethod = (ui.paymentMethod.val() || 'in_hand').toLowerCase();
+        const bankAccountId = ui.bankSelect.val() || '';
+
+        if ((paymentMethod === 'upi' || paymentMethod === 'bank_transfer') && !bankAccountId) {
+            showToast('danger', 'Please select a collection bank account for UPI / Bank Transfer.');
+            return;
+        }
+
         const formData = {
             _token: $('meta[name="csrf-token"]').attr('content'),
             override_mode: isOverrideMode ? 1 : 0,
             extra_charge: isOverrideMode && extraCharge > 0 ? extraCharge : 0,
-            foreclosure_notes: ui.reasonInput.val().trim()
+            discount_type: ui.discountType.val() || 'amount',
+            discount_value: parseFloat(ui.discountValue.val()) || 0,
+            foreclosure_notes: ui.reasonInput.val().trim(),
+            payment_method: paymentMethod,
+            payment_reference: ui.paymentReference.val().trim(),
+            internal_bank_account_id: (paymentMethod === 'in_hand' || paymentMethod === 'cash') ? '' : bankAccountId
         };
 
         const btn = $(this);

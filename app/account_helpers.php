@@ -45,22 +45,19 @@ if (! function_exists('get_setting')) {
             // 2. Fallback for company-specific details from CompanyDetail model
             $companyFields = [
                 'company_email', 'company_name', 'company_phone', 
-                'support_email', 'support_mobile', 'company_address',
-                'company_website', 'website_url'
+                'support_email', 'support_mobile', 'company_address'
             ];
             
             if (in_array($key, $companyFields) && class_exists('\App\Models\CompanyDetail')) {
                 $company = \App\Models\CompanyDetail::first();
                 if ($company) {
                     $fieldMap = [
-                        'company_email'   => 'company_email',
-                        'company_name'    => 'company_name',
-                        'company_phone'   => 'company_mobile',
-                        'support_email'   => 'support_email',
-                        'support_mobile'  => 'support_mobile',
-                        'company_address' => 'address_line1',
-                        'company_website' => 'website_url',
-                        'website_url'     => 'website_url'
+                        'company_email' => 'company_email',
+                        'company_name'  => 'company_name',
+                        'company_phone' => 'company_mobile',
+                        'support_email' => 'support_email',
+                        'support_mobile' => 'support_mobile',
+                        'company_address' => 'address_line1'
                     ];
                     $field = $fieldMap[$key] ?? $key;
                     if (isset($company->$field) && $company->$field !== null && $company->$field !== '') {

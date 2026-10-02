@@ -3,7 +3,7 @@
 @section('title', __('Account types'))
 
 @section('content')
-<div class="container-xxl flex-grow-1 container-p-y">
+<div class="account-module">
   <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-4">
     <div>
       <h4 class="mb-1">{{ __('Account types') }}</h4>

@@ -179,7 +179,7 @@
         <h5 class="mb-0">
           <i class="ri-notification-line me-2"></i>Send Notification
         </h5>
-        <p class="text-muted mb-0">Broadcast notifications to users, agents, or all</p>
+        <p class="text-muted mb-0">Broadcast to all clients, all agents, or selected people. Custom messages are saved in the app inbox even if push is not registered.</p>
       </div>
       <div class="card-body">
         <form id="notificationForm" action="{{ url('/admin/notification/send') }}" method="POST">
@@ -194,9 +194,11 @@
               type="text" 
               id="notificationTitle"
               name="title" 
-              class="form-control" 
+              class="form-control @error('title') is-invalid @enderror" 
               placeholder="Enter notification title"
+              value="{{ old('title') }}"
               required>
+            @error('title')<div class="invalid-feedback">{{ $message }}</div>@enderror
           </div>
 
           <!-- Notification Body -->
@@ -207,10 +209,11 @@
             <textarea 
               id="notificationBody"
               name="body" 
-              class="form-control" 
+              class="form-control @error('body') is-invalid @enderror" 
               rows="4"
               placeholder="Enter notification message"
-              required></textarea>
+              required>{{ old('body') }}</textarea>
+            @error('body')<div class="invalid-feedback">{{ $message }}</div>@enderror
           </div>
 
 
@@ -224,14 +227,71 @@
               name="target" 
               class="form-select" 
               required>
-              <option value="users">Clients</option>
-              <option value="agents">Agents</option>
-              <option value="all">All</option>
+              <option value="users" {{ old('target', 'users') === 'users' ? 'selected' : '' }}>Clients</option>
+              <option value="agents" {{ old('target') === 'agents' ? 'selected' : '' }}>Agents</option>
+              <option value="all" {{ old('target') === 'all' ? 'selected' : '' }}>All (Clients + Agents)</option>
             </select>
             <div class="form-text">
               <i class="ri-information-line me-1"></i>
-              Select who should receive this notification
+              Choose clients, agents, or both
             </div>
+          </div>
+
+          <!-- Recipient Scope -->
+          <div class="mb-4">
+            <label class="form-label fw-semibold">
+              Recipients <span class="text-danger">*</span>
+            </label>
+            <div class="d-flex flex-wrap gap-3">
+              <div class="form-check">
+                <input class="form-check-input" type="radio" name="recipient_scope" id="recipientAll" value="all" {{ old('recipient_scope', 'all') === 'all' ? 'checked' : '' }}>
+                <label class="form-check-label" for="recipientAll">All selected audience</label>
+              </div>
+              <div class="form-check">
+                <input class="form-check-input" type="radio" name="recipient_scope" id="recipientParticular" value="particular" {{ old('recipient_scope') === 'particular' ? 'checked' : '' }}>
+                <label class="form-check-label" for="recipientParticular">Particular client / agent</label>
+              </div>
+            </div>
+          </div>
+
+          <div id="clientPickerWrap" class="mb-4 d-none">
+            <label for="clientIds" class="form-label fw-semibold">
+              Select Client(s) <span class="text-danger">*</span>
+            </label>
+            <select
+              id="clientIds"
+              name="client_ids[]"
+              class="form-select @error('client_ids') is-invalid @enderror"
+              multiple
+              data-placeholder="Search and select one or more clients">
+              @foreach($clients as $client)
+                <option value="{{ $client->id }}" {{ collect(old('client_ids', []))->contains($client->id) ? 'selected' : '' }}>
+                  {{ $client->client_name }}{{ $client->client_phone ? ' — ' . $client->client_phone : '' }}
+                </option>
+              @endforeach
+            </select>
+            @error('client_ids')<div class="invalid-feedback d-block">{{ $message }}</div>@enderror
+            <div class="form-text">Search by name or mobile. You can select one or many. Phone push needs the customer app to send <code>fcm_token</code> on login — not the API bearer token.</div>
+          </div>
+
+          <div id="agentPickerWrap" class="mb-4 d-none">
+            <label for="agentIds" class="form-label fw-semibold">
+              Select Agent(s) <span class="text-danger">*</span>
+            </label>
+            <select
+              id="agentIds"
+              name="agent_ids[]"
+              class="form-select @error('agent_ids') is-invalid @enderror"
+              multiple
+              data-placeholder="Search and select one or more agents">
+              @foreach($agents as $agent)
+                <option value="{{ $agent->id }}" {{ collect(old('agent_ids', []))->contains($agent->id) ? 'selected' : '' }}>
+                  {{ $agent->agent_name }}{{ $agent->agent_code ? ' (' . $agent->agent_code . ')' : '' }}{{ $agent->agent_phone ? ' — ' . $agent->agent_phone : '' }}
+                </option>
+              @endforeach
+            </select>
+            @error('agent_ids')<div class="invalid-feedback d-block">{{ $message }}</div>@enderror
+            <div class="form-text">Search by name, code, or mobile. You can select one or many.</div>
           </div>
 
           <!-- Notification Type -->
@@ -245,11 +305,11 @@
               class="form-select" 
               required>
               <option value="">-- Select Notification Type --</option>
-              <option value="general" data-targets="users,agents,all">General Announcement</option>
+              <option value="general" data-targets="users,agents,all" {{ old('type') === 'general' ? 'selected' : '' }}>General Announcement</option>
               <option value="loan_product" data-targets="users">New Loan Product</option>
               <option value="interest_update" data-targets="users">Loan Interest Update</option>
               <option value="disbursement" data-targets="users">Application Disbursed</option>
-              <option value="offer" data-targets="users,agents,all">Offer / Promotion</option>
+              <option value="offer" data-targets="users,agents,all" {{ old('type') === 'offer' ? 'selected' : '' }}>Offer / Promotion</option>
             </select>
           </div>
 
@@ -335,6 +395,9 @@
     const bodyInput = document.getElementById('notificationBody');
     const typeSelect = document.getElementById('notificationType');
     const targetSelect = document.getElementById('notificationTarget');
+    const clientPickerWrap = document.getElementById('clientPickerWrap');
+    const agentPickerWrap = document.getElementById('agentPickerWrap');
+    const scopeInputs = document.querySelectorAll('input[name="recipient_scope"]');
     
     const previewTitle = document.getElementById('previewTitle');
     const previewBody = document.getElementById('previewBody');
@@ -374,11 +437,31 @@
       }
     }
     
+    function currentScope() {
+      const checked = document.querySelector('input[name="recipient_scope"]:checked');
+      return checked ? checked.value : 'all';
+    }
+
+    function toggleRecipientPickers() {
+      const target = targetSelect.value;
+      const particular = currentScope() === 'particular';
+
+      clientPickerWrap.classList.toggle('d-none', !particular || (target !== 'users' && target !== 'all'));
+      agentPickerWrap.classList.toggle('d-none', !particular || (target !== 'agents' && target !== 'all'));
+    }
+
     // Filter on page load
     filterNotificationTypes();
+    toggleRecipientPickers();
     
     // Filter when target changes
-    targetSelect.addEventListener('change', filterNotificationTypes);
+    targetSelect.addEventListener('change', function() {
+      filterNotificationTypes();
+      toggleRecipientPickers();
+    });
+    scopeInputs.forEach(function(input) {
+      input.addEventListener('change', toggleRecipientPickers);
+    });
 
     // Update time and date
     function updateTime() {

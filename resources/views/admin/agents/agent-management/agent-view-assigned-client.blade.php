@@ -24,7 +24,7 @@
           <div class="d-flex align-items-center flex-column">
             <div class="user-info text-center">
               <h5 class="mb-2">{{ $client->client_name }}</h5>
-              <span class="badge bg-label-primary mt-1">Client ID: #{{ $client->id }}</span>
+              <span class="badge bg-label-primary mt-1">Customer ID: {{ $client->displayCustomerId() }}</span>
             </div>
           </div>
         </div>

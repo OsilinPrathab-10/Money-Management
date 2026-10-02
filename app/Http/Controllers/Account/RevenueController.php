@@ -16,6 +16,7 @@ use App\Models\Account\ChartOfAccount;
 use App\Services\Account\BankTransactionsService;
 use App\Services\Account\JournalService;
 use App\Services\Account\AccountExportService;
+use App\Support\DateRangePreset;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
 use Illuminate\Support\Facades\Auth;
@@ -65,8 +66,12 @@ class RevenueController extends Controller
             if ($request->status) {
                 $query->where('status', $request->status);
             }
-            if ($request->date_from && $request->date_to) {
-                $query->whereBetween('revenue_date', [$request->date_from, $request->date_to]);
+            [$dateFrom, $dateTo] = DateRangePreset::applyToRequest($request, 'date_from', 'date_to');
+            if ($dateFrom) {
+                $query->whereDate('revenue_date', '>=', $dateFrom);
+            }
+            if ($dateTo) {
+                $query->whereDate('revenue_date', '<=', $dateTo);
             }
             if ($request->bank_account_id) {
                 $query->where('bank_account_id', $request->bank_account_id);
@@ -159,8 +164,12 @@ class RevenueController extends Controller
         if (!empty($validated['status'])) {
             $query->where('status', $validated['status']);
         }
-        if (!empty($validated['date_from']) && !empty($validated['date_to'])) {
-            $query->whereBetween('revenue_date', [$validated['date_from'], $validated['date_to']]);
+        [$dateFrom, $dateTo] = DateRangePreset::applyToRequest($request, 'date_from', 'date_to');
+        if ($dateFrom) {
+            $query->whereDate('revenue_date', '>=', $dateFrom);
+        }
+        if ($dateTo) {
+            $query->whereDate('revenue_date', '<=', $dateTo);
         }
         if (!empty($validated['bank_account_id'])) {
             $query->where('bank_account_id', (int) $validated['bank_account_id']);
@@ -420,7 +429,9 @@ class RevenueController extends Controller
 
                     // Refresh model to get updated state for listeners
                     $revenue->refresh();
+                    $revenue->load(['bankAccount.glAccount', 'chartOfAccount']);
 
+                    // GL journal is optional (skip when bank has no GL). Cashbook always posts.
                     $this->journalService->createRevenueEntryJournal($revenue);
                     $this->bankTransactionsService->createRevenuePayment($revenue);
 

@@ -29,7 +29,7 @@ class EmiCalculatorController extends Controller
     {
         $request->validate([
             'principal' => 'required|numeric|min:1000',
-            'annual_rate' => 'required|numeric|min:0.1|max:100',
+            'annual_rate' => 'required|numeric|min:0|max:100',
             'term_months' => 'required|integer|min:1|max:360',
             'start_date' => 'nullable|date',
             'interest_type' => 'nullable|string|in:flat,reducing,fixed'

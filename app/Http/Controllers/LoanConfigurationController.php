@@ -17,8 +17,9 @@ class LoanConfigurationController extends Controller
         $prepaymentConfig = LoanConfiguration::getPrepaymentConfig();
         $partialPaymentConfig = LoanConfiguration::getPartialPaymentConfig();
         $penaltyConfig = LoanConfiguration::getPenaltyConfig();
+        $accountPrefixConfig = LoanConfiguration::getAccountPrefixConfig();
         
-        return view('admin.loan-management.loan-configuration.loan-configuration', compact('foreclosureConfig', 'prepaymentConfig', 'partialPaymentConfig', 'penaltyConfig'));
+        return view('admin.loan-management.loan-configuration.loan-configuration', compact('foreclosureConfig', 'prepaymentConfig', 'partialPaymentConfig', 'penaltyConfig', 'accountPrefixConfig'));
     }
 
     /**
@@ -249,10 +250,21 @@ class LoanConfigurationController extends Controller
         $isToggleOnly = $request->has('is_active') && !$request->has('charge_value') && !$request->has('eligibility_days');
         
         $validated = $request->validate([
+            'penalty_charge_type' => 'nullable|in:fixed,percentage',
             'charge_value' => 'nullable|numeric|min:0',
             'eligibility_days' => 'nullable|integer|min:0',
             'is_active' => 'nullable|boolean'
         ]);
+
+        // Additional validation: percentage must be <= 100
+        if (($validated['penalty_charge_type'] ?? 'fixed') === 'percentage' && isset($validated['charge_value'])) {
+            if ((float) $validated['charge_value'] > 100) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Percentage penalty value cannot exceed 100%.'
+                ], 422);
+            }
+        }
 
         try {
             // If only is_active is being updated (toggle switch), preserve other values
@@ -271,6 +283,7 @@ class LoanConfigurationController extends Controller
                 
                 // Full form submission - update all fields
                 LoanConfiguration::updateConfig('penalty', [
+                    'penalty_charge_type' => $validated['penalty_charge_type'] ?? 'fixed',
                     'charge_value' => $validated['charge_value'] ?? 0.00,
                     'eligibility_days' => $validated['eligibility_days'] ?? 0,
                     'is_active' => $isActive,
@@ -286,6 +299,38 @@ class LoanConfigurationController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to save configuration: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Save loan account prefix configuration
+     */
+    public function saveAccountPrefixConfig(Request $request)
+    {
+        $validated = $request->validate([
+            'prefix' => 'required|string|min:1|max:4|regex:/^[A-Z]+$/'
+        ], [
+            'prefix.required' => 'The prefix is required.',
+            'prefix.min' => 'The prefix must be at least 1 character.',
+            'prefix.max' => 'The prefix must not exceed 4 characters.',
+            'prefix.regex' => 'The prefix must contain only capital letters.'
+        ]);
+
+        try {
+            LoanConfiguration::updateConfig('account_prefix', [
+                'prefix' => $validated['prefix'],
+                'is_active' => true
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Loan account prefix configuration saved successfully'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to save prefix configuration: ' . $e->getMessage()
             ], 500);
         }
     }

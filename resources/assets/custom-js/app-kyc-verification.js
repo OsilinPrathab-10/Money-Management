@@ -505,7 +505,56 @@ function createToastContainer() {
   return container;
 }
 
+// Helper functions to manage blurred page loader during actions
+function showTransitionLoader() {
+  const pageLoader = document.querySelector('.page-loader');
+  if (pageLoader) {
+    pageLoader.classList.remove('fade-out');
+    pageLoader.classList.add('transition-loading');
+    pageLoader.style.display = 'flex';
+  }
+}
+
+function hideTransitionLoader() {
+  const pageLoader = document.querySelector('.page-loader');
+  if (pageLoader) {
+    pageLoader.classList.add('fade-out');
+    setTimeout(() => {
+      pageLoader.style.display = 'none';
+      pageLoader.classList.remove('transition-loading');
+    }, 300);
+  }
+}
+
 $(document).ready(function () {
+  // Handle Skip KYC Form Submission
+  $('#skipKycForm').on('submit', function (e) {
+    e.preventDefault();
+
+    const form = $(this);
+    const submitBtn = form.find('#confirmSkipKycBtn');
+    const originalText = submitBtn.html();
+
+    submitBtn.prop('disabled', true).html('<span class="spinner-border spinner-border-sm me-2"></span>Skipping...');
+
+    $.ajax({
+      url: form.attr('action'),
+      type: 'POST',
+      data: form.serialize(),
+      success: function (response) {
+        $('#skipKycModal').modal('hide');
+        showAlert('success', response.message);
+        showTransitionLoader();
+        setTimeout(() => window.location.reload(), 1200);
+      },
+      error: function (xhr) {
+        const message = xhr.responseJSON?.message || 'Failed to skip KYC verification';
+        showAlert('danger', message);
+        submitBtn.prop('disabled', false).html(originalText);
+      }
+    });
+  });
+
   // Handle Approve Form Submission
   $('#approveModal form').on('submit', function (e) {
     e.preventDefault();
@@ -523,6 +572,7 @@ $(document).ready(function () {
       success: function (response) {
         $('#approveModal').modal('hide');
         showAlert('success', response.message);
+        showTransitionLoader();
         setTimeout(() => window.location.reload(), 1500);
       },
       error: function (xhr) {
@@ -557,6 +607,7 @@ $(document).ready(function () {
       success: function (response) {
         $('#deleteModal').modal('hide');
         showAlert('success', response.message);
+        showTransitionLoader();
         setTimeout(() => window.location.reload(), 1500);
       },
       error: function (xhr) {
@@ -591,6 +642,7 @@ $(document).ready(function () {
       success: function (response) {
         $('#blacklistModal').modal('hide');
         showAlert('success', response.message);
+        showTransitionLoader();
         setTimeout(() => window.location.reload(), 1500);
       },
       error: function (xhr) {

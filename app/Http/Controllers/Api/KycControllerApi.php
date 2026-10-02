@@ -86,7 +86,7 @@ class KycControllerApi extends Controller
     public function addEmployeeInformation(Request $request)
     {
         $validated = $request->validate([
-            'employment_type' => 'required|in:salaried,self_employed',
+            'employment_type' => 'nullable|in:salaried,self_employed,business',
 
             // Salaried
             'company_name' => 'nullable|string|max:255',
@@ -94,58 +94,93 @@ class KycControllerApi extends Controller
             'monthly_salary' => 'nullable|numeric',
             'work_experience' => 'nullable|numeric',
             'salary_credit_bank' => 'nullable|string',
+            'payslip' => 'nullable|file|mimes:jpg,jpeg,png,pdf|max:5120',
             'payslips' => 'nullable|array|max:3',
             'payslips.*' => 'file|mimes:jpg,jpeg,png,pdf|max:5120',
 
-            // Self-employed
+            // Business Owner / Self-employed
             'business_name' => 'nullable|string|max:255',
             'business_type' => 'nullable|string|max:255',
             'business_category' => 'nullable|string|max:255',
             'years_in_business' => 'nullable|integer|min:0',
             'monthly_turnover' => 'nullable|numeric',
+            'monthly_income' => 'nullable|numeric',
+            'average_monthly_profit' => 'nullable|numeric',
             'business_address' => 'nullable|string',
+            'business_document' => 'nullable|file|mimes:jpg,jpeg,png,pdf|max:5120',
             'proofs' => 'nullable|array|max:2',
             'proofs.*' => 'file|mimes:jpg,jpeg,png,pdf|max:5120',
         ]);
 
         $user = Auth::user();
-        $client = $user->client;
+        $client = $user->client ?? Client::where('user_id', $user->id)->first();
 
-        // Handle payslips
-        // Salaried
-        if ($request->employment_type === 'salaried' && $request->hasFile('payslips')) {
-            $paths = [];
-
-            foreach ($request->file('payslips') as $file) {
-                $paths[] = $file->store('employment/payslips', 'public');
-            }
-
-            $validated['payslip_documents'] = $paths;
-            $validated['business_proof_documents'] = null;
+        if (!$client) {
+            return response()->json([
+                'status' => false,
+                'message' => 'Client profile not found.',
+            ], 404);
         }
 
-        // Self-employed
-        if ($request->employment_type === 'self_employed' && $request->hasFile('proofs')) {
+        $rawEmpType = $validated['employment_type'] ?? null;
+        $empType = ($rawEmpType === 'business' || $rawEmpType === 'self_employed') ? 'self_employed' : 'salaried';
+
+        $empData = [
+            'client_id' => $client->id,
+            'employment_type' => $empType,
+        ];
+
+        if ($rawEmpType === 'salaried' || $empType === 'salaried') {
+            if ($request->filled('company_name')) $empData['company_name'] = $request->input('company_name');
+            if ($request->filled('job_type')) $empData['job_type'] = $request->input('job_type');
+            if ($request->filled('monthly_salary')) $empData['monthly_salary'] = $request->input('monthly_salary');
+            elseif ($request->filled('monthly_income')) $empData['monthly_salary'] = $request->input('monthly_income');
+            if ($request->filled('work_experience')) $empData['work_experience'] = $request->input('work_experience');
+            if ($request->filled('salary_credit_bank')) $empData['salary_credit_bank'] = $request->input('salary_credit_bank');
+
             $paths = [];
-
-            foreach ($request->file('proofs') as $file) {
-                $paths[] = $file->store('employment/proofs', 'public');
+            if ($request->hasFile('payslips')) {
+                foreach ($request->file('payslips') as $file) {
+                    $paths[] = $file->store('employment/payslips', 'public');
+                }
+            } elseif ($request->hasFile('payslip')) {
+                $paths[] = $request->file('payslip')->store('employment/payslips', 'public');
             }
+            if (!empty($paths)) {
+                $empData['payslip_documents'] = $paths;
+            }
+        } else {
+            if ($request->filled('business_name')) $empData['business_name'] = $request->input('business_name');
+            if ($request->filled('business_type')) $empData['business_type'] = $request->input('business_type');
+            if ($request->filled('business_category')) $empData['business_category'] = $request->input('business_category');
+            if ($request->filled('years_in_business')) $empData['years_in_business'] = $request->input('years_in_business');
+            if ($request->filled('monthly_turnover')) $empData['monthly_turnover'] = $request->input('monthly_turnover');
+            elseif ($request->filled('monthly_income')) $empData['monthly_turnover'] = $request->input('monthly_income');
+            elseif ($request->filled('average_monthly_profit')) $empData['monthly_turnover'] = $request->input('average_monthly_profit');
+            if ($request->filled('business_address')) $empData['business_address'] = $request->input('business_address');
 
-            $validated['business_proof_documents'] = $paths;
-            $validated['payslip_documents'] = null;
+            $paths = [];
+            if ($request->hasFile('proofs')) {
+                foreach ($request->file('proofs') as $file) {
+                    $paths[] = $file->store('employment/proofs', 'public');
+                }
+            } elseif ($request->hasFile('business_document')) {
+                $paths[] = $request->file('business_document')->store('employment/proofs', 'public');
+            }
+            if (!empty($paths)) {
+                $empData['business_proof_documents'] = $paths;
+            }
         }
 
-        $validated['client_id'] = $client->id;
-
-        $client->employeeInformation()->updateOrCreate(
+        $info = $client->employeeInformation()->updateOrCreate(
             ['client_id' => $client->id],
-            $validated
+            $empData
         );
 
         return response()->json([
             'status' => true,
             'message' => 'Employment details saved successfully',
+            'data' => $info,
         ]);
     }
 

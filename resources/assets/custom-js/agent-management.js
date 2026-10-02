@@ -696,6 +696,81 @@ document.addEventListener('DOMContentLoaded', function (e) {
     document.querySelectorAll('.invalid-feedback').forEach(el => el.textContent = '');
   }
 
+  // Agent Modal Tab Wizard Buttons & Reset
+  const agentModalTabs = document.getElementById('agentModalTabs');
+  const prevAgentTabBtn = document.getElementById('prevAgentTabBtn');
+  const nextAgentTabBtn = document.getElementById('nextAgentTabBtn');
+
+  function updateAgentTabButtons(activeTabId) {
+    if (!prevAgentTabBtn || !nextAgentTabBtn) return;
+    const tabs = ['tab-personal', 'tab-location', 'tab-bank', 'tab-security'];
+    const currentIndex = tabs.indexOf(activeTabId);
+    
+    if (currentIndex <= 0) {
+      prevAgentTabBtn.style.display = 'none';
+      nextAgentTabBtn.style.display = 'inline-block';
+    } else if (currentIndex >= tabs.length - 1) {
+      prevAgentTabBtn.style.display = 'inline-block';
+      nextAgentTabBtn.style.display = 'none';
+    } else {
+      prevAgentTabBtn.style.display = 'inline-block';
+      nextAgentTabBtn.style.display = 'inline-block';
+    }
+  }
+
+  function switchToTabContainingElement(element) {
+    if (!element) return;
+    const tabPane = element.closest('.tab-pane');
+    if (tabPane && tabPane.id) {
+      const tabBtn = document.querySelector(`#agentModalTabs button[data-bs-target="#${tabPane.id}"]`);
+      if (tabBtn) {
+        const tab = bootstrap.Tab.getOrCreateInstance(tabBtn);
+        tab.show();
+      }
+    }
+    setTimeout(() => element.focus(), 150);
+  }
+
+  if (agentModalTabs) {
+    agentModalTabs.querySelectorAll('button[data-bs-toggle="pill"]').forEach(tabBtn => {
+      tabBtn.addEventListener('shown.bs.tab', function (e) {
+        const targetId = e.target.getAttribute('data-bs-target')?.replace('#', '');
+        updateAgentTabButtons(targetId);
+      });
+    });
+  }
+
+  if (nextAgentTabBtn) {
+    nextAgentTabBtn.addEventListener('click', function () {
+      const activeTab = document.querySelector('#agentModalTabs button.active');
+      const tabs = Array.from(document.querySelectorAll('#agentModalTabs button[data-bs-toggle="pill"]'));
+      const currentIndex = tabs.indexOf(activeTab);
+      if (currentIndex >= 0 && currentIndex < tabs.length - 1) {
+        const nextTab = new bootstrap.Tab(tabs[currentIndex + 1]);
+        nextTab.show();
+      }
+    });
+  }
+
+  if (prevAgentTabBtn) {
+    prevAgentTabBtn.addEventListener('click', function () {
+      const activeTab = document.querySelector('#agentModalTabs button.active');
+      const tabs = Array.from(document.querySelectorAll('#agentModalTabs button[data-bs-toggle="pill"]'));
+      const currentIndex = tabs.indexOf(activeTab);
+      if (currentIndex > 0) {
+        const prevTab = new bootstrap.Tab(tabs[currentIndex - 1]);
+        prevTab.show();
+      }
+    });
+  }
+
+  function clearAutofilledFields() {
+    ['agentEmail', 'agentPassword', 'agentConfirmPassword'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.value = '';
+    });
+  }
+
   // Handle modal show event
   const addAgentModal = document.getElementById('addAgentModal');
   if (addAgentModal) {
@@ -704,6 +779,21 @@ document.addEventListener('DOMContentLoaded', function (e) {
       document.getElementById('agentForm').reset();
       $('#agentLocation').val('').trigger('change');
       clearValidationErrors();
+      clearAutofilledFields();
+
+      // Reset to first tab
+      const firstTabBtn = document.querySelector('#agentModalTabs button[data-bs-target="#tab-personal"]');
+      if (firstTabBtn) {
+        const tab = bootstrap.Tab.getOrCreateInstance(firstTabBtn);
+        tab.show();
+      }
+      updateAgentTabButtons('tab-personal');
+    });
+
+    addAgentModal.addEventListener('shown.bs.modal', function () {
+      clearAutofilledFields();
+      setTimeout(clearAutofilledFields, 100);
+      setTimeout(clearAutofilledFields, 300);
     });
   }
 
@@ -745,6 +835,14 @@ document.addEventListener('DOMContentLoaded', function (e) {
       const location_id = $('#agentLocation').val();
       const password = document.getElementById('agentPassword').value;
       const confirmPassword = document.getElementById('agentConfirmPassword').value;
+
+      const salary_amount = document.getElementById('agentSalary').value.trim();
+      const account_holder_name = (document.getElementById('agentAccountHolderName')?.value || '').trim();
+      const bank_name = (document.getElementById('agentBankName')?.value || '').trim();
+      const account_number = (document.getElementById('agentAccountNumber')?.value || '').trim();
+      const ifsc_code = (document.getElementById('agentIfscCode')?.value || '').trim().toUpperCase();
+      const branch_name = (document.getElementById('agentBranchName')?.value || '').trim();
+      const upi_id = (document.getElementById('agentUpiId')?.value || '').trim();
 
       // Client-side validation
       let hasError = false;
@@ -847,7 +945,31 @@ document.addEventListener('DOMContentLoaded', function (e) {
         hasError = true;
       }
 
+      // Validate salary
+      if (salary_amount === '') {
+        document.getElementById('agentSalary').classList.add('is-invalid');
+        document.getElementById('salaryAmountError').textContent = 'Monthly salary is required';
+        hasError = true;
+      } else if (isNaN(salary_amount) || parseFloat(salary_amount) < 0) {
+        document.getElementById('agentSalary').classList.add('is-invalid');
+        document.getElementById('salaryAmountError').textContent = 'Please enter a valid salary amount';
+        hasError = true;
+      }
+
+      // Validate IFSC Code if provided
+      if (ifsc_code !== '' && !/^[A-Z]{4}0[A-Z0-9]{6}$/.test(ifsc_code)) {
+        const ifscInput = document.getElementById('agentIfscCode');
+        const ifscError = document.getElementById('ifscCodeError');
+        if (ifscInput) ifscInput.classList.add('is-invalid');
+        if (ifscError) ifscError.textContent = 'Please enter a valid IFSC code (e.g. SBIN0001234)';
+        hasError = true;
+      }
+
       if (hasError) {
+        const firstInvalid = agentForm.querySelector('.is-invalid');
+        if (firstInvalid) {
+          switchToTabContainingElement(firstInvalid);
+        }
         return false;
       }
 
@@ -862,6 +984,13 @@ document.addEventListener('DOMContentLoaded', function (e) {
         state: state,
         pincode: pincode,
         location_id: location_id,
+        salary_amount: salary_amount,
+        account_holder_name: account_holder_name,
+        bank_name: bank_name,
+        account_number: account_number,
+        ifsc_code: ifsc_code,
+        branch_name: branch_name,
+        upi_id: upi_id,
         password: password,
         password_confirmation: confirmPassword
       };
@@ -934,6 +1063,13 @@ document.addEventListener('DOMContentLoaded', function (e) {
                 state: 'agentState',
                 pincode: 'agentPincode',
                 location_id: 'agentLocation',
+                salary_amount: 'agentSalary',
+                account_holder_name: 'agentAccountHolderName',
+                bank_name: 'agentBankName',
+                account_number: 'agentAccountNumber',
+                ifsc_code: 'agentIfscCode',
+                branch_name: 'agentBranchName',
+                upi_id: 'agentUpiId',
                 password: 'agentPassword'
               };
 
@@ -943,12 +1079,29 @@ document.addEventListener('DOMContentLoaded', function (e) {
                 if (element) {
                   element.classList.add('is-invalid');
                 }
-                const errorElement = document.getElementById(field + 'Error');
+                const errorMap = {
+                  location_id: 'locationError',
+                  salary_amount: 'salaryAmountError',
+                  account_holder_name: 'accountHolderNameError',
+                  bank_name: 'bankNameError',
+                  account_number: 'accountNumberError',
+                  ifsc_code: 'ifscCodeError',
+                  branch_name: 'branchNameError',
+                  upi_id: 'upiIdError',
+                  password_confirmation: 'confirmPasswordError'
+                };
+                const errorElementId = errorMap[field] || (field + 'Error');
+                const errorElement = document.getElementById(errorElementId);
                 if (errorElement) {
                   errorElement.textContent = error.data.errors[field][0];
                 }
               }
             });
+
+            const firstInvalid = agentForm.querySelector('.is-invalid');
+            if (firstInvalid) {
+              switchToTabContainingElement(firstInvalid);
+            }
 
             showAlert('danger', 'Please fix the errors in the form');
           } else if (error.data && error.data.message) {

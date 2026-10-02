@@ -1,504 +1,1203 @@
 {
-  "menu": [
-    {
-      "icon": "menu-icon icon-base ri ri-home-smile-2-line",
-      "url": "dashboard",
-      "name": "Dashboard",
-      "slug": "dashboard",
-      "roles": [
-        "Admin"
-      ]
-    },
-    {
-      "icon": "menu-icon icon-base ri ri-home-smile-2-line",
-      "url": "app/agents/dashboard",
-      "name": "Dashboard",
-      "slug": "agent-dashboard",
-      "roles": [
-        "Agent"
-      ]
-    },
-   
-    {
-      "icon": "menu-icon icon-base ri ri-bar-chart-box-line",
-      "url": "verification/credit-score-history",
-      "name": "CIBIL / Credit score",
-      "slug": "verification-credit-score-history",
-      "roles": [
-        "CreditVerifier"
-      ]
-    },
-    {
-      "url": "client-management",
-      "icon": "menu-icon icon-base ri ri-group-line",
-      "name": "Clients",
-      "roles": [
-        "Admin",
-        "Agent"
-      ],
-      "slug": [
-        "client-management",
-        "client-view-",
-        "client-loan-emis",
-        "client-loan-document-view",
-        "client-loan-document-download"
-      ]
-    },
-    {
-      "url": "verification/kyc-verification",
-      "name": "KYC Verification",
-      "icon": "menu-icon icon-base ri ri-shield-check-line",
-      "roles": [
-        "Admin",
-        "Staff"
-      ],
-      "slug": [
-        "verification-kyc-verification",
-        "verification-kyc-view"
-      ]
-    },
-    {
-      "url": "loan/loan-applications",
-      "name": "Loan Applications",
-      "icon": "menu-icon icon-base ri ri-file-list-3-line",
-      "roles": [
-        "Admin",
-        "Agent"
-      ],
-      "slug": [
-        "loan-applications",
-        "loan-application-view"
-      ]
-    },
-    {
-      "url": "loan/loan-accounts",
-      "name": "Loan Accounts",
-      "icon": "menu-icon icon-base ri ri-bank-line",
-      "roles": [
-        "Admin"
-      ],
-      "slug": [
-        "loan-accounts",
-        "loan-account-view"
-      ]
-    },
-    {
-      "name": "Loan Setup",
-      "icon": "menu-icon icon-base ri ri-settings-4-line",
-      "roles": [
-        "Admin"
-      ],
-      "slug": [
-        "loan-products",
-        "loan-product-view",
-        "loan-types",
-        "loan-configuration"
-      ],
-      "submenu": [
+    "menu": [
         {
-          "url": "loan/loan-types",
-          "name": "Loan Types",
-          "slug": "loan-types",
-          "roles": [
-            "Admin"
-          ]
+            "icon": "menu-icon icon-base ri ri-home-smile-2-line",
+            "url": "dashboard",
+            "name": "Dashboard",
+            "slug": "dashboard",
+            "roles": [
+                "Admin"
+            ]
         },
         {
-          "url": "loan/loan-products",
-          "name": "Loan Products",
-          "slug": [
-            "loan-products",
-            "loan-product-view"
-          ]
+            "icon": "menu-icon icon-base ri ri-home-smile-2-line",
+            "url": "app/agents/dashboard",
+            "name": "Dashboard",
+            "slug": "agent-dashboard",
+            "roles": [
+                "Agent"
+            ]
         },
         {
-          "url": "loan/loan-configuration",
-          "name": "Loan Configuration",
-          "slug": "loan-configuration",
-          "roles": [
-            "Admin"
-          ]
+            "url": "client-management",
+            "icon": "menu-icon icon-base ri ri-group-line",
+            "name": "Clients",
+            "roles": [
+                "Admin",
+                "Agent"
+            ],
+            "slug": [
+                "client-management",
+                "client-view-",
+                "client-loan-emis",
+                "client-loan-document-view",
+                "client-loan-document-download"
+            ]
+        },
+        {
+            "url": "admin/client-ledgers",
+            "icon": "menu-icon icon-base ri ri-book-open-line",
+            "name": "Client Ledgers",
+            "roles": [
+                "Admin"
+            ],
+            "slug": [
+                "admin-client-ledgers",
+                "admin-client-ledger-show"
+            ]
+        },
+        {
+            "url": "verification/kyc-verification",
+            "name": "KYC Verification",
+            "icon": "menu-icon icon-base ri ri-shield-check-line",
+            "roles": [
+                "Admin",
+                "Staff"
+            ],
+            "slug": [
+                "verification-kyc-verification",
+                "verification-kyc-view"
+            ]
+        },
+        {
+            "name": "All Applications",
+            "icon": "menu-icon icon-base ri ri-folder-user-line",
+            "url": "applications",
+            "roles": [
+                "Admin",
+                "Staff",
+                "Agent"
+            ],
+            "slug": [
+                "chit.applications.index",
+                "chit.applications.show",
+                "loan-applications",
+                "loan-application-view",
+                "fd.applications.index",
+                "fd.applications.show",
+                "applications",
+                "all-applications",
+                "applications.loan",
+                "applications.chit",
+                "applications.fd",
+                "applications.settlement",
+                "chit.settlement-applications.index",
+                "chit.settlement-applications.show"
+            ]
+        },
+        {
+            "name": "EMI & Chit Collections",
+            "icon": "menu-icon icon-base ri ri-calendar-check-line",
+            "url": "client-collections",
+            "roles": [
+                "Admin",
+                "Staff",
+                "Agent"
+            ],
+            "slug": [
+                "client-collections",
+                "client-collections.data"
+            ]
+        },
+        {
+            "name": "All Payment Receipts",
+            "icon": "menu-icon icon-base ri ri-receipt-line",
+            "url": "payment-receipts",
+            "roles": [
+                "Admin",
+                "Staff",
+                "Agent"
+            ],
+            "slug": [
+                "payment-receipts",
+                "all-payment-receipts",
+                "loan-payment-receipts",
+                "chit-payment-receipts",
+                "fd-payment-receipts"
+            ]
+        },
+        {
+            "menuHeader": "Business Modules"
+        },
+        {
+            "name": "Card to Cash",
+            "icon": "menu-icon icon-base ri ri-bank-card-2-line",
+            "roles": [
+                "Admin",
+                "Staff"
+            ],
+            "slug": [
+                "card-cash.dashboard",
+                "card-cash.leads.index",
+                "card-cash.leads.create",
+                "card-cash.leads.show",
+                "card-cash.processing.index",
+                "card-cash.processing.process",
+                "card-cash.bill-payments.index",
+                "card-cash.swipes.index",
+                "card-cash.returns.index",
+                "card-cash.customers.index",
+                "card-cash.customers.create",
+                "card-cash.customers.show",
+                "card-cash.customers.edit",
+                "card-cash.wallets.index",
+                "card-cash.wallets.show",
+                "card-cash.settings.index",
+                "card-cash.reports.index"
+            ],
+            "submenu": [
+                {
+                    "url": "card-to-cash/dashboard",
+                    "name": "Dashboard",
+                    "slug": "card-cash.dashboard",
+                    "roles": [
+                        "Admin",
+                        "Staff"
+                    ]
+                },
+                {
+                    "url": "card-to-cash/leads",
+                    "name": "Leads",
+                    "slug": [
+                        "card-cash.leads.index",
+                        "card-cash.leads.create",
+                        "card-cash.leads.show"
+                    ],
+                    "roles": [
+                        "Admin",
+                        "Staff"
+                    ]
+                },
+                {
+                    "url": "card-to-cash/customers",
+                    "name": "Credit Card Customers",
+                    "slug": [
+                        "card-cash.customers.index",
+                        "card-cash.customers.create",
+                        "card-cash.customers.show",
+                        "card-cash.customers.edit"
+                    ],
+                    "roles": [
+                        "Admin",
+                        "Staff"
+                    ]
+                },
+                {
+                    "url": "card-to-cash/wallets",
+                    "name": "Wallets",
+                    "slug": [
+                        "card-cash.wallets.index",
+                        "card-cash.wallets.show"
+                    ],
+                    "roles": [
+                        "Admin"
+                    ]
+                },
+                {
+                    "name": "Reports",
+                    "slug": [
+                        "card-cash.reports.index",
+                        "card-cash.processing.index",
+                        "card-cash.processing.process",
+                        "card-cash.bill-payments.index",
+                        "card-cash.swipes.index",
+                        "card-cash.returns.index"
+                    ],
+                    "roles": [
+                        "Admin",
+                        "Staff"
+                    ],
+                    "submenu": [
+                        {
+                            "url": "card-to-cash/reports",
+                            "name": "Reports & Analytics",
+                            "slug": "card-cash.reports.index",
+                            "roles": [
+                                "Admin",
+                                "Staff"
+                            ]
+                        },
+                        {
+                            "url": "card-to-cash/processing",
+                            "name": "Processing",
+                            "slug": [
+                                "card-cash.processing.index",
+                                "card-cash.processing.process"
+                            ],
+                            "roles": [
+                                "Admin",
+                                "Staff"
+                            ]
+                        },
+                        {
+                            "url": "card-to-cash/bill-payments",
+                            "name": "Bill Payments",
+                            "slug": "card-cash.bill-payments.index",
+                            "roles": [
+                                "Admin",
+                                "Staff"
+                            ]
+                        },
+                        {
+                            "url": "card-to-cash/swipes",
+                            "name": "Swipe Transactions",
+                            "slug": "card-cash.swipes.index",
+                            "roles": [
+                                "Admin",
+                                "Staff"
+                            ]
+                        },
+                        {
+                            "url": "card-to-cash/returns",
+                            "name": "Returns / Statement",
+                            "slug": "card-cash.returns.index",
+                            "roles": [
+                                "Admin",
+                                "Staff"
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "url": "card-to-cash/settings",
+                    "name": "Settings",
+                    "slug": "card-cash.settings.index",
+                    "roles": [
+                        "Admin"
+                    ]
+                }
+            ]
+        },
+        {
+            "name": "Accounting",
+            "icon": "menu-icon icon-base ri ri-book-2-line",
+            "slug": [
+                "account.index",
+                "account.bank-accounts",
+                "account.bank-transfers",
+                "account.bank-transactions",
+                "account.loan-accounts",
+                "account.chit-accounts",
+                "account.fd-accounts",
+                "account.emis",
+                "account.revenues",
+                "account.expenses",
+                "account.reports",
+                "account.day-book",
+                "account.ledger",
+                "account.profit-loss",
+                "account.revenue-categories",
+                "account.expense-categories"
+            ],
+            "roles": [
+                "Admin"
+            ],
+            "submenu": [
+                {
+                    "url": "account",
+                    "name": "Dashboard",
+                    "slug": "account.index",
+                    "roles": [
+                        "Admin"
+                    ]
+                },
+                {
+                    "url": "account/bank-accounts",
+                    "name": "Bank Accounts",
+                    "slug": "account.bank-accounts",
+                    "roles": [
+                        "Admin"
+                    ]
+                },
+                {
+                    "url": "account/bank-transfers",
+                    "name": "Bank Transfers",
+                    "slug": "account.bank-transfers",
+                    "roles": [
+                        "Admin"
+                    ]
+                },
+                {
+                    "url": "account/bank-transactions",
+                    "name": "Bank Transactions",
+                    "slug": "account.bank-transactions",
+                    "roles": [
+                        "Admin"
+                    ]
+                },
+                {
+                    "url": "account/revenues",
+                    "name": "Revenues",
+                    "slug": "account.revenues",
+                    "roles": [
+                        "Admin"
+                    ]
+                },
+                {
+                    "url": "account/expenses",
+                    "name": "Expenses",
+                    "slug": "account.expenses",
+                    "roles": [
+                        "Admin"
+                    ]
+                },
+                {
+                    "url": "account/day-book",
+                    "name": "Day Book",
+                    "slug": "account.day-book",
+                    "roles": [
+                        "Admin"
+                    ]
+                },
+                {
+                    "url": "account/ledger",
+                    "name": "Ledger",
+                    "slug": "account.ledger",
+                    "roles": [
+                        "Admin"
+                    ]
+                },
+                {
+                    "url": "account/profit-loss",
+                    "name": "Profit & Loss",
+                    "slug": "account.profit-loss",
+                    "roles": [
+                        "Admin"
+                    ]
+                },
+                {
+                    "url": "account/revenue-categories",
+                    "name": "Revenue categories",
+                    "slug": "account.revenue-categories",
+                    "roles": [
+                        "Admin"
+                    ]
+                },
+                {
+                    "url": "account/expense-categories",
+                    "name": "Expense categories",
+                    "slug": "account.expense-categories",
+                    "roles": [
+                        "Admin"
+                    ]
+                },
+                {
+                    "url": "account/reports",
+                    "name": "Reports",
+                    "slug": "account.reports",
+                    "roles": [
+                        "Admin"
+                    ]
+                }
+            ]
+        },
+        {
+            "name": "Loan Management",
+            "icon": "menu-icon icon-base ri ri-bank-line",
+            "roles": [
+                "Admin",
+                "Staff",
+                "Agent"
+            ],
+            "slug": [
+                "loan-applications",
+                "loan-application-view",
+                "loan-accounts",
+                "loan-account-view",
+                "loan-products",
+                "loan-product-view",
+                "loan-types",
+                "loan-configuration",
+                "emi-repayments",
+                "emi-details",
+                "client-loan-emi-details",
+                "pending-emis",
+                "create-receipt",
+                "view-receipt",
+                "print-receipt",
+                "emi-calculator",
+                "reports-clients",
+                "reports-applications",
+                "reports-loans",
+                "reports-emi"
+            ],
+            "submenu": [
+                {
+                    "url": "loan/loan-accounts",
+                    "name": "Loan Accounts",
+                    "slug": [
+                        "loan-accounts",
+                        "loan-account-view"
+                    ],
+                    "roles": [
+                        "Admin",
+                        "Agent"
+                    ]
+                },
+                {
+                    "url": "loan/loan-types",
+                    "name": "Loan Types",
+                    "slug": "loan-types",
+                    "roles": [
+                        "Admin"
+                    ]
+                },
+                {
+                    "url": "loan/loan-products",
+                    "name": "Loan Products",
+                    "slug": [
+                        "loan-products",
+                        "loan-product-view"
+                    ],
+                    "roles": [
+                        "Admin"
+                    ]
+                },
+                {
+                    "url": "loan/loan-configuration",
+                    "name": "Loan Configuration",
+                    "slug": "loan-configuration",
+                    "roles": [
+                        "Admin"
+                    ]
+                },
+                {
+                    "url": "emi/repayments",
+                    "name": "EMI Repayments",
+                    "slug": [
+                        "emi-repayments",
+                        "emi-details",
+                        "client-loan-emi-details"
+                    ],
+                    "roles": [
+                        "Admin",
+                        "Staff",
+                        "Agent"
+                    ]
+                },
+                {
+                    "url": "emi/emi-calculator",
+                    "name": "EMI Calculator",
+                    "slug": "emi-calculator",
+                    "roles": [
+                        "Admin",
+                        "Staff",
+                        "Agent"
+                    ]
+                },
+                {
+                    "url": "reports/clients",
+                    "name": "Client Reports",
+                    "slug": "reports-clients",
+                    "roles": [
+                        "Admin"
+                    ]
+                },
+                {
+                    "url": "reports/applications",
+                    "name": "Application Reports",
+                    "slug": "reports-applications",
+                    "roles": [
+                        "Admin"
+                    ]
+                },
+                {
+                    "url": "reports/loans",
+                    "name": "Loan Reports",
+                    "slug": "reports-loans",
+                    "roles": [
+                        "Admin"
+                    ]
+                },
+                {
+                    "url": "reports/emi",
+                    "name": "EMI Reports",
+                    "slug": "reports-emi",
+                    "roles": [
+                        "Admin"
+                    ]
+                }
+            ]
+        },
+        {
+            "name": "Chit Management",
+            "icon": "menu-icon icon-base ri ri-group-2-line",
+            "roles": [
+                "Admin",
+                "Staff",
+                "Agent"
+            ],
+            "slug": [
+                "chit.applications",
+                "chit.accounts",
+                "chit.dashboard",
+                "chit.schemes",
+                "chit.groups",
+                "chit.members",
+                "chit.transfers",
+                "chit.families",
+                "chit.configuration",
+                "chit.installments",
+                "chit.settlement-applications",
+                "chit.settlements",
+                "chit.auctions",
+                "chit.dividends",
+                "chit.reports.applications",
+                "chit.reports.accounts",
+                "chit.reports.installments-analytics",
+                "chit.reports.payments",
+                "chit.referral-bonuses"
+            ],
+            "submenu": [
+                {
+                    "url": "admin/chit/dashboard",
+                    "name": "Dashboard",
+                    "slug": "chit.dashboard",
+                    "roles": [
+                        "Admin",
+                        "Staff"
+                    ]
+                },
+                {
+                    "url": "admin/chit/chit-configuration",
+                    "name": "Configuration",
+                    "slug": "chit.configuration.index",
+                    "roles": [
+                        "Admin",
+                        "Staff"
+                    ]
+                },
+                {
+                    "url": "admin/chit/schemes",
+                    "name": "Schemes",
+                    "slug": "chit.schemes.index",
+                    "roles": [
+                        "Admin",
+                        "Staff"
+                    ]
+                },
+                {
+                    "url": "admin/chit/groups",
+                    "name": "Groups",
+                    "slug": "chit.groups.index",
+                    "roles": [
+                        "Admin",
+                        "Staff"
+                    ]
+                },
+                {
+                    "url": "admin/chit/members",
+                    "name": "Members",
+                    "slug": "chit.members.index",
+                    "roles": [
+                        "Admin",
+                        "Staff",
+                        "Agent"
+                    ]
+                },
+                {
+                    "url": "admin/chit/transfers",
+                    "name": "Member Transfers",
+                    "slug": [
+                        "chit.transfers.index",
+                        "chit.transfers.show",
+                        "chit.members.transfer.create"
+                    ],
+                    "roles": [
+                        "Admin",
+                        "Staff"
+                    ]
+                },
+                {
+                    "url": "admin/chit/families",
+                    "name": "Family Members",
+                    "slug": "chit.families.index",
+                    "roles": [
+                        "Admin",
+                        "Staff"
+                    ]
+                },
+                {
+                    "url": "admin/chit/accounts",
+                    "name": "Chit Accounts",
+                    "slug": [
+                        "chit.accounts.index",
+                        "chit.accounts.show"
+                    ],
+                    "roles": [
+                        "Admin",
+                        "Staff",
+                        "Agent"
+                    ]
+                },
+                {
+                    "url": "admin/chit/installments",
+                    "name": "Installments",
+                    "slug": "chit.installments.index",
+                    "roles": [
+                        "Admin",
+                        "Staff",
+                        "Agent"
+                    ]
+                },
+                {
+                    "url": "admin/chit/settlement-applications",
+                    "name": "Settlement Applications",
+                    "slug": [
+                        "chit.settlement-applications.index",
+                        "chit.settlement-applications.show"
+                    ],
+                    "roles": [
+                        "Admin",
+                        "Staff"
+                    ]
+                },
+                {
+                    "url": "admin/chit/auctions",
+                    "name": "Auction Winners",
+                    "slug": "chit.auctions.index",
+                    "roles": [
+                        "Admin",
+                        "Staff"
+                    ]
+                },
+                {
+                    "url": "admin/chit/dividends",
+                    "name": "Dividends",
+                    "slug": "chit.dividends.index",
+                    "roles": [
+                        "Admin",
+                        "Staff"
+                    ]
+                },
+                {
+                    "url": "admin/chit/referral-bonuses",
+                    "name": "Referral Bonuses",
+                    "slug": "chit.referral-bonuses.index",
+                    "roles": [
+                        "Admin",
+                        "Staff"
+                    ]
+                },
+                {
+                    "url": "admin/chit/reports/applications",
+                    "name": "Application Reports",
+                    "slug": "chit.reports.applications",
+                    "roles": [
+                        "Admin",
+                        "Staff"
+                    ]
+                },
+                {
+                    "url": "admin/chit/reports/accounts-analytics",
+                    "name": "Chit Reports",
+                    "slug": "chit.reports.accounts",
+                    "roles": [
+                        "Admin",
+                        "Staff"
+                    ]
+                },
+                {
+                    "url": "admin/chit/reports/installments-analytics",
+                    "name": "Installment Reports",
+                    "slug": "chit.reports.installments-analytics",
+                    "roles": [
+                        "Admin",
+                        "Staff"
+                    ]
+                },
+                {
+                    "url": "admin/chit/reports/payments",
+                    "name": "Payment Reports",
+                    "slug": "chit.reports.payments",
+                    "roles": [
+                        "Admin",
+                        "Staff"
+                    ]
+                }
+            ]
+        },
+        {
+            "name": "Fixed Deposit",
+            "icon": "menu-icon icon-base ri ri-safe-2-line",
+            "slug": [
+                "fd.dashboard",
+                "fd.schemes",
+                "fd.deposits",
+                "fd.wallets",
+                "fd.reports",
+                "fd.reports.applications",
+                "fd.reports.deposits",
+                "fd.reports.payments"
+            ],
+            "roles": [
+                "Admin",
+                "Staff",
+                "Agent"
+            ],
+            "submenu": [
+                {
+                    "url": "admin/fd/dashboard",
+                    "name": "FD Dashboard",
+                    "slug": "fd.dashboard",
+                    "roles": [
+                        "Admin",
+                        "Staff"
+                    ]
+                },
+                {
+                    "url": "admin/fd/schemes",
+                    "name": "FD Schemes",
+                    "slug": [
+                        "fd.schemes.index",
+                        "fd.schemes.create",
+                        "fd.schemes.show",
+                        "fd.schemes.edit"
+                    ],
+                    "roles": [
+                        "Admin",
+                        "Staff",
+                        "Agent"
+                    ]
+                },
+                {
+                    "url": "admin/fd/deposits",
+                    "name": "Fixed Deposits",
+                    "slug": [
+                        "fd.deposits.index",
+                        "fd.deposits.show",
+                        "fd.deposits.premature-receipt"
+                    ],
+                    "roles": [
+                        "Admin",
+                        "Staff",
+                        "Agent"
+                    ]
+                },
+                {
+                    "url": "admin/fd/wallets",
+                    "name": "Client Wallets",
+                    "slug": [
+                        "fd.wallets.index",
+                        "fd.wallets.show"
+                    ],
+                    "roles": [
+                        "Admin",
+                        "Staff"
+                    ]
+                },
+                {
+                    "url": "admin/fd/reports/applications",
+                    "name": "Application Reports",
+                    "slug": "fd.reports.applications",
+                    "roles": [
+                        "Admin",
+                        "Staff"
+                    ]
+                },
+                {
+                    "url": "admin/fd/reports/deposits-analytics",
+                    "name": "FD Reports",
+                    "slug": "fd.reports.deposits",
+                    "roles": [
+                        "Admin",
+                        "Staff"
+                    ]
+                },
+                {
+                    "url": "admin/fd/reports/payments",
+                    "name": "Payment Reports",
+                    "slug": "fd.reports.payments",
+                    "roles": [
+                        "Admin",
+                        "Staff"
+                    ]
+                },
+                {
+                    "url": "admin/fd/reports",
+                    "name": "More Reports",
+                    "slug": "fd.reports.index",
+                    "roles": [
+                        "Admin",
+                        "Staff"
+                    ]
+                }
+            ]
+        },
+        {
+            "url": "reports/revenue",
+            "icon": "menu-icon icon-base ri ri-money-rupee-circle-line",
+            "name": "Revenue",
+            "slug": "reports-revenue",
+            "roles": [
+                "Admin"
+            ]
+        },
+        {
+            "name": "Agent Collections",
+            "icon": "menu-icon icon-base ri ri-wallet-line",
+            "url": "app/agents/agent-collections",
+            "roles": [
+                "Admin"
+            ],
+            "slug": [
+                "agent-collections",
+                "agent-collections.list",
+                "agent-collections.show"
+            ]
+        },
+        {
+            "menuHeader": "Managements"
+        },
+        {
+            "url": "user-management",
+            "icon": "menu-icon icon-base ri ri-user-settings-line",
+            "name": "Staff Management",
+            "slug": "user-management",
+            "roles": [
+                "Admin"
+            ]
+        },
+        {
+            "name": "HRM Management",
+            "icon": "menu-icon icon-base ri ri-team-line",
+            "roles": [
+                "Admin"
+            ],
+            "slug": [
+                "admin.staff.index",
+                "agent-management",
+                "agent-management.index",
+                "agent-management.data",
+                "agent-management.view-account",
+                "agent-management.view-work",
+                "agent-management.view-visits",
+                "agent-management.view-assigned-client",
+                "agent-management.visit-details",
+                "agent-management.attendance",
+                "agent-collections"
+            ],
+            "submenu": [
+                {
+                    "url": "staff",
+                    "name": "Staff Management",
+                    "slug": "admin.staff.index"
+                },
+                {
+                    "url": "app/agents",
+                    "name": "Agent Management",
+                    "slug": [
+                        "agent-management.index",
+                        "agent-management.data",
+                        "agent-management.view",
+                        "agent-management.view-account",
+                        "agent-management.view-work",
+                        "agent-management.view-visits",
+                        "agent-management.view-assigned-client",
+                        "agent-management.visit-details"
+                    ]
+                }
+            ]
+        },
+        {
+            "name": "API Hits & Usage",
+            "icon": "menu-icon icon-base ri ri-bar-chart-2-line",
+            "url": "management/api-wallet",
+            "roles": [
+                "Admin"
+            ],
+            "slug": [
+                "api-wallet.index",
+                "api-wallet.export"
+            ]
+        },
+        {
+            "name": "My Collections",
+            "icon": "menu-icon icon-base ri ri-wallet-line",
+            "url": "app/agents/agent-collections",
+            "roles": [
+                "Agent"
+            ],
+            "slug": [
+                "agent-collections",
+                "agent-collections.list",
+                "agent-collections.show"
+            ]
+        },
+        {
+            "name": "Location Management",
+            "icon": "menu-icon icon-base ri ri-map-pin-line",
+            "slug": "location-management",
+            "url": "location-management",
+            "roles": [
+                "Admin"
+            ]
+        },
+        {
+            "name": "Roles & Permissions",
+            "icon": "menu-icon icon-base ri ri-key-2-line",
+            "slug": "role",
+            "roles": [
+                "Admin"
+            ],
+            "submenu": [
+                {
+                    "url": "roles",
+                    "name": "Staff Roles",
+                    "slug": "role-users"
+                },
+                {
+                    "url": "roles/menus",
+                    "name": "Menu Access",
+                    "slug": "roles.menus"
+                },
+                {
+                    "url": "permission",
+                    "name": "Role Permissions",
+                    "slug": "role-permissions"
+                }
+            ]
+        },
+        {
+            "name": "Notifications",
+            "url": "notifications",
+            "icon": "menu-icon icon-base ri ri-notification-line",
+            "slug": "notifications",
+            "roles": [
+                "Admin"
+            ]
+        },
+        {
+            "url": "admin/account-deletion",
+            "icon": "menu-icon icon-base ri ri-user-unfollow-line",
+            "name": "Account Deletion",
+            "roles": [
+                "Admin",
+                "Staff"
+            ],
+            "slug": [
+                "admin-account-deletion"
+            ]
+        },
+        {
+            "name": "Templates",
+            "icon": "menu-icon icon-base ri ri-file-text-line",
+            "slug": [
+                "templates-email",
+                "email-template-index",
+                "email-template-create",
+                "email-template-edit",
+                "templates-sms",
+                "sms-template-index",
+                "sms-template-create",
+                "sms-template-edit",
+                "templates-whatsapp",
+                "whatsapp-template-index",
+                "whatsapp-template-create",
+                "whatsapp-template-edit",
+                "whatsapp-template-view"
+            ],
+            "roles": [
+                "Admin"
+            ],
+            "submenu": [
+                {
+                    "url": "templates/email",
+                    "name": "Email Templates",
+                    "slug": [
+                        "templates-email",
+                        "email-template-index",
+                        "email-template-create",
+                        "email-template-edit"
+                    ]
+                },
+                {
+                    "url": "templates/sms",
+                    "name": "SMS Templates",
+                    "slug": [
+                        "templates-sms",
+                        "sms-template-index",
+                        "sms-template-create",
+                        "sms-template-edit"
+                    ]
+                },
+                {
+                    "url": "templates/whatsapp",
+                    "name": "WhatsApp Templates",
+                    "slug": [
+                        "templates-whatsapp",
+                        "whatsapp-template-index",
+                        "whatsapp-template-create",
+                        "whatsapp-template-edit",
+                        "whatsapp-template-view",
+                        "templates/whatsapp"
+                    ]
+                }
+            ]
+        },
+        {
+            "url": "admin/website",
+            "name": "Website Setup",
+            "icon": "menu-icon icon-base ri ri-global-line",
+            "slug": "website",
+            "roles": [
+                "Admin"
+            ],
+            "submenu": [
+                {
+                    "url": "admin/homepage-setup",
+                    "name": "Homepage Setup",
+                    "slug": "website-homepage"
+                },
+                {
+                    "url": "admin/appearance",
+                    "name": "Appearance",
+                    "slug": "website-appearance"
+                }
+            ]
+        },
+        {
+            "name": "Mobile Apps",
+            "icon": "menu-icon icon-base ri ri-smartphone-line",
+            "slug": [
+                "mobile-apps",
+                "customer-app-settings",
+                "agent-app-settings"
+            ],
+            "roles": [
+                "Admin"
+            ],
+            "submenu": [
+                {
+                    "url": "admin/mobile-apps/customer-app",
+                    "name": "Customer App",
+                    "slug": "customer-app-settings"
+                },
+                {
+                    "url": "admin/mobile-apps/agent-app",
+                    "name": "Agent App",
+                    "slug": "agent-app-settings"
+                }
+            ]
+        },
+        {
+            "name": "Setup & Configuration",
+            "icon": "menu-icon icon-base ri ri-settings-5-line",
+            "slug": [
+                "setup-configuration",
+                "feature-activation",
+                "setup-configuration-smtp-settings",
+                "smtp-settings",
+                "smtp-settings-update",
+                "smtp-settings-test",
+                "payment-methods",
+                "payment-methods-update",
+                "page-configuration",
+                "faq-index",
+                "loan-document-templates",
+                "setup-configuration-api-configuration",
+                "faq-create",
+                "faq-edit"
+            ],
+            "roles": [
+                "Admin"
+            ],
+            "submenu": [
+                {
+                    "url": "setup-configuration/feature-activation",
+                    "name": "Feature Activation",
+                    "slug": "feature-activation"
+                },
+                {
+                    "url": "setup-configuration/api-configuration",
+                    "name": "API Configuration",
+                    "slug": "setup-configuration-api-configuration"
+                },
+                {
+                    "url": "setup-configuration/smtp-settings",
+                    "name": "SMTP Settings",
+                    "slug": "smtp-settings"
+                },
+                {
+                    "url": "setup-configuration/payment-methods",
+                    "name": "Payment Methods",
+                    "slug": "payment-methods"
+                },
+                {
+                    "url": "setup-configuration/page-configuration",
+                    "name": "Pages Configuration",
+                    "slug": "page-configuration"
+                },
+                {
+                    "url": "setup-configuration/faq",
+                    "name": "FAQ",
+                    "slug": [
+                        "faq-index",
+                        "faq-create",
+                        "faq-edit"
+                    ]
+                },
+                {
+                    "url": "setup-configuration/loan-document-templates",
+                    "name": "Loan Document Template",
+                    "slug": "loan-document-templates"
+                }
+            ]
+        },
+        {
+            "url": "support/tickets",
+            "icon": "menu-icon icon-base ri ri-customer-service-2-line",
+            "name": "Support Tickets",
+            "roles": [
+                "Admin",
+                "Staff"
+            ],
+            "slug": [
+                "support-tickets",
+                "support-tickets-data",
+                "support-tickets-show",
+                "support-tickets-reply"
+            ]
+        },
+        {
+            "name": "System",
+            "icon": "menu-icon icon-base ri ri-cpu-line",
+            "slug": [
+                "system",
+                "system-cache-clear",
+                "system-login-log",
+                "system-collection-log"
+            ],
+            "roles": [
+                "Admin"
+            ],
+            "submenu": [
+                {
+                    "url": "system/server-status",
+                    "name": "Server Status",
+                    "slug": "system-server-status"
+                },
+                {
+                    "url": "system/database-backup",
+                    "name": "Database Backup",
+                    "slug": "system-database-backup"
+                },
+                {
+                    "url": "system/cache/clear",
+                    "name": "Cache Clear",
+                    "slug": "system-cache-clear"
+                },
+                {
+                    "url": "system/login-log",
+                    "name": "Login Log",
+                    "slug": "system-login-log"
+                },
+                {
+                    "url": "system/collection-log",
+                    "name": "Collection Log",
+                    "slug": "system-collection-log"
+                }
+            ]
         }
-      ]
-    },
-     {
-      "name": "Loan Repayments",
-      "icon": "menu-icon icon-base ri ri-calendar-check-line",
-      "roles": [
-        "Admin",
-        "Staff",
-        "Agent"
-      ],
-      "slug": [
-        "emi-repayments",
-        "emi-details",
-        "client-loan-emi-details",
-        "payment-receipts",
-        "pending-emis",
-        "create-receipt",
-        "view-receipt",
-        "print-receipt",
-        "emi-calculator"
-      ],
-      "submenu": [
-        {
-          "url": "emi/repayments",
-          "name": "EMI/Interest Repayments",
-          "slug": [
-            "emi-repayments",
-            "emi-details",
-            "client-loan-emi-details"
-          ]
-        },
-        {
-          "url": "emi/receipts",
-          "name": "Payment Receipts",
-          "slug": "payment-receipts"
-        },
-        {
-          "url": "emi/emi-calculator",
-          "name": "EMI/Interest Calc",
-          "slug": "emi-calculator"
-        }
-      ]
-    },
- 
-    {
-      "name": "Reports & Analytics",
-      "icon": "menu-icon icon-base ri ri-bar-chart-grouped-line",
-      "slug": "reports",
-      "roles": [
-        "Admin"
-      ],
-      "submenu": [
-        {
-          "url": "reports/clients",
-          "name": "Clients",
-          "slug": "reports-clients"
-        },
-        {
-          "url": "reports/applications",
-          "name": "Applications",
-          "slug": "reports-applications"
-        },
-        {
-          "url": "reports/loans",
-          "name": "Loans",
-          "slug": "reports-loans"
-        },
-        {
-          "url": "reports/emi",
-          "name": "EMI/Interest Loan",
-          "slug": "reports-emi"
-        }
-      ]
-    },
-    {
-      "url": "reports/revenue",
-      "icon": "menu-icon icon-base ri ri-money-rupee-circle-line",
-      "name": "Revenue",
-      "slug": "reports-revenue",
-      "roles": [
-        "Admin"
-      ]
-    },
-    {
-      "menuHeader": "Managements"
-    },
-    {
-      "url": "user-management",
-      "icon": "menu-icon icon-base ri ri-user-settings-line",
-      "name": "User Management",
-      "slug": "user-management",
-      "roles": [
-        "Admin"
-      ]
-    },
-    {
-      "name": "HRM Management",
-      "icon": "menu-icon icon-base ri ri-team-line",
-      "roles": [
-        "Admin"
-      ],
-      "slug": [
-        "admin.staff.index",
-        "agent-management",
-        "agent-management.index",
-        "agent-management.data",
-        "agent-management.view-account",
-        "agent-management.view-work",
-        "agent-management.view-visits",
-        "agent-management.view-assigned-client",
-        "agent-management.visit-details",
-        "agent-management.attendance",
-        "agent-collections"
-      ],
-      "submenu": [
-        {
-          "url": "staff",
-          "name": "Staff Management",
-          "slug": "admin.staff.index"
-        },
-        {
-          "url": "app/agents",
-          "name": "Agent Management",
-          "slug": [
-            "agent-management.index",
-            "agent-management.data",
-            "agent-management.view",
-            "agent-management.view-account",
-            "agent-management.view-work",
-            "agent-management.view-visits",
-            "agent-management.view-assigned-client",
-            "agent-management.visit-details"
-          ]
-        }
-      ]
-    },
-    {
-      "name": "Agent Collections",
-      "icon": "menu-icon icon-base ri ri-wallet-line",
-      "url": "app/agents/agent-collections",
-      "roles": [
-        "Admin"
-      ],
-      "slug": [
-        "agent-collections",
-        "agent-collections.list",
-        "agent-collections.show"
-      ]
-    },
-    {
-      "name": "My Collections",
-      "icon": "menu-icon icon-base ri ri-wallet-line",
-      "url": "app/agents/agent-collections",
-      "roles": [
-        "Agent"
-      ],
-      "slug": [
-        "agent-collections",
-        "agent-collections.list",
-        "agent-collections.show"
-      ]
-    },
-    {
-      "name": "Location Management",
-      "icon": "menu-icon icon-base ri ri-map-pin-line",
-      "slug": "location-management",
-      "url": "location-management",
-      "roles": [
-        "Admin"
-      ]
-    },
-    {
-      "name": "Roles & Permissions",
-      "icon": "menu-icon icon-base ri ri-key-2-line",
-      "slug": "role",
-      "roles": [
-        "Admin"
-      ],
-      "submenu": [
-        {
-          "url": "roles",
-          "name": "User Roles",
-          "slug": "role-users"
-        },
-        {
-          "url": "permission",
-          "name": "Role Permissions",
-          "slug": "role-permissions"
-        }
-      ]
-    },
-    {
-      "name": "Notifications",
-      "url": "notifications",
-      "icon": "menu-icon icon-base ri ri-notification-line",
-      "slug": "notifications",
-      "roles": [
-        "Admin"
-      ]
-    },
-    {
-      "name": "Templates",
-      "icon": "menu-icon icon-base ri ri-file-text-line",
-      "slug": [
-        "templates-email",
-        "email-template-index",
-        "email-template-create",
-        "email-template-edit",
-        "templates-sms",
-        "sms-template-index",
-        "sms-template-create",
-        "sms-template-edit",
-        "templates-whatsapp",
-        "whatsapp-template-index",
-        "whatsapp-template-create",
-        "whatsapp-template-edit",
-        "whatsapp-template-view"
-      ],
-      "roles": [
-        "Admin"
-      ],
-      "submenu": [
-        {
-          "url": "templates/email",
-          "name": "Email Templates",
-          "slug": [
-            "templates-email",
-            "email-template-index",
-            "email-template-create",
-            "email-template-edit"
-          ]
-        },
-        {
-          "url": "templates/sms",
-          "name": "SMS Templates",
-          "slug": [
-            "templates-sms",
-            "sms-template-index",
-            "sms-template-create",
-            "sms-template-edit"
-          ]
-        },
-        {
-          "url": "templates/whatsapp",
-          "name": "WhatsApp Templates",
-          "slug": [
-            "templates-whatsapp",
-            "whatsapp-template-index",
-            "whatsapp-template-create",
-            "whatsapp-template-edit",
-            "whatsapp-template-view",
-            "templates/whatsapp"
-          ]
-        }
-      ]
-    },
-    {
-      "url": "admin/website",
-      "name": "Website Setup",
-      "icon": "menu-icon icon-base ri ri-global-line",
-      "slug": "website",
-      "roles": [
-        "Admin"
-      ],
-      "submenu": [
-        {
-          "url": "admin/homepage-setup",
-          "name": "Homepage Setup",
-          "slug": "website-homepage"
-        },
-        {
-          "url": "admin/appearance",
-          "name": "Appearance",
-          "slug": "website-appearance"
-        }
-      ]
-    },
-    {
-      "name": "Setup & Configuration",
-      "icon": "menu-icon icon-base ri ri-settings-5-line",
-      "slug": [
-        "setup-configuration",
-        "feature-activation",
-        "setup-configuration-smtp-settings",
-        "smtp-settings",
-        "smtp-settings-update",
-        "smtp-settings-test",
-        "payment-methods",
-        "payment-methods-update",
-        "page-configuration",
-        "faq-index",
-        "loan-document-templates",
-        "setup-configuration-api-configuration",
-        "faq-create",
-        "faq-edit"
-      ],
-      "roles": [
-        "Admin"
-      ],
-      "submenu": [
-        {
-          "url": "setup-configuration/feature-activation",
-          "name": "Feature Activation",
-          "slug": "feature-activation"
-        },
-        {
-          "url": "setup-configuration/api-configuration",
-          "name": "API Configuration",
-          "slug": "setup-configuration-api-configuration"
-        },
-        {
-          "url": "setup-configuration/smtp-settings",
-          "name": "SMTP Settings",
-          "slug": "smtp-settings"
-        },
-        {
-          "url": "setup-configuration/payment-methods",
-          "name": "Payment Methods",
-          "slug": "payment-methods"
-        },
-        {
-          "url": "setup-configuration/page-configuration",
-          "name": "Pages Configuration",
-          "slug": "page-configuration"
-        },
-        {
-          "url": "setup-configuration/faq",
-          "name": "FAQ",
-          "slug": [
-            "faq-index",
-            "faq-create",
-            "faq-edit"
-          ]
-        },
-        {
-          "url": "setup-configuration/loan-document-templates",
-          "name": "Loan Document Template",
-          "slug": "loan-document-templates"
-        }
-      ]
-    },
-    {
-      "name": "System",
-      "icon": "menu-icon icon-base ri ri-cpu-line",
-      "slug": [
-        "system",
-        "system-cache-clear",
-        "system-login-log",
-        "system-collection-log"
-      ],
-      "roles": [
-        "Admin"
-      ],
-      "submenu": [
-        {
-          "url": "system/server-status",
-          "name": "Server Status",
-          "slug": "system-server-status"
-        },
-        {
-          "url": "system/database-backup",
-          "name": "Database Backup",
-          "slug": "system-database-backup"
-        },
-        {
-          "url": "system/cache/clear",
-          "name": "Cache Clear",
-          "slug": "system-cache-clear"
-        },
-        {
-          "url": "system/login-log",
-          "name": "Login Log",
-          "slug": "system-login-log"
-        },
-        {
-          "url": "system/collection-log",
-          "name": "Collection Log",
-          "slug": "system-collection-log"
-        }
-      ]
-    }
-  ]
+    ]
 }

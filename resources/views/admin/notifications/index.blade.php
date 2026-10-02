@@ -6,10 +6,10 @@
 @section('title', 'Notifications')
 
 @section('content')
-<div class="card">
-  <div class="card-header d-flex align-items-center justify-content-between">
+<div class="card mb-4">
+  <div class="card-header d-flex flex-wrap align-items-center justify-content-between gap-3">
     <h5 class="mb-0"><i class="ri-notification-3-line me-2 text-primary"></i>All Notifications</h5>
-    <div class="card-toolbar d-flex gap-2">
+    <div class="card-toolbar d-flex flex-wrap gap-2">
       <button type="button"
         class="btn btn-sm btn-label-primary"
         id="markAllReadBtn"
@@ -23,6 +23,92 @@
         <i class="ri-delete-bin-line me-1"></i> Clear Read
       </button>
     </div>
+  </div>
+
+  <!-- Notification Filters Section -->
+  <div class="card-body border-top py-3 bg-body-tertiary">
+    <form action="{{ route('admin-notifications') }}" method="GET" id="notificationFilterForm">
+      <div class="row g-3 align-items-end">
+        <!-- Category Filter -->
+        <div class="col-lg-2 col-md-3 col-sm-6">
+          <label class="form-label small fw-medium mb-1">Category</label>
+          <select name="category" class="form-select form-select-sm" onchange="handleCategoryChange(this)">
+            <option value="all" {{ request('category', 'all') == 'all' ? 'selected' : '' }}>All Categories</option>
+            <option value="client" {{ request('category') == 'client' ? 'selected' : '' }}>Client / KYC</option>
+            <option value="loan" {{ request('category') == 'loan' ? 'selected' : '' }}>Loan</option>
+            <option value="chit" {{ request('category') == 'chit' ? 'selected' : '' }}>Chit</option>
+            <option value="ticket" {{ request('category') == 'ticket' ? 'selected' : '' }}>Tickets & Support</option>
+            <option value="fd" {{ request('category') == 'fd' ? 'selected' : '' }}>Fixed Deposit (FD)</option>
+          </select>
+        </div>
+
+        <!-- Notification Type Filter -->
+        <div class="col-lg-2 col-md-3 col-sm-6">
+          <label class="form-label small fw-medium mb-1">Specific Type</label>
+          <select name="type" class="form-select form-select-sm" onchange="this.form.submit()">
+            <option value="all">All Types</option>
+            @foreach($notificationTypes as $type)
+              @if(!empty($type))
+                <option value="{{ $type }}" {{ request('type') == $type ? 'selected' : '' }}>
+                  {{ ucwords(str_replace('_', ' ', $type)) }}
+                </option>
+              @endif
+            @endforeach
+          </select>
+        </div>
+
+        <!-- Date Range Filter -->
+        <div class="col-lg-2 col-md-3 col-sm-6">
+          <label class="form-label small fw-medium mb-1">Date Filter</label>
+          <select name="date_preset" id="date_preset" class="form-select form-select-sm" onchange="handleDatePresetChange(this)">
+            <option value="all" {{ request('date_preset', 'all') == 'all' ? 'selected' : '' }}>All Dates</option>
+            <option value="today" {{ request('date_preset') == 'today' ? 'selected' : '' }}>Today</option>
+            <option value="yesterday" {{ request('date_preset') == 'yesterday' ? 'selected' : '' }}>Yesterday</option>
+            <option value="this_week" {{ request('date_preset') == 'this_week' ? 'selected' : '' }}>This Week</option>
+            <option value="this_month" {{ request('date_preset') == 'this_month' ? 'selected' : '' }}>This Month</option>
+            <option value="custom" {{ request('date_preset') == 'custom' || request('start_date') ? 'selected' : '' }}>Custom Range</option>
+          </select>
+        </div>
+
+        <!-- Custom Start Date -->
+        <div class="col-lg-2 col-md-3 col-sm-6 custom-date-container" style="{{ (request('date_preset') == 'custom' || request('start_date')) ? '' : 'display: none;' }}">
+          <label class="form-label small fw-medium mb-1">Start Date</label>
+          <input type="date" name="start_date" class="form-control form-control-sm" value="{{ request('start_date') }}" onchange="this.form.submit()">
+        </div>
+
+        <!-- Custom End Date -->
+        <div class="col-lg-2 col-md-3 col-sm-6 custom-date-container" style="{{ (request('date_preset') == 'custom' || request('start_date')) ? '' : 'display: none;' }}">
+          <label class="form-label small fw-medium mb-1">End Date</label>
+          <input type="date" name="end_date" class="form-control form-control-sm" value="{{ request('end_date') }}" onchange="this.form.submit()">
+        </div>
+
+        <!-- Read Status Filter -->
+        <div class="col-lg-2 col-md-3 col-sm-6">
+          <label class="form-label small fw-medium mb-1">Status</label>
+          <select name="status" class="form-select form-select-sm" onchange="this.form.submit()">
+            <option value="all" {{ request('status', 'all') == 'all' ? 'selected' : '' }}>All Statuses</option>
+            <option value="unread" {{ request('status') == 'unread' ? 'selected' : '' }}>Unread Only</option>
+            <option value="read" {{ request('status') == 'read' ? 'selected' : '' }}>Read Only</option>
+          </select>
+        </div>
+
+        <!-- Search Keyword Filter -->
+        <div class="col-lg-3 col-md-4 col-sm-6">
+          <label class="form-label small fw-medium mb-1">Search Keyword</label>
+          <div class="input-group input-group-sm">
+            <input type="text" name="search" class="form-control" placeholder="Search Client, Title, Message..." value="{{ request('search') }}">
+            <button class="btn btn-outline-primary" type="submit"><i class="ri-search-line"></i></button>
+          </div>
+        </div>
+
+        <!-- Reset Button -->
+        <div class="col-lg-1 col-md-2 col-sm-6">
+          <a href="{{ route('admin-notifications') }}" class="btn btn-sm btn-outline-secondary w-100" title="Reset Filters">
+            <i class="ri-refresh-line me-1"></i>Reset
+          </a>
+        </div>
+      </div>
+    </form>
   </div>
   <div class="card-body p-0">
     <div class="list-group list-group-flush" id="allNotificationsList">
@@ -88,6 +174,36 @@
 
 @section('page-script')
 <script>
+function toggleCustomDates() {
+    var preset = document.getElementById('date_preset');
+    var containers = document.querySelectorAll('.custom-date-container');
+    if (preset && containers) {
+        var show = (preset.value === 'custom');
+        containers.forEach(function(el) {
+            el.style.display = show ? 'block' : 'none';
+        });
+    }
+}
+
+function handleCategoryChange(selectEl) {
+    var form = selectEl.form;
+    var typeSelect = form.querySelector('select[name="type"]');
+    if (typeSelect) typeSelect.value = 'all';
+    form.submit();
+}
+
+function handleDatePresetChange(selectEl) {
+    var form = selectEl.form;
+    toggleCustomDates();
+    if (selectEl.value !== 'custom') {
+        var startInput = form.querySelector('input[name="start_date"]');
+        var endInput = form.querySelector('input[name="end_date"]');
+        if (startInput) startInput.value = '';
+        if (endInput) endInput.value = '';
+        form.submit();
+    }
+}
+
 document.addEventListener('DOMContentLoaded', function () {
     // ── Row click → open notification detail modal ──────────────────────────
     document.querySelectorAll('.notif-row').forEach(function (row) {

@@ -3,7 +3,7 @@
 @section('title', __('Edit bank account'))
 
 @section('content')
-<div class="container-xxl flex-grow-1 container-p-y">
+<div class="account-module">
   <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-4">
     <div>
       <h4 class="mb-1">{{ __('Edit bank account') }}</h4>
@@ -21,7 +21,7 @@
 
   <div class="card">
     <div class="card-body">
-      <form method="post" action="{{ route('account.bank-accounts.update', $bankaccount) }}" class="row g-3">
+      <form method="post" action="{{ route('account.bank-accounts.update', $bankaccount) }}" enctype="multipart/form-data" class="row g-3">
         @csrf
         @method('PUT')
         <div class="col-md-2">
@@ -46,16 +46,8 @@
         <div class="col-md-2">
           <label class="form-label">{{ __('Type') }}</label>
           <select name="account_type" class="form-select" required>
-            @foreach (['current', 'savings', 'other'] as $t)
+            @foreach (['current', 'savings', 'cash', 'other'] as $t)
               <option value="{{ $t }}" @selected(old('account_type', $bankaccount->account_type) === $t)>{{ ucfirst($t) }}</option>
-            @endforeach
-          </select>
-        </div>
-        <div class="col-md-2">
-          <label class="form-label">{{ __('GL account') }}</label>
-          <select name="gl_account_id" class="form-select" required>
-            @foreach ($chartofaccounts as $g)
-              <option value="{{ $g->id }}" @selected(old('gl_account_id', $bankaccount->gl_account_id) == $g->id)>{{ $g->account_code }} — {{ $g->account_name }}</option>
             @endforeach
           </select>
         </div>
@@ -80,8 +72,27 @@
           <input type="text" name="routing_number" value="{{ old('routing_number', $bankaccount->routing_number) }}" class="form-control">
         </div>
         <div class="col-md-4">
+          <label class="form-label">{{ __('IFSC Code') }}</label>
+          <input type="text" name="ifsc_code" value="{{ old('ifsc_code', $bankaccount->ifsc_code) }}" class="form-control" placeholder="e.g. SBIN0001234" maxlength="20">
+        </div>
+        <div class="col-md-4">
           <label class="form-label">{{ __('Payment gateway') }}</label>
           <input type="text" name="payment_gateway" value="{{ old('payment_gateway', $bankaccount->payment_gateway) }}" class="form-control">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">{{ __('UPI ID') }}</label>
+          <input type="text" name="upi_id" value="{{ old('upi_id', $bankaccount->upi_id) }}" class="form-control">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">{{ __('QR Code (for collection)') }}</label>
+          <input type="file" name="qr_code" class="form-control" accept="image/*">
+          @if($bankaccount->qr_code)
+            <div class="mt-2">
+              <a href="{{ asset('storage/' . $bankaccount->qr_code) }}" target="_blank" class="btn btn-sm btn-outline-info">
+                <i class="ri-eye-line me-1"></i>{{ __('View Current QR') }}
+              </a>
+            </div>
+          @endif
         </div>
         <div class="col-md-2">
           <label class="form-label d-block">{{ __('Active') }}</label>

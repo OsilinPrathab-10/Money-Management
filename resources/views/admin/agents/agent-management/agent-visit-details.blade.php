@@ -99,7 +99,7 @@
              <div class="d-flex align-items-center">
                 <div>
                    <h6 class="mb-0">{{ $client->client_name }}</h6>
-                   <small class="text-muted">Client ID: #{{ $client->id }}</small>
+                   <small class="text-muted">Customer ID: {{ $client->displayCustomerId() }}</small>
                 </div>
              </div>
           </div>

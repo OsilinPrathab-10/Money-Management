@@ -30,12 +30,18 @@
 @endsection
 
 @section('page-script')
+<script>
+  window.isAdmin = @json(auth()->user()->hasRole('Admin') || auth()->user()->hasRole('Super Admin') || auth()->user()->hasRole('Staff'));
+</script>
 @vite([
 'resources/assets/js/modal-edit-user.js',
 'resources/assets/js/app-user-view.js',
 'resources/assets/js/client-view-account.js',
 'resources/assets/custom-js/app-kyc-verification.js',
-'resources/assets/custom-js/loan-applications.js'
+'resources/assets/custom-js/loan-applications.js',
+'resources/assets/custom-js/fd-applications.js',
+'resources/assets/custom-js/chit-applications.js',
+'resources/assets/custom-js/chit-need-month.js'
 ])
 @endsection
 
@@ -49,6 +55,9 @@
       <li class="nav-item"><a class="nav-link" href="{{ url('/clients/view/kyc/'.$client->id) }}"><i class="icon-base ri ri-shield-check-line me-1_5"></i>KYC</a></li>
       @endif
       <li class="nav-item"><a class="nav-link" href="{{ url('/client/view/loans/'.$client->id) }}"><i class="icon-base ri ri-file-list-3-line me-1_5"></i>Loans</a></li>
+      <li class="nav-item"><a class="nav-link" href="{{ url('/client/view/chits/'.$client->id) }}"><i class="icon-base ri ri-group-2-line me-1_5"></i>Chits</a></li>
+      <li class="nav-item"><a class="nav-link" href="{{ url('/clients/view/ledger/'.$client->id) }}"><i class="icon-base ri ri-wallet-3-line me-1_5"></i>Ledger</a></li>
+      <li class="nav-item"><a class="nav-link" href="{{ url('/clients/view/notifications/'.$client->id) }}"><i class="icon-base ri ri-notification-3-line me-1_5"></i>Notifications</a></li>
     </ul>
   </div>
   <div class="d-flex gap-2 w-100 w-sm-auto ms-md-auto">
@@ -69,12 +78,17 @@
     <!-- User Card -->
     <div class="card mb-6">
       @if(auth()->user()->hasRole('Admin') || auth()->user()->hasRole('Staff'))
-      @if($client->status !== 'blacklist')
       <div class="position-absolute top-0 end-0 m-3">
-        <button type="button" class="btn btn-sm btn-danger py-1 px-2" data-bs-toggle="modal" data-bs-target="#blacklistModal">
-          <i class="icon-base ri ri-forbid-line me-1"></i></button>
+        @if($client->status !== 'blacklist')
+        <button type="button" class="btn btn-sm btn-danger py-1 px-2" data-bs-toggle="modal" data-bs-target="#blacklistModal" title="Blacklist client">
+          <i class="icon-base ri ri-forbid-line"></i>
+        </button>
+        @else
+        <button type="button" class="btn btn-sm btn-success py-1 px-2" data-bs-toggle="modal" data-bs-target="#unblacklistModal" title="Remove from blacklist">
+          <i class="icon-base ri ri-shield-check-line"></i> Unblacklist
+        </button>
+        @endif
       </div>
-      @endif
       @endif
       <div class="card-body pt-12">
         <div class="user-avatar-section">
@@ -94,17 +108,21 @@
             @endif
             <div class="user-info text-center">
               <h5 id="sidebarClientName">{{ $client->client_name ?? 'Client Name' }}</h5>
+              <p class="text-muted mb-1 small" id="sidebarClientNickname">{{ $client->nickname ? '(' . $client->nickname . ')' : '' }}</p>
+              <p class="text-muted mb-2 small">Customer ID: <span class="fw-semibold text-heading">{{ $client->displayCustomerId() }}</span></p>
               {{-- DEBUG: Client Status = {{ $client->status }} --}}
               @php
                 // Map all 5 database status values to only 3 badge displays: Active, Inactive, Blacklisted
                 $statusBadgeMap = [
                   'active' => ['label' => 'Active', 'badge' => 'success'],
                   'verified' => ['label' => 'Active', 'badge' => 'success'], // Treat verified as active
+                  'pending' => ['label' => 'Pending', 'badge' => 'warning'],
                   'inactive' => ['label' => 'Inactive', 'badge' => 'danger'],
-                  'unverified' => ['label' => 'Inactive', 'badge' => 'danger'], // Treat unverified as inactive
+                  'rejected' => ['label' => 'Rejected', 'badge' => 'danger'],
+                  'unverified' => ['label' => 'Pending', 'badge' => 'warning'],
                   'blacklist' => ['label' => 'Blacklisted', 'badge' => 'dark'],
                 ];
-                $statusInfo = $statusBadgeMap[$client->status] ?? ['label' => 'Inactive', 'badge' => 'danger'];
+                $statusInfo = $statusBadgeMap[$client->status] ?? ['label' => 'Pending', 'badge' => 'warning'];
               @endphp
               <span id="sidebarClientStatusBadge" class="badge bg-label-{{ $statusInfo['badge'] }} rounded-pill">
                 {{ $statusInfo['label'] }}
@@ -114,43 +132,83 @@
         </div>
         <div class="row g-4 my-6">
           <div class="col-6">
-            <div class="d-flex align-items-center gap-4">
-              <div class="avatar">
-                <div class="avatar-initial bg-label-info rounded-3">
-                  <i class="icon-base ri ri-file-text-line icon-24px"></i>
+            <a href="{{ route('client-view-loans', $client->id) }}" class="text-heading text-decoration-none">
+              <div class="d-flex align-items-center gap-3">
+                <div class="avatar">
+                  <div class="avatar-initial bg-label-info rounded-3">
+                    <i class="icon-base ri ri-file-text-line icon-24px"></i>
+                  </div>
+                </div>
+                <div>
+                  <h5 class="mb-0">{{ $stats['applications'] ?? 0 }}</h5>
+                  <span class="small">Applications</span>
                 </div>
               </div>
-              <div>
-                <h5 class="mb-0">{{ $stats['applications'] ?? 0 }}</h5>
-                <span>Applications</span>
-              </div>
-            </div>
+            </a>
           </div>
           <div class="col-6">
-            <div class="d-flex align-items-center gap-4">
-              <div class="avatar">
-                <div class="avatar-initial bg-label-primary rounded-3">
-                  <i class="icon-base ri ri-money-dollar-circle-line icon-24px"></i>
+            <a href="{{ route('client-view-loans', $client->id) }}" class="text-heading text-decoration-none">
+              <div class="d-flex align-items-center gap-3">
+                <div class="avatar">
+                  <div class="avatar-initial bg-label-primary rounded-3">
+                    <i class="icon-base ri ri-money-dollar-circle-line icon-24px"></i>
+                  </div>
+                </div>
+                <div>
+                  <h5 class="mb-0">{{ $stats['loans'] ?? 0 }}</h5>
+                  <span class="small">Total Loans</span>
                 </div>
               </div>
-              <div>
-                <h5 class="mb-0">{{ $stats['loans'] ?? 0 }}</h5>
-                <span>Total Loans</span>
+            </a>
+          </div>
+          <div class="col-6">
+            <a href="{{ route('client-view-chits', $client->id) }}" class="text-heading text-decoration-none">
+              <div class="d-flex align-items-center gap-3">
+                <div class="avatar">
+                  <div class="avatar-initial bg-label-warning rounded-3">
+                    <i class="icon-base ri ri-group-line icon-24px"></i>
+                  </div>
+                </div>
+                <div>
+                  <h5 class="mb-0">{{ $stats['chits'] ?? 0 }}</h5>
+                  <span class="small">Total Chits</span>
+                </div>
               </div>
-            </div>
+            </a>
+          </div>
+          <div class="col-6">
+            @php $canViewFd = auth()->user()->hasRole('Admin') || auth()->user()->hasRole('Staff'); @endphp
+            <a href="{{ $canViewFd ? route('fd.deposits.index', ['client_id' => $client->id]) : '#' }}"
+               class="text-heading text-decoration-none {{ $canViewFd ? '' : 'pe-none' }}">
+              <div class="d-flex align-items-center gap-3">
+                <div class="avatar">
+                  <div class="avatar-initial bg-label-success rounded-3">
+                    <i class="icon-base ri ri-safe-2-line icon-24px"></i>
+                  </div>
+                </div>
+                <div>
+                  <h5 class="mb-0">{{ $stats['fixed_deposits'] ?? 0 }}</h5>
+                  <span class="small">Fixed Deposits</span>
+                </div>
+              </div>
+            </a>
           </div>
         </div>
         <div class="d-flex flex-column gap-4">
           <div class="border rounded-3 p-4">
             <small class="text-primary text-uppercase fw-semibold d-block mb-3">Personal Information</small>
             <div class="row g-4">
-            <div class="col-12">
-              <small class="text-muted text-uppercase">Email</small>
-              <p class="mb-0 text-heading" id="sidebarClientEmail" style="word-break: break-all; overflow-wrap: break-word;" title="{{ $client->client_email ?? ($client->user->email ?? 'N/A') }}">{{ $client->client_email ?? ($client->user->email ?? 'N/A') }}</p>
+            <div class="col-sm-6">
+              <small class="text-muted text-uppercase">Nickname</small>
+              <p class="mb-0 text-heading" id="sidebarClientNicknameDetail">{{ $client->nickname ?? 'N/A' }}</p>
             </div>
             <div class="col-sm-6">
               <small class="text-muted text-uppercase">Mobile</small>
               <p class="mb-0 text-heading" id="sidebarClientPhone">{{ $client->client_phone ?? 'N/A' }}</p>
+            </div>
+            <div class="col-12">
+              <small class="text-muted text-uppercase">Email</small>
+              <p class="mb-0 text-heading" id="sidebarClientEmail" style="word-break: break-all; overflow-wrap: break-word;" title="{{ $client->client_email ?? ($client->user->email ?? 'N/A') }}">{{ $client->client_email ?? ($client->user->email ?? 'N/A') }}</p>
             </div>
             <div class="col-sm-6">
               <small class="text-muted text-uppercase">Alternate Phone</small>
@@ -287,10 +345,13 @@
         <h5 class="mb-0">Account Details</h5>
         <div class="d-flex align-items-center gap-2">
           @if(auth()->user()->hasRole('Admin') || auth()->user()->hasRole('Staff'))
-            @if($client->status === 'active' || $client->status === 'verified')
-            <!-- <button type="button" class="btn btn-sm btn-primary py-1 px-3" data-bs-toggle="modal" data-bs-target="#modalApplyLoan">
-              <i class="icon-base ri ri-add-line me-1"></i> Apply for Loan
-            </button> -->
+            @if(($client->status === 'active' || $client->status === 'verified') && optional($client->kycDetail)->status === 'verified')
+            <button type="button" class="btn btn-sm btn-outline-primary py-1 px-3" data-bs-toggle="modal" data-bs-target="#modalApplyFd">
+              <i class="icon-base ri ri-safe-2-line me-1"></i> Apply for FD
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-primary py-1 px-3" data-bs-toggle="modal" data-bs-target="#modalApplyChit">
+              <i class="icon-base ri ri-hand-coin-line me-1"></i> Apply for Chit
+            </button>
             @endif
             <button type="button" class="btn btn-sm btn-icon btn-outline-primary btn-pill " id="enableAccountEditBtn" title="Edit Account Details" aria-label="Edit Account Details">
               <i class="icon-base ri ri-pencil-fill"></i>
@@ -301,8 +362,14 @@
             <button type="button" class="btn btn-sm btn-primary py-1 px-3" data-bs-toggle="modal" data-bs-target="#modalApplyLoan">
               <i class="icon-base ri ri-hand-coin-line me-1"></i> Apply for Loan
             </button>
+            <button type="button" class="btn btn-sm btn-outline-primary py-1 px-3" data-bs-toggle="modal" data-bs-target="#modalApplyFd">
+              <i class="icon-base ri ri-safe-2-line me-1"></i> Apply for FD
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-primary py-1 px-3" data-bs-toggle="modal" data-bs-target="#modalApplyChit">
+              <i class="icon-base ri ri-group-line me-1"></i> Apply for Chit
+            </button>
             @else
-            <span class="badge bg-label-warning py-2 px-3">KYC not yet approved — cannot apply for loan</span>
+            <span class="badge bg-label-warning py-2 px-3">KYC not yet approved — cannot apply for loan/FD/chit</span>
             @endif
           @endif
           <div class="alert-container" data-success="{{ session('success') }}" data-error="{{ session('error') }}" data-warning="" data-info=""></div>
@@ -316,6 +383,12 @@
               <div class="form-floating form-floating-outline">
                 <input class="form-control" type="text" id="client_name" name="client_name" value="{{ $client->client_name }}" readonly data-editable="true" required />
                 <label for="client_name">Full Name <span class="text-danger">*</span></label>
+              </div>
+            </div>
+            <div class="col-md-6">
+              <div class="form-floating form-floating-outline">
+                <input class="form-control" type="text" id="nickname" name="nickname" value="{{ $client->nickname }}" readonly data-editable="true" />
+                <label for="nickname">Nickname</label>
               </div>
             </div>
             <div class="col-md-6">
@@ -367,12 +440,22 @@
             </div>
             <div class="col-md-6">
               <div class="form-floating form-floating-outline">
+                @php
+                  $isKycVerified = optional($client->kycDetail)->status === 'verified';
+                @endphp
                 <select id="status" name="status" class="form-select" disabled data-editable="true">
-                  <option value="active" {{ $client->status == 'active' ? 'selected' : '' }}>Active</option>
+                  <option value="pending" {{ in_array($client->status, ['pending', 'unverified', '']) ? 'selected' : '' }}>Pending</option>
+                  <option value="active" {{ in_array($client->status, ['active', 'verified']) ? 'selected' : '' }} {{ $isKycVerified ? '' : 'disabled' }}>
+                    Active{{ $isKycVerified ? '' : ' (KYC verification required)' }}
+                  </option>
                   <option value="inactive" {{ $client->status == 'inactive' ? 'selected' : '' }}>Inactive</option>
+                  <option value="rejected" {{ $client->status == 'rejected' ? 'selected' : '' }}>Rejected</option>
                   <option value="blacklist" {{ $client->status == 'blacklist' ? 'selected' : '' }}>Blacklist</option>
                 </select>
                 <label for="status">Status</label>
+                @unless($isKycVerified)
+                  <small class="text-muted">Client becomes Active only after KYC is verified.</small>
+                @endunless
               </div>
             </div>
             <div class="col-md-6">
@@ -536,61 +619,107 @@
     <!--/ Bank Details Card -->
     @endif
 
-    @if($client->employeeInformation)
-    <!-- Employment Details Card -->
+    <!-- Employment & Documents Card -->
     <div class="card mb-6">
-      <div class="card-header">
-        <h5 class="mb-0">Employment Details</h5>
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <h5 class="mb-0">Employment & Documents</h5>
+        <button type="button" class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#editEmploymentModal">
+          <i class="icon-base ri ri-edit-box-line me-1"></i> Edit
+        </button>
       </div>
       <div class="card-body">
+        @php
+          $emp = $client->employeeInformation;
+          $empType = $emp->employment_type ?? null;
+          $isSalaried = $empType === 'salaried';
+          $isBusiness = in_array($empType, ['business', 'self_employed'], true);
+        @endphp
+        
         <div class="row g-4">
           <div class="col-md-6">
             <ul class="list-unstyled mb-0">
               <li class="mb-2">
                 <span class="text-heading me-2 fw-medium">Employment Type:</span>
-                <span class="badge bg-label-primary">{{ ucfirst(str_replace('_', ' ', $client->employeeInformation->employment_type ?? 'N/A')) }}</span>
+                @if($isSalaried)
+                  <span class="badge bg-label-info">Salaried Employee</span>
+                @elseif($isBusiness)
+                  <span class="badge bg-label-primary">Business Owner</span>
+                @else
+                  <span class="badge bg-label-secondary">Not Provided</span>
+                @endif
               </li>
-              @if($client->employeeInformation->employment_type == 'salaried')
-              <li class="mb-2">
-                <span class="text-heading me-2 fw-medium">Company Name:</span>
-                <span>{{ $client->employeeInformation->company_name ?? 'N/A' }}</span>
-              </li>
-              <li class="mb-2">
-                <span class="text-heading me-2 fw-medium">Monthly Salary:</span>
-                <span class="text-success fw-bold">₹{{ number_format($client->employeeInformation->monthly_salary ?? 0, 2) }}</span>
-              </li>
+              
+              @if($isSalaried)
+                <li class="mb-2">
+                  <span class="text-heading me-2 fw-medium">Company Name:</span>
+                  <span>{{ $emp->company_name ?? 'N/A' }}</span>
+                </li>
+                <li class="mb-2">
+                  <span class="text-heading me-2 fw-medium">Monthly Income:</span>
+                  <span class="text-success fw-bold">₹{{ number_format($emp->monthly_salary ?? 0, 2) }}</span>
+                </li>
+              @elseif($isBusiness)
+                <li class="mb-2">
+                  <span class="text-heading me-2 fw-medium">Business Name:</span>
+                  <span>{{ $emp->business_name ?? 'N/A' }}</span>
+                </li>
+                <li class="mb-2">
+                  <span class="text-heading me-2 fw-medium">Monthly Income / Avg Monthly Profit:</span>
+                  <span class="text-success fw-bold">₹{{ number_format($emp->monthly_turnover ?? 0, 2) }}</span>
+                </li>
               @else
-              <li class="mb-2">
-                <span class="text-heading me-2 fw-medium">Business Name:</span>
-                <span>{{ $client->employeeInformation->business_name ?? 'N/A' }}</span>
-              </li>
-              <li class="mb-2">
-                <span class="text-heading me-2 fw-medium">Monthly Turnover:</span>
-                <span class="text-success fw-bold">₹{{ number_format($client->employeeInformation->monthly_turnover ?? 0, 2) }}</span>
-              </li>
+                <li class="mb-2 text-muted">
+                  <span>No employment details submitted yet.</span>
+                </li>
               @endif
             </ul>
           </div>
+          
           <div class="col-md-6">
             <ul class="list-unstyled mb-0">
-              @if($client->employeeInformation->employment_type == 'salaried')
-              @else
-              <li class="mb-2">
-                <span class="text-heading me-2 fw-medium">Business Type:</span>
-                <span>{{ ucfirst($client->employeeInformation->business_type ?? 'N/A') }}</span>
-              </li>
-              <li class="mb-2">
-                <span class="text-heading me-2 fw-medium">Years in Business:</span>
-                <span>{{ $client->employeeInformation->years_in_business ?? 'N/A' }}</span>
-              </li>
+              @if($isSalaried)
+                @php
+                  $payslipDocs = $emp->payslip_documents ?? [];
+                  $payslipPath = is_array($payslipDocs) ? ($payslipDocs[0] ?? null) : $payslipDocs;
+                @endphp
+                <li class="mb-2">
+                  <span class="text-heading me-2 fw-medium">Payslip / Document:</span>
+                  @if($payslipPath)
+                    <a href="{{ \Illuminate\Support\Facades\Storage::url($payslipPath) }}" target="_blank" class="btn btn-xs btn-outline-info">
+                      <i class="icon-base ri ri-file-text-line me-1"></i> View Document
+                    </a>
+                  @else
+                    <span class="text-muted">Not Provided</span>
+                  @endif
+                </li>
+              @elseif($isBusiness)
+                @php
+                  $proofDocs = $emp->business_proof_documents ?? [];
+                  $proofPath = is_array($proofDocs) ? ($proofDocs[0] ?? null) : $proofDocs;
+                @endphp
+                <li class="mb-2">
+                  <span class="text-heading me-2 fw-medium">Business Document:</span>
+                  @if($proofPath)
+                    <a href="{{ \Illuminate\Support\Facades\Storage::url($proofPath) }}" target="_blank" class="btn btn-xs btn-outline-primary">
+                      <i class="icon-base ri ri-file-text-line me-1"></i> View Document
+                    </a>
+                  @else
+                    <span class="text-muted">Not Provided</span>
+                  @endif
+                </li>
+                @if(!empty($emp->business_type))
+                <li class="mb-2">
+                  <span class="text-heading me-2 fw-medium">Business Type:</span>
+                  <span>{{ ucfirst($emp->business_type) }}</span>
+                </li>
+                @endif
               @endif
             </ul>
           </div>
         </div>
       </div>
     </div>
-    <!--/ Employment Details Card -->
-    @endif
+    <!--/ Employment & Documents Card -->
  
   </div>
   <!--/ User Content -->
@@ -616,13 +745,14 @@
           <div class="mb-3">
             <label for="blacklist_reason" class="form-label fw-medium">Reason for Blacklist <span class="text-danger">*</span></label>
             <textarea name="reason" id="blacklist_reason" class="form-control" rows="3" placeholder="Enter reason for blacklisting" required></textarea>
+            <div class="invalid-feedback">Please enter a reason for blacklisting.</div>
           </div>
         </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">
             <i class="icon-base ri ri-close-line me-1"></i> Cancel
           </button>
-          <button type="submit" class="btn btn-danger">
+          <button type="submit" class="btn btn-danger" id="blacklistSubmitBtn">
             <i class="icon-base ri ri-forbid-line me-1"></i> Blacklist
           </button>
         </div>
@@ -631,5 +761,181 @@
   </div>
 </div>
 
+<!-- Unblacklist Confirmation Modal -->
+<div class="modal fade" id="unblacklistModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered" role="document">
+    <form id="unblacklistForm" action="{{ route('client-unblacklist', $client->id) }}" method="POST">
+      @csrf
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Remove from Blacklist</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <div class="text-center mb-4">
+            <i class="icon-base ri ri-shield-check-line text-success" style="font-size: 48px;"></i>
+          </div>
+          <h5 class="text-center mb-2">Unblacklist this client?</h5>
+          <p class="text-center mb-4">Client status will be set back to <strong>Active</strong>.</p>
+          @if(!empty($client->remarks))
+          <div class="alert alert-secondary py-2 small mb-3">
+            <strong>Current blacklist note:</strong> {{ $client->remarks }}
+          </div>
+          @endif
+          <div class="mb-3">
+            <label for="unblacklist_reason" class="form-label fw-medium">Note (optional)</label>
+            <textarea name="reason" id="unblacklist_reason" class="form-control" rows="2" placeholder="Optional reason for removing blacklist"></textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">
+            <i class="icon-base ri ri-close-line me-1"></i> Cancel
+          </button>
+          <button type="submit" class="btn btn-success" id="unblacklistSubmitBtn">
+            <i class="icon-base ri ri-shield-check-line me-1"></i> Unblacklist
+          </button>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Edit Employment & Documents Modal -->
+<div class="modal fade" id="editEmploymentModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered" role="document">
+    <form id="editEmploymentForm" action="{{ route('client-view-account.update-employment', $client->id) }}" method="POST" enctype="multipart/form-data">
+      @csrf
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Edit Employment & Documents</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          @php
+            $currentEmp = $client->employeeInformation;
+            $currentType = $currentEmp->employment_type ?? 'salaried';
+            $isSalariedVal = ($currentType === 'salaried');
+          @endphp
+
+          <!-- Employment Type Radio Selection -->
+          <div class="mb-3">
+            <label class="form-label fw-medium d-block">Employment Type</label>
+            <div class="form-check form-check-inline">
+              <input class="form-check-input" type="radio" name="employment_type" id="empTypeSalaried" value="salaried" {{ $isSalariedVal ? 'checked' : '' }}>
+              <label class="form-check-label" for="empTypeSalaried">Salaried Employee</label>
+            </div>
+            <div class="form-check form-check-inline">
+              <input class="form-check-input" type="radio" name="employment_type" id="empTypeBusiness" value="business" {{ !$isSalariedVal ? 'checked' : '' }}>
+              <label class="form-check-label" for="empTypeBusiness">Business Owner</label>
+            </div>
+          </div>
+
+          <!-- Salaried Fields Section -->
+          <div id="salariedFieldsSection" style="{{ $isSalariedVal ? '' : 'display: none;' }}">
+            <div class="mb-3">
+              <label for="company_name_edit" class="form-label">Company Name</label>
+              <input type="text" class="form-control" id="company_name_edit" name="company_name" value="{{ $currentEmp->company_name ?? '' }}" placeholder="Enter company name">
+            </div>
+            <div class="mb-3">
+              <label for="monthly_salary_edit" class="form-label">Monthly Income / Salary (₹)</label>
+              <input type="number" step="0.01" class="form-control" id="monthly_salary_edit" name="monthly_salary" value="{{ $currentEmp->monthly_salary ?? '' }}" placeholder="Enter monthly salary">
+            </div>
+            <div class="mb-3">
+              <label for="payslip_edit" class="form-label">Payslip / Document (Optional)</label>
+              <input type="file" class="form-control" id="payslip_edit" name="payslip" accept=".jpg,.jpeg,.png,.pdf">
+              @if(!empty($currentEmp->payslip_documents))
+                <small class="text-muted d-block mt-1">Existing document uploaded</small>
+              @endif
+            </div>
+          </div>
+
+          <!-- Business Owner Fields Section -->
+          <div id="businessFieldsSection" style="{{ !$isSalariedVal ? '' : 'display: none;' }}">
+            <div class="mb-3">
+              <label for="business_name_edit" class="form-label">Business Name</label>
+              <input type="text" class="form-control" id="business_name_edit" name="business_name" value="{{ $currentEmp->business_name ?? '' }}" placeholder="Enter business name">
+            </div>
+            <div class="mb-3">
+              <label for="monthly_income_edit" class="form-label">Monthly Income / Avg Monthly Profit (₹)</label>
+              <input type="number" step="0.01" class="form-control" id="monthly_income_edit" name="monthly_income" value="{{ $currentEmp->monthly_turnover ?? '' }}" placeholder="Enter monthly income/profit">
+            </div>
+            <div class="mb-3">
+              <label for="business_document_edit" class="form-label">Business Document (Optional)</label>
+              <input type="file" class="form-control" id="business_document_edit" name="business_document" accept=".jpg,.jpeg,.png,.pdf">
+              @if(!empty($currentEmp->business_proof_documents))
+                <small class="text-muted d-block mt-1">Existing document uploaded</small>
+              @endif
+            </div>
+          </div>
+
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="saveEmploymentBtn">Save Changes</button>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  const salariedRadio = document.getElementById('empTypeSalaried');
+  const businessRadio = document.getElementById('empTypeBusiness');
+  const salariedSec = document.getElementById('salariedFieldsSection');
+  const businessSec = document.getElementById('businessFieldsSection');
+
+  function toggleEmpSections() {
+    if (salariedRadio && salariedRadio.checked) {
+      if (salariedSec) salariedSec.style.display = 'block';
+      if (businessSec) businessSec.style.display = 'none';
+    } else {
+      if (salariedSec) salariedSec.style.display = 'none';
+      if (businessSec) businessSec.style.display = 'block';
+    }
+  }
+
+  if (salariedRadio && businessRadio) {
+    salariedRadio.addEventListener('change', toggleEmpSections);
+    businessRadio.addEventListener('change', toggleEmpSections);
+  }
+
+  const editEmpForm = document.getElementById('editEmploymentForm');
+  if (editEmpForm) {
+    editEmpForm.addEventListener('submit', function (e) {
+      e.preventDefault();
+      const btn = document.getElementById('saveEmploymentBtn');
+      if (btn) btn.disabled = true;
+
+      const formData = new FormData(editEmpForm);
+
+      fetch(editEmpForm.action, {
+        method: 'POST',
+        body: formData,
+        headers: {
+          'X-Requested-With': 'XMLHttpRequest',
+        }
+      })
+      .then(res => res.json())
+      .then(data => {
+        if (btn) btn.disabled = false;
+        if (data.success) {
+          window.location.reload();
+        } else {
+          alert(data.message || 'Failed to update employment details.');
+        }
+      })
+      .catch(err => {
+        if (btn) btn.disabled = false;
+        console.error(err);
+        alert('An error occurred while updating employment details.');
+      });
+    });
+  }
+});
+</script>
+
 @include('admin.clients.modals.modal-apply-loan')
+@include('admin.clients.modals.modal-apply-fd')
+@include('admin.clients.modals.modal-apply-chit')
 @endsection

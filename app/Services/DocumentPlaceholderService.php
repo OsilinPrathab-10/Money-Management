@@ -18,32 +18,35 @@ class DocumentPlaceholderService
     public static function getReplacements(LoanAccount $loanAccount): array
     {
         // Load necessary relationships
-        $loanAccount->load([
+        $loanAccount->loadMissing([
+            'client.kycDetail',
+            'client.employeeInformation',
+            'client.nominee',
             'loanApplication.client.kycDetail',
             'loanApplication.client.employeeInformation',
             'loanApplication.client.nominee',
             'loanApplication.product',
-            'loanApplication.applicationDetail'
+            'loanApplication.applicationDetail',
+            'loanProduct',
+            'product',
         ]);
 
-        $client = $loanAccount->loanApplication->client;
-        $kyc = $client->kycDetail;
-        $employeeInfo = $client->employeeInformation;
-        $nominee = $client->nominee;
-        $product = $loanAccount->loanApplication->product;
         $application = $loanAccount->loanApplication;
-        $applicationDetail = $application->applicationDetail;
-        
-        // Extract vehicle/course details from JSON if available
-        $details = $applicationDetail->details ?? [];
+        $client = $application?->client ?? $loanAccount->client;
+        $kyc = $client?->kycDetail;
+        $employeeInfo = $client?->employeeInformation;
+        $nominee = $client?->nominee;
+        $product = $application?->product ?? $loanAccount->loanProduct ?? $loanAccount->product;
+        $applicationDetail = $application?->applicationDetail;
+        $details = is_array($applicationDetail?->details ?? null) ? $applicationDetail->details : [];
 
         // Calculate EMI (use the same generator used in the loan schedule)
         $principal = (float) ($loanAccount->loan_amount ?? 0);
-        $annualRate = (float) ($loanAccount->interest_rate ?? $product->interest_rate ?? 0);
-        $tenureMonths = (int) ($loanAccount->tenure ?? $application->tenure ?? 0);
+        $annualRate = (float) ($loanAccount->interest_rate ?? $product?->interest_rate ?? 0);
+        $tenureMonths = (int) ($loanAccount->tenure ?? $application?->tenure ?? 0);
         $loanMode = strtolower((string) ($loanAccount->loan_mode ?? ''));
 
-        $termUnit = strtolower((string) ($product->term_unit ?? 'months'));
+        $termUnit = strtolower((string) ($product?->term_unit ?? 'months'));
         $frequency = 'monthly';
         if (in_array($termUnit, ['week', 'weeks', 'weekly'], true)) {
             $frequency = 'weekly';
@@ -59,7 +62,7 @@ class DocumentPlaceholderService
                 ? $loanAccount->disbursed_at->format('Y-m-d')
                 : ($loanAccount->created_at ? $loanAccount->created_at->format('Y-m-d') : now()->toDateString());
 
-            $emiDay = (int) ($loanAccount->emi_day ?? $application->emi_day ?? 1);
+            $emiDay = (int) ($loanAccount->emi_day ?? $application?->emi_day ?? 1);
 
             $emiCalculator = new EmiCalculator();
             $result = $emiCalculator->generateSchedule(
@@ -69,7 +72,7 @@ class DocumentPlaceholderService
                 startDate: $startDate,
                 emiDay: $emiDay,
                 frequency: $frequency,
-                interestType: $product->interest_type ?? 'flat'
+                interestType: $product?->interest_type ?? 'flat'
             );
 
             $emiAmount = (float) ($result['emi'] ?? 0);
@@ -104,9 +107,9 @@ class DocumentPlaceholderService
             $otherCharges = 0;
         } else {
             // Fallback for pending/preview: use product defaults
-            $processingFee = (float) ($product->processing_fee ?? 0);
-            $documentCharges = (float) ($product->document_charges ?? 0);
-            $otherCharges = (float) ($product->other_charges ?? 0);
+            $processingFee = (float) ($product?->processing_fee ?? 0);
+            $documentCharges = (float) ($product?->document_charges ?? 0);
+            $otherCharges = (float) ($product?->other_charges ?? 0);
             $totalCharges = $processingFee + $documentCharges + $otherCharges;
             $netDisbursal = $principal - $totalCharges;
         }
@@ -114,52 +117,52 @@ class DocumentPlaceholderService
 
         // Address Construction
         $addressParts = [
-            $client->address,
-            $client->city,
-            $client->state,
-            $client->pincode
+            $client?->address,
+            $client?->city,
+            $client?->state,
+            $client?->pincode
         ];
         $fullAddress = implode(', ', array_filter($addressParts));
 
         $replacements = [
             // Client Details
-            '{{client_name}}' => $client->client_name ?? 'N/A',
-            '{{client_dob}}' => $client->date_of_birth ? \Carbon\Carbon::parse($client->date_of_birth)->format('d-m-Y') : 'N/A',
-            '{{dob}}' => $client->date_of_birth ? \Carbon\Carbon::parse($client->date_of_birth)->format('d-m-Y') : 'N/A',
-            '{{client_mobile}}' => $client->client_phone ?? 'N/A',
-            '{{mobile_number}}' => $client->client_phone ?? 'N/A',
-            '{{client_gender}}' => $client->gender ? ucfirst($client->gender) : 'N/A',
-            '{{gender}}' => $client->gender ? ucfirst($client->gender) : 'N/A',
-            '{{client_marital_status}}' => $client->marital_status ? ucfirst($client->marital_status) : 'N/A',
-            '{{marital_status}}' => $client->marital_status ? ucfirst($client->marital_status) : 'N/A',
-            '{{client_pan}}' => $kyc->pan_number ?? 'N/A',
-            '{{pan_number}}' => $kyc->pan_number ?? 'N/A',
-            '{{client_email}}' => $client->client_email ?? 'N/A',
-            '{{email}}' => $client->client_email ?? 'N/A',
+            '{{client_name}}' => $client?->client_name ?? 'N/A',
+            '{{client_dob}}' => $client?->date_of_birth ? \Carbon\Carbon::parse($client->date_of_birth)->format('d-m-Y') : 'N/A',
+            '{{dob}}' => $client?->date_of_birth ? \Carbon\Carbon::parse($client->date_of_birth)->format('d-m-Y') : 'N/A',
+            '{{client_mobile}}' => $client?->client_phone ?? 'N/A',
+            '{{mobile_number}}' => $client?->client_phone ?? 'N/A',
+            '{{client_gender}}' => $client?->gender ? ucfirst($client->gender) : 'N/A',
+            '{{gender}}' => $client?->gender ? ucfirst($client->gender) : 'N/A',
+            '{{client_marital_status}}' => $client?->marital_status ? ucfirst($client->marital_status) : 'N/A',
+            '{{marital_status}}' => $client?->marital_status ? ucfirst($client->marital_status) : 'N/A',
+            '{{client_pan}}' => $kyc?->pan_number ?? 'N/A',
+            '{{pan_number}}' => $kyc?->pan_number ?? 'N/A',
+            '{{client_email}}' => $client?->client_email ?? 'N/A',
+            '{{email}}' => $client?->client_email ?? 'N/A',
             '{{client_address}}' => $fullAddress ?: 'N/A',
             '{{residence_address}}' => $fullAddress ?: 'N/A',
             
             // Employment Details
-            '{{client_employment_type}}' => $employeeInfo->employment_type ?? 'N/A',
-            '{{employment_status}}' => $employeeInfo->employment_type ?? 'N/A',
-            '{{client_employment_status}}' => $employeeInfo->employment_type ?? 'N/A',
-            '{{client_monthly_salary}}' => $employeeInfo->monthly_salary ? '₹' . number_format($employeeInfo->monthly_salary, 2) : 'N/A',
-            '{{client_company_name}}' => $employeeInfo->company_name ?? 'N/A',
-            '{{company_name}}' => $employeeInfo->company_name ?? AppearanceHelper::get('title', 'Loan App'),
-            '{{work_email}}' => $employeeInfo->work_email ?? 'N/A',
-            '{{client_work_email}}' => $employeeInfo->work_email ?? 'N/A',
-            '{{work_address}}' => $employeeInfo->work_address ?? 'N/A',
-            '{{client_work_address}}' => $employeeInfo->work_address ?? 'N/A',
+            '{{client_employment_type}}' => $employeeInfo?->employment_type ?? 'N/A',
+            '{{employment_status}}' => $employeeInfo?->employment_type ?? 'N/A',
+            '{{client_employment_status}}' => $employeeInfo?->employment_type ?? 'N/A',
+            '{{client_monthly_salary}}' => ($employeeInfo && $employeeInfo->monthly_salary) ? '₹' . number_format($employeeInfo->monthly_salary, 2) : 'N/A',
+            '{{client_company_name}}' => $employeeInfo?->company_name ?? 'N/A',
+            '{{company_name}}' => $employeeInfo?->company_name ?? AppearanceHelper::get('title', 'Loan App'),
+            '{{work_email}}' => $employeeInfo?->work_email ?? 'N/A',
+            '{{client_work_email}}' => $employeeInfo?->work_email ?? 'N/A',
+            '{{work_address}}' => $employeeInfo?->work_address ?? 'N/A',
+            '{{client_work_address}}' => $employeeInfo?->work_address ?? 'N/A',
 
             // Bank Details
-            '{{client_bank_name}}' => $kyc->bank_name ?? 'N/A',
-            '{{bank_name}}' => $kyc->bank_name ?? 'N/A',
-            '{{client_account_number}}' => $kyc->account_number ?? 'N/A',
-            '{{account_number}}' => $kyc->account_number ?? 'N/A',
-            '{{client_ifsc_code}}' => $kyc->ifsc_code ?? 'N/A',
-            '{{ifsc_code}}' => $kyc->ifsc_code ?? 'N/A',
-            '{{client_micr_code}}' => $kyc->micr_code ?? 'N/A',
-            '{{micr_code}}' => $kyc->micr_code ?? 'N/A',
+            '{{client_bank_name}}' => $kyc?->bank_name ?? 'N/A',
+            '{{bank_name}}' => $kyc?->bank_name ?? 'N/A',
+            '{{client_account_number}}' => $kyc?->account_number ?? 'N/A',
+            '{{account_number}}' => $kyc?->account_number ?? 'N/A',
+            '{{client_ifsc_code}}' => $kyc?->ifsc_code ?? 'N/A',
+            '{{ifsc_code}}' => $kyc?->ifsc_code ?? 'N/A',
+            '{{client_micr_code}}' => $kyc?->micr_code ?? 'N/A',
+            '{{micr_code}}' => $kyc?->micr_code ?? 'N/A',
 
             // Loan Details
             '{{agreement_no}}' => $loanAccount->account_number ?? 'N/A',
@@ -185,7 +188,7 @@ class DocumentPlaceholderService
             '{{total_charges}}' => number_format($processingFee + $documentCharges + $otherCharges, 2),
             '{{total_deductions}}' => number_format($processingFee + $documentCharges + $otherCharges, 2),
             '{{applied_total_charges}}' => number_format($processingFee + $documentCharges + $otherCharges, 2),
-            '{{interest_rate}}' => $loanAccount->interest_rate ?? $product->interest_rate ?? '0',
+            '{{interest_rate}}' => $loanAccount->interest_rate ?? $product?->interest_rate ?? '0',
             '{{lender_name}}' => AppearanceHelper::get('title', 'Loan App'),
             '{{current_date}}' => now()->format('d-m-Y'),
             '{{date}}' => now()->format('d-m-Y'),
@@ -193,15 +196,15 @@ class DocumentPlaceholderService
             '{{disbursed_date}}' => $loanAccount->disbursed_at ? $loanAccount->disbursed_at->format('d-m-Y') : 'N/A',
             '{{application_date}}' => $loanAccount->created_at ? $loanAccount->created_at->format('d-m-Y') : 'N/A',
             '{{agreement_date}}' => $loanAccount->disbursed_at ? $loanAccount->disbursed_at->format('d-m-Y') : ($loanAccount->created_at ? $loanAccount->created_at->format('d-m-Y') : 'N/A'),
-            '{{application_number}}' => $application->application_number ?? 'N/A',
-            '{{loan_application_number}}' => $application->application_number ?? 'N/A',
+            '{{application_number}}' => $application?->application_number ?? 'N/A',
+            '{{loan_application_number}}' => $application?->application_number ?? 'N/A',
 
             // Product Details
-            '{{product_name}}' => $product->loan_name ?? 'N/A',
-            '{{loan_name}}' => $product->loan_name ?? 'N/A',
-            '{{loan_code}}' => $product->loan_code ?? 'N/A',
-            '{{loan_description}}' => $product->description ?? 'N/A',
-            '{{loan_interest_rate}}' => $product->interest_rate ?? 'N/A',
+            '{{product_name}}' => $product?->loan_name ?? 'N/A',
+            '{{loan_name}}' => $product?->loan_name ?? 'N/A',
+            '{{loan_code}}' => $product?->loan_code ?? $loanAccount->loan_code ?? 'N/A',
+            '{{loan_description}}' => $product?->description ?? 'N/A',
+            '{{loan_interest_rate}}' => $product?->interest_rate ?? 'N/A',
             
             // Repayment/Statement Specific
             '{{total_payable}}' => number_format($loanAccount->total_payable ?? 0, 2),
@@ -213,13 +216,13 @@ class DocumentPlaceholderService
             '{{generated_on}}' => now()->format('d-m-Y H:i:s'),
 
             // NOC Specific
-            '{{customer_name}}' => $client->client_name ?? '',
-            '{{customer_address_line1}}' => $client->address ?? '',
+            '{{customer_name}}' => $client?->client_name ?? '',
+            '{{customer_address_line1}}' => $client?->address ?? '',
             '{{customer_address_line2}}' => '',
-            '{{customer_city}}' => $client->city ?? '',
-            '{{customer_state}}' => $client->state ?? '',
-            '{{customer_pincode}}' => $client->pincode ?? '',
-            '{{loan_type}}' => $product->loan_name ?? '',
+            '{{customer_city}}' => $client?->city ?? '',
+            '{{customer_state}}' => $client?->state ?? '',
+            '{{customer_pincode}}' => $client?->pincode ?? '',
+            '{{loan_type}}' => $product?->loan_name ?? '',
             '{{loan_closed_date}}' => $loanAccount->closed_at ? $loanAccount->closed_at->format('d-m-Y') : now()->format('d-m-Y'),
             '{{closure_date}}' => $loanAccount->closed_at ? $loanAccount->closed_at->format('d-m-Y') : now()->format('d-m-Y'),
             '{{sign_name}}' => 'Admin',
@@ -246,14 +249,14 @@ class DocumentPlaceholderService
             '{{annual_fee}}' => $details['annual_fee'] ?? 'N/A',
 
             // Education Loan - Guarantor/Nominee Details
-            '{{guarantor_name}}' => $nominee->nominee1_name ?? 'N/A',
-            '{{nominee1_name}}' => $nominee->nominee1_name ?? 'N/A',
-            '{{guarantor_relationship}}' => $nominee->nominee1_relationship ?? 'N/A',
-            '{{nominee1_relationship}}' => $nominee->nominee1_relationship ?? 'N/A',
-            '{{guarantor_mobile}}' => $nominee->nominee1_mobile ?? 'N/A',
-            '{{nominee1_mobile}}' => $nominee->nominee1_mobile ?? 'N/A',
+            '{{guarantor_name}}' => $nominee?->nominee1_name ?? 'N/A',
+            '{{nominee1_name}}' => $nominee?->nominee1_name ?? 'N/A',
+            '{{guarantor_relationship}}' => $nominee?->nominee1_relationship ?? 'N/A',
+            '{{nominee1_relationship}}' => $nominee?->nominee1_relationship ?? 'N/A',
+            '{{guarantor_mobile}}' => $nominee?->nominee1_mobile ?? 'N/A',
+            '{{nominee1_mobile}}' => $nominee?->nominee1_mobile ?? 'N/A',
             '{{guarantor_occupation}}' => 'N/A', // Not available in current schema
-            '{{guardian_address}}' => $client->address ?? 'N/A',
+            '{{guardian_address}}' => $client?->address ?? 'N/A',
 
             // Business Loan - Business Details (from loan_application_details.details JSON)
             '{{business_name}}' => $details['business_name'] ?? 'N/A',
@@ -261,7 +264,7 @@ class DocumentPlaceholderService
             '{{business_address}}' => $details['business_address'] ?? 'N/A',
             '{{years_in_business}}' => $details['years_in_business'] ?? 'N/A',
             '{{annual_turnover}}' => $details['annual_turnover'] ?? 'N/A',
-            '{{client_designation}}' => $details['client_designation'] ?? $employeeInfo->designation ?? 'N/A',
+            '{{client_designation}}' => $details['client_designation'] ?? $employeeInfo?->designation ?? 'N/A',
             
             // Company/App Details (from company_details table)
             '{{app_name}}' => \App\Models\CompanyDetail::first()->company_name ?? AppearanceHelper::get('title', 'Loan App'),

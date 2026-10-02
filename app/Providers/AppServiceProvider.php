@@ -6,7 +6,6 @@ use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Facades\Vite;
 use Illuminate\Support\Facades\View;
-use App\Models\Account\ChartOfAccount;
 use Illuminate\Pagination\Paginator;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Auth\Events\Login;
@@ -41,12 +40,16 @@ class AppServiceProvider extends ServiceProvider
     {
         Paginator::useBootstrapFive();
 
-        // Avoid mixed http/https URL generation (can break session cookies + CSRF).
-        $appUrl = (string) config('app.url', '');
-        if ($appUrl !== '') {
-            if (str_starts_with($appUrl, 'http://')) {
-                URL::forceScheme('http');
-            } elseif (str_starts_with($appUrl, 'https://')) {
+        // Avoid mixed http/https URL generation (especially behind ngrok / reverse proxy)
+        if (
+            request()->isSecure() ||
+            request()->server('HTTP_X_FORWARDED_PROTO') === 'https' ||
+            (isset($_SERVER['HTTP_HOST']) && str_contains($_SERVER['HTTP_HOST'], 'ngrok'))
+        ) {
+            URL::forceScheme('https');
+        } else {
+            $appUrl = (string) config('app.url', '');
+            if ($appUrl !== '' && str_starts_with($appUrl, 'https://')) {
                 URL::forceScheme('https');
             }
         }
@@ -95,7 +98,7 @@ class AppServiceProvider extends ServiceProvider
                 $collection->loadMissing(['emi.loanAccount.client', 'agent', 'verifiedBy']);
                 
                 $clientName = $collection->emi?->loanAccount?->client?->client_name ?? 'Unknown';
-                $loanNumber = $collection->emi?->loanAccount?->account_number ?? 'N/A';
+                $loanNumber = $collection->emi?->loanAccount?->customer_loan_account_number ?? $collection->emi?->loanAccount?->account_number ?? 'N/A';
                 $emiNumber = $collection->emi?->instalment_number ?? 'N/A';
                 $amount = $collection->amount ?? 0;
                 $paymentMode = $collection->payment_method ?? 'direct';
@@ -124,6 +127,79 @@ class AppServiceProvider extends ServiceProvider
             }
         });
 
+        // Register collection updated logger
+        \App\Models\EmiCollection::updated(function ($collection) {
+            try {
+                $collection->loadMissing(['emi.loanAccount.client', 'agent', 'verifiedBy']);
+                
+                $clientName = $collection->emi?->loanAccount?->client?->client_name ?? 'Unknown';
+                $loanNumber = $collection->emi?->loanAccount?->customer_loan_account_number ?? $collection->emi?->loanAccount?->account_number ?? 'N/A';
+                $emiNumber = $collection->emi?->instalment_number ?? 'N/A';
+                $amount = $collection->amount ?? 0;
+                $paymentMode = $collection->payment_method ?? 'direct';
+                
+                $collectedBy = 'System';
+                if ($collection->agent) {
+                    $collectedBy = $collection->agent->agent_name;
+                } elseif ($collection->verifiedBy) {
+                    $collectedBy = $collection->verifiedBy->name;
+                } elseif (auth()->check()) {
+                    $collectedBy = auth()->user()->name;
+                }
+
+                $createdAtFormatted = $collection->created_at ? \Carbon\Carbon::parse($collection->created_at)->format('Y-m-d H:i:s') : null;
+
+                // Match existing log within a 5-second window of EmiCollection's created_at
+                $log = \App\Models\CollectionLog::where('loan_number', $loanNumber)
+                    ->where('emi_number', (string)$emiNumber)
+                    ->where(function($q) use ($createdAtFormatted) {
+                        if ($createdAtFormatted) {
+                            $q->whereRaw("ABS(TIMESTAMPDIFF(SECOND, created_at, ?)) <= 5", [$createdAtFormatted]);
+                        }
+                    })
+                    ->first();
+
+                if ($log) {
+                    $log->update([
+                        'client_name' => $clientName,
+                        'collected_amount' => $amount,
+                        'payment_mode' => $paymentMode,
+                        'collected_by_name' => $collectedBy,
+                        'collected_at' => $collection->collected_at ?: now(),
+                    ]);
+                }
+            } catch (\Exception $e) {
+                \Illuminate\Support\Facades\Log::error('Failed to update collection log: ' . $e->getMessage());
+            }
+        });
+
+        // Register collection deleted logger
+        \App\Models\EmiCollection::deleted(function ($collection) {
+            try {
+                $loanNumber = $collection->emi?->loanAccount?->customer_loan_account_number ?? $collection->emi?->loanAccount?->account_number ?? 'N/A';
+                $emiNumber = $collection->emi?->instalment_number ?? 'N/A';
+                
+                $createdAtFormatted = $collection->created_at ? \Carbon\Carbon::parse($collection->created_at)->format('Y-m-d H:i:s') : null;
+
+                // Match existing log within a 5-second window of EmiCollection's created_at
+                $log = \App\Models\CollectionLog::where('loan_number', $loanNumber)
+                    ->where('emi_number', (string)$emiNumber)
+                    ->where(function($q) use ($createdAtFormatted) {
+                        if ($createdAtFormatted) {
+                            $q->whereRaw("ABS(TIMESTAMPDIFF(SECOND, created_at, ?)) <= 5", [$createdAtFormatted]);
+                        }
+                    })
+                    ->first();
+
+                if ($log) {
+                    $log->delete();
+                }
+            } catch (\Exception $e) {
+                \Illuminate\Support\Facades\Log::error('Failed to delete collection log: ' . $e->getMessage());
+            }
+        });
+
+
         Vite::useStyleTagAttributes(function (?string $src, string $url, ?array $chunk, ?array $manifest) {
             if ($src !== null) {
                 return [
@@ -133,73 +209,26 @@ class AppServiceProvider extends ServiceProvider
             return [];
         });
         
-        // Share GL accounts for Sidebar "Add" Modals and Accounting Views
+        // Share data for sidebar Add Bank / Revenue / Expense / Category modals
         View::composer(['layouts.sections.menu.verticalMenu', 'layouts.sections.menu.submenu', 'admin.account.*'], function ($view) {
             if (auth()->check()) {
                 $created_by = creatorId();
-                
-                // Get list of GL accounts already linked to bank accounts
-                $usedBankGlIds = \App\Models\Account\BankAccount::where('created_by', $created_by)
-                    ->whereNotNull('gl_account_id')
-                    ->pluck('gl_account_id')
-                    ->toArray();
-                
+
                 $view->with([
-                    'bankGlAccounts' => ChartOfAccount::where('created_by', $created_by)
+                    'allBankAccounts' => \App\Models\Account\BankAccount::where('created_by', $created_by)
                         ->where('is_active', true)
-                        ->whereHas('accountType.category', function($q) {
-                            $q->where('type', 'assets');
-                        })
-                        ->whereNotIn('id', $usedBankGlIds)
-                        ->select('id', 'account_code', 'account_name')
-                        ->orderBy('account_code')
-                        ->get(),
-                    'revenueGlAccounts' => ChartOfAccount::where('created_by', $created_by)
-                        ->where('is_active', true)
-                        ->whereHas('accountType.category', function($q) {
-                            $q->whereIn('type', ['revenue', 'income']);
-                        })
-                        ->select('id', 'account_code', 'account_name')
-                        ->orderBy('account_code')
-                        ->get(),
-                    'expenseGlAccounts' => ChartOfAccount::where('created_by', $created_by)
-                        ->where('is_active', true)
-                        ->whereHas('accountType', function($q) {
-                            $q->where(function ($sub) {
-                                $sub->where('name', 'like', '%expense%')
-                                    ->orWhereHas('category', function($q2) {
-                                        $q2->where('type', 'expenses');
-                                    });
-                            })->where('name', 'not like', '%liability%')
-                              ->where('name', 'not like', '%asset%')
-                              ->where('name', 'not like', '%income%')
-                              ->where('name', 'not like', '%revenue%')
-                              ->where('name', 'not like', '%equity%');
-                        })
-                        ->select('id', 'account_code', 'account_name')
-                        ->orderBy('account_code')
-                        ->get(),
-                    'accountCategories' => \App\Models\Account\AccountCategory::where('created_by', $created_by)
-                        ->select('id', 'name', 'code')
+                        ->select('id', 'account_name', 'bank_name', 'account_number', 'branch_name', 'ifsc_code', 'upi_id', 'qr_code', 'current_balance')
+                        ->orderBy('account_name')
                         ->get(),
                     'allRevenueCategories' => \App\Models\Account\RevenueCategories::where('created_by', $created_by)
                         ->where('is_active', true)
                         ->select('id', 'category_name')
+                        ->orderBy('category_name')
                         ->get(),
                     'allExpenseCategories' => \App\Models\Account\ExpenseCategories::where('created_by', $created_by)
                         ->where('is_active', true)
                         ->select('id', 'category_name')
-                        ->get(),
-                    'allBankAccounts' => \App\Models\Account\BankAccount::where('created_by', $created_by)
-                        ->where('is_active', true)
-                        ->select('id', 'account_name')
-                        ->get(),
-                    'allAccountTypes' => \App\Models\Account\AccountType::where('created_by', $created_by)
-                        ->select('id', 'name')
-                        ->get(),
-                    'allChartOfAccounts' => ChartOfAccount::where('created_by', $created_by)
-                        ->select('id', 'account_code', 'account_name')
-                        ->orderBy('account_code')
+                        ->orderBy('category_name')
                         ->get(),
                 ]);
             }

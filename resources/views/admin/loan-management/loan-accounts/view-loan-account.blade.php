@@ -5,6 +5,7 @@
 @section('page-script')
 @vite([
   'resources/assets/vendor/libs/sweetalert2/sweetalert2.js',
+  'resources/assets/custom-js/bank-payment-fields.js',
   'resources/assets/custom-js/client-view-loans.js',
   'resources/assets/custom-js/loan-account-view.js',
   'resources/assets/custom-js/loan-account-prepayment.js'
@@ -46,7 +47,7 @@
     <p class="text-heading mb-0">{{ $client->client_name ?? 'N/A' }}</p>
   </div>
   <div class="w-100 w-sm-auto">
-    <a href="{{ route('loan-accounts') }}" class="btn btn-outline-secondary w-100 w-sm-auto justify-content-center d-inline-flex align-items-center">
+    <a href="{{ route('loan-accounts') }}" class="btn btn-sm btn-outline-secondary w-100 w-sm-auto justify-content-center d-inline-flex align-items-center">
       <i class="icon-base ri ri-arrow-left-line me-1"></i>
       Back To Loan Accounts
     </a>
@@ -71,7 +72,7 @@
       </button>
       @endif -->
       @if($loanAccount->status === 'active' && $foreclosureConfig)
-      <button type="button" class="btn btn-warning btn-sm flex-grow-1 w-sm-auto" id="forecloseBtn" 
+      <button type="button" class="btn btn-warning btn-sm" id="forecloseBtn" 
               data-account-id="{{ $loanAccount->id }}"
               data-account-number="{{ $loanAccount->account_number }}">
         <i class="icon-base ri ri-close-circle-line me-1"></i>
@@ -97,9 +98,17 @@
       <div class="col-md-3 col-6">
         <div class="d-flex flex-column">
           <small class="text-muted text-uppercase mb-1">Account Number</small>
-          <h6 class="mb-0">{{ $loanAccount->account_number }}</h6>
+          <h6 class="mb-0 text-primary fw-bold">{{ $loanAccount->customer_loan_account_number ?? $loanAccount->account_number }}</h6>
         </div>
       </div>
+      @if($loanAccount->customer_loan_account_number)
+      <div class="col-md-3 col-6">
+        <div class="d-flex flex-column">
+          <small class="text-muted text-uppercase mb-1">System Account ID</small>
+          <h6 class="mb-0 text-muted">{{ $loanAccount->account_number }}</h6>
+        </div>
+      </div>
+      @endif
       <div class="col-md-3 col-6">
         <div class="d-flex flex-column">
           <small class="text-muted text-uppercase mb-1">Sanctioned Amount</small>
@@ -109,7 +118,13 @@
       <div class="col-md-3 col-6">
         <div class="d-flex flex-column">
           <small class="text-muted text-uppercase mb-1">Interest Rate</small>
-          <h6 class="mb-0">{{ $loanAccount->interest_rate }}% p.a.</h6>
+          <h6 class="mb-0">
+            @if((float) $loanAccount->interest_rate === 0.0 && $loanAccount->loan_mode !== 'interest_only')
+              <span class="badge bg-label-success">Free Loan · 0%</span>
+            @else
+              {{ $loanAccount->interest_rate }}% p.a.
+            @endif
+          </h6>
         </div>
       </div>
       <div class="col-md-3 col-6">
@@ -208,6 +223,12 @@
           <div class="text-muted d-flex align-items-center gap-3">
             @if($isKandhuvatti && $loanAccount->outstanding_amount > 0)
               <span class="badge bg-label-danger fw-bold fs-6">Remaining Principal Balance: ₹{{ number_format($loanAccount->outstanding_amount, 2) }}</span>
+              @if(auth()->user()->hasRole('Admin') || auth()->user()->hasRole('Staff'))
+                <button type="button" class="btn btn-sm btn-primary" id="btnOpenGenerateCyclesModal"
+                        data-bs-toggle="modal" data-bs-target="#generateCyclesModal">
+                  <i class="ri-add-circle-line me-1"></i> Generate Cycles
+                </button>
+              @endif
             @endif
             <small>{{ $isKandhuvatti ? 'Total Cycles' : 'Total EMIs' }}: {{ $emis->count() }}</small>
           </div>
@@ -253,7 +274,7 @@
                   ₹{{ number_format($emi->interest_amount, 2) }}
                 </td>
                 <td class="text-end">
-                  <strong>₹{{ number_format($emi->total_amount, 2) }}</strong>
+                  <strong>₹{{ number_format($isKandhuvatti ? (float)$emi->interest_amount : $emi->total_amount, 2) }}</strong>
                 </td>
                 <td class="text-end">
                   @php
@@ -288,33 +309,53 @@
 
                     $displayRemaining = max(0, ($emi->total_amount + ($emi->penalty_amount ?? 0)) - $currentPaid - $inProgressSum);
                   @endphp
-                  @if($displayPaid > 0.01)
-                    <div class="d-flex flex-column align-items-end text-end font-monospace" style="font-size: 0.85rem; gap: 2px;">
-                      @if($totalPrincipalPaid > 0.01)
-                        <span class="text-success small fw-medium">
-                          P. Paid: ₹{{ number_format($principalPaid, 2) }}
-                          @if($inProgressPrincipalPaid > 0.01)
-                            <span class="text-warning small" title="Unverified Agent Collection">(+₹{{ number_format($inProgressPrincipalPaid, 2) }})</span>
-                          @endif
-                        </span>
-                      @endif
-                      @if($totalInterestPaid > 0.01)
-                        <span class="text-info small fw-medium">
-                          I. Paid: ₹{{ number_format($interestPaid, 2) }}
+                  @if($isKandhuvatti)
+                    @if($totalInterestPaid > 0.01)
+                      <div class="d-flex flex-column align-items-end">
+                        <span class="fw-bold text-dark font-monospace" style="font-size: 0.9rem;">
+                          ₹{{ number_format($totalInterestPaid, 2) }}
                           @if($inProgressInterestPaid > 0.01)
                             <span class="text-warning small" title="Unverified Agent Collection">(+₹{{ number_format($inProgressInterestPaid, 2) }})</span>
                           @endif
                         </span>
-                      @endif
-                      <span class="fw-bold text-dark border-top pt-1 mt-1">
-                        Total: ₹{{ number_format($currentPaid, 2) }}
-                        @if($inProgressSum > 0.01)
-                          <span class="text-warning small" title="Unverified Agent Collection">(+₹{{ number_format($inProgressSum, 2) }})</span>
+                        @if($totalPrincipalPaid > 0.01)
+                          <span class="badge bg-label-info small mt-1" title="Principal Paid">
+                            Principal: ₹{{ number_format($totalPrincipalPaid, 2) }}
+                          </span>
                         @endif
-                      </span>
-                    </div>
+                      </div>
+                    @else
+                      -
+                    @endif
                   @else
-                    -
+                    @if($displayPaid > 0.01)
+                      <div class="d-flex flex-column align-items-end text-end font-monospace" style="font-size: 0.85rem; gap: 2px;">
+                        @if($totalPrincipalPaid > 0.01)
+                          <span class="text-success small fw-medium">
+                            P. Paid: ₹{{ number_format($principalPaid, 2) }}
+                            @if($inProgressPrincipalPaid > 0.01)
+                              <span class="text-warning small" title="Unverified Agent Collection">(+₹{{ number_format($inProgressPrincipalPaid, 2) }})</span>
+                            @endif
+                          </span>
+                        @endif
+                        @if($totalInterestPaid > 0.01)
+                          <span class="text-info small fw-medium">
+                            I. Paid: ₹{{ number_format($interestPaid, 2) }}
+                            @if($inProgressInterestPaid > 0.01)
+                              <span class="text-warning small" title="Unverified Agent Collection">(+₹{{ number_format($inProgressInterestPaid, 2) }})</span>
+                            @endif
+                          </span>
+                        @endif
+                        <span class="fw-bold text-dark border-top pt-1 mt-1">
+                          Total: ₹{{ number_format($currentPaid, 2) }}
+                          @if($inProgressSum > 0.01)
+                            <span class="text-warning small" title="Unverified Agent Collection">(+₹{{ number_format($inProgressSum, 2) }})</span>
+                          @endif
+                        </span>
+                      </div>
+                    @else
+                      -
+                    @endif
                   @endif
                 </td>
                 <td>
@@ -406,7 +447,7 @@
               </tr>
             </thead>
             <tbody>
-              @forelse($savedDocuments as $index => $document)
+              @forelse(($documentRows ?? $savedDocuments) as $index => $document)
               <tr>
                 <td class="text-center">
                   <strong>{{ $index + 1 }}</strong>
@@ -415,6 +456,9 @@
                   <div class="d-flex align-items-center">
                     <i class="icon-base ri ri-file-text-line text-primary me-2"></i>
                     {{ $document->document_title ?? ucfirst(str_replace('_', ' ', $document->document_type)) }}
+                    @if(isset($document->generated) && ! $document->generated)
+                      <span class="badge bg-label-warning ms-2">Not generated</span>
+                    @endif
                   </div>
                 </td>
                 <td class="text-center">
@@ -439,6 +483,7 @@
                   <div class="d-flex flex-column align-items-center">
                     <i class="icon-base ri ri-file-forbid-line text-muted mb-2" style="font-size: 2rem;"></i>
                     <p class="mb-0">No documents found for this loan</p>
+                    <p class="mb-0 small">Click <strong>Regenerate All</strong> to create them.</p>
                   </div>
                 </td>
               </tr>
@@ -535,6 +580,28 @@
             </form>
           </div>
           
+          <!-- Settlement Discount Section -->
+          <div class="col-md-12" id="foreclosureDiscountSection">
+            <h6 class="fw-bold mb-3">Settlement Discount</h6>
+            <div class="row g-3">
+              <div class="col-md-5">
+                <label class="form-label text-uppercase text-muted small fw-bold" for="foreclosureDiscountType">Discount Type</label>
+                <select class="form-select no-search" id="foreclosureDiscountType" name="discount_type">
+                  <option value="amount" selected>Amount (₹)</option>
+                  <option value="percentage">Percentage of interest (%)</option>
+                </select>
+              </div>
+              <div class="col-md-7">
+                <label class="form-label text-uppercase text-muted small fw-bold" for="foreclosureDiscountValue">Discount Value</label>
+                <div class="input-group">
+                  <span class="input-group-text" id="foreclosureDiscountPrefix">₹</span>
+                  <input type="number" class="form-control" id="foreclosureDiscountValue" name="discount_value" step="0.01" min="0" placeholder="0.00">
+                </div>
+                <small class="text-muted">Reduces the interest the client pays. Revenue records the discounted interest. Capped at the interest outstanding.</small>
+              </div>
+            </div>
+          </div>
+
           <!-- Amount Breakdown Section -->
           <div class="col-md-12" id="breakdownSection">
             <h6 class="fw-bold mb-3" id="breakdownTitle">Payment Breakdown</h6>
@@ -548,6 +615,10 @@
               <div class="d-flex justify-content-between mb-2">
                 <span class="text-muted" id="interestOutstandingLabel">Interest outstanding</span>
                 <span class="fw-medium text-info" id="interestOutstandingAmt">₹0.00</span>
+              </div>
+              <div class="d-flex justify-content-between mb-2 d-none" id="discountRow">
+                <span class="text-muted">Less: settlement discount</span>
+                <span class="fw-medium text-success" id="discountAmt">₹0</span>
               </div>
               <div class="d-flex justify-content-between mb-2">
                 <span class="text-muted">Foreclosure charges (<span id="chargesPercent"></span>%)</span>
@@ -563,7 +634,41 @@
                 <span class="fw-bold text-primary fs-5" id="totalForeclosureAmt"></span>
               </div>
             </div>
-            
+          </div>
+
+          <div class="col-md-12" id="foreclosureCollectionSection">
+            <h6 class="fw-bold mb-3">Collection Details</h6>
+            <div class="row g-3">
+              <div class="col-md-6">
+                <label class="form-label text-uppercase text-muted small fw-bold" for="foreclosurePaymentMethod">Payment Method <span class="text-danger">*</span></label>
+                <select class="form-select no-search" id="foreclosurePaymentMethod" name="payment_method">
+                  <option value="in_hand" selected>Cash in hand</option>
+                  <option value="upi">UPI / GPay / QR</option>
+                  <option value="bank_transfer">Bank Transfer</option>
+                </select>
+              </div>
+              <div class="col-md-6">
+                <label class="form-label text-uppercase text-muted small fw-bold" for="foreclosurePaymentReference">Payment Reference</label>
+                <input type="text" class="form-control" id="foreclosurePaymentReference" name="payment_reference" placeholder="e.g. UPI ID, Bank UTR">
+              </div>
+              <div class="col-12">
+                @include('admin.partials.bank-collection-fields', [
+                  'bankAccounts' => $bankAccounts ?? collect(),
+                  'bankContainerId' => 'foreclosureBankAccountContainer',
+                  'bankSelectId' => 'foreclosure_internal_bank_account_id',
+                  'bankSelectName' => 'internal_bank_account_id',
+                  'qrContainerId' => 'foreclosureQrCodeDisplayContainer',
+                  'qrBankNameId' => 'foreclosureQrBankName',
+                  'qrUpiIdId' => 'foreclosureQrUpiId',
+                  'qrImageWrapperId' => 'foreclosureQrCodeImageWrapper',
+                  'bankTransferContainerId' => 'foreclosureBankTransferDetailsContainer',
+                  'bankTransferContentId' => 'foreclosureBankTransferDetailsContent',
+                  'bankDetailsCardId' => 'foreclosureBankDetailsCard',
+                  'wrapperClass' => 'mb-0',
+                ])
+              </div>
+            </div>
+            <small class="text-muted d-block mt-2">Collected amount will be credited to the selected company bank / cash account. Foreclosure interest and charges are posted to Revenue.</small>
           </div>
         </div>
 
@@ -586,16 +691,16 @@
       <div class="modal-footer border-top p-3 d-flex justify-content-between">
         <!-- Left Side Buttons -->
         <div>
-          <button type="button" class="btn btn-danger d-none" id="overrideBtn">
+          <button type="button" class="btn btn-sm btn-danger d-none" id="overrideBtn">
             Override Foreclose
           </button>
         </div>
 
         <!-- Right Side Buttons -->
         <div>
-          <button type="button" class="btn btn-label-secondary" data-bs-dismiss="modal" id="closeBtn">Close</button>
-          <button type="button" class="btn btn-label-secondary d-none" id="cancelBtn">Cancel</button>
-          <button type="button" class="btn btn-danger d-none" id="confirmForeclosureBtn">
+          <button type="button" class="btn btn-sm btn-label-secondary" data-bs-dismiss="modal" id="closeBtn">Close</button>
+          <button type="button" class="btn btn-sm btn-label-secondary d-none" id="cancelBtn">Cancel</button>
+          <button type="button" class="btn btn-sm btn-danger d-none" id="confirmForeclosureBtn">
             <i class="icon-base ri ri-check-line me-1"></i>
             Confirm Foreclosure
           </button>
@@ -674,7 +779,6 @@
             <select class="form-select" id="prepaymentPaymentMethod">
               <option value="cash">Cash</option>
               <option value="bank_transfer">Bank Transfer</option>
-              <option value="cheque">Cheque</option>
               <option value="online">Online Payment</option>
               <option value="upi">UPI</option>
             </select>
@@ -684,7 +788,7 @@
           <div class="col-md-12">
             <label class="form-label text-uppercase text-muted small fw-bold">Payment Reference (Optional)</label>
             <input type="text" class="form-control" id="prepaymentReference" 
-                   placeholder="Transaction ID, Cheque Number, etc.">
+                   placeholder="Transaction ID, UTR, etc.">
           </div>
 
           <!-- Remarks -->
@@ -720,5 +824,100 @@
     </div>
   </div>
 </div>
+
+@if($isKandhuvatti && $loanAccount->outstanding_amount > 0)
+@php
+  $openLoanCycleService = app(\App\Services\OpenLoanCycleService::class);
+  $openLoanFreq = $openLoanCycleService->frequencyFor($loanAccount);
+  $freqTitle = match($openLoanFreq) {
+      'daily' => 'Daily',
+      'weekly' => 'Weekly',
+      default => 'Monthly',
+  };
+  $unitPlural = match($openLoanFreq) {
+      'daily' => 'days',
+      'weekly' => 'weeks',
+      default => 'months',
+  };
+  $defaultCycleCount = match($openLoanFreq) {
+      'daily' => 10,
+      'weekly' => 10,
+      default => 5,
+  };
+  $unitPlaceholder = match($openLoanFreq) {
+      'daily' => 'e.g., 10 days',
+      'weekly' => 'e.g., 10 weeks',
+      default => 'e.g., 5 months',
+  };
+  $approxCycleInterest = round($loanAccount->outstanding_amount * ((float)$loanAccount->interest_rate / 100));
+@endphp
+<!-- Generate Interest Cycles Modal (Open Loan Only) -->
+<div class="modal fade" id="generateCyclesModal" tabindex="-1" aria-labelledby="generateCyclesModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <form id="formGenerateOpenLoanCycles" action="{{ route('client-loan.generate-open-cycles', $loanAccount->id) }}" method="POST">
+        @csrf
+        <div class="modal-header">
+          <h5 class="modal-title" id="generateCyclesModalLabel">
+            <i class="ri-calendar-event-line me-2 text-primary"></i>Generate Interest Cycles
+          </h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <div class="alert alert-primary d-flex align-items-center mb-3 py-2 px-3" role="alert">
+            <i class="ri-information-line me-2 fs-5"></i>
+            <div class="small">
+              Generate upcoming interest cycles for this Open Loan so you can collect payments or make principal repayments in advance.
+            </div>
+          </div>
+
+          <div class="row g-2 mb-3">
+            <div class="col-6">
+              <div class="border rounded p-2 text-center bg-light">
+                <small class="text-muted d-block">Principal Balance</small>
+                <span class="fw-bold text-danger fs-6">₹{{ number_format($loanAccount->outstanding_amount, 2) }}</span>
+              </div>
+            </div>
+            <div class="col-6">
+              <div class="border rounded p-2 text-center bg-light">
+                <small class="text-muted d-block">Interest per Cycle</small>
+                <span class="fw-bold text-primary fs-6">₹{{ number_format($approxCycleInterest, 2) }}</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="mb-3">
+            <label for="generate_cycle_count" class="form-label fw-medium">
+              Number of {{ ucfirst($unitPlural) }} to Generate <span class="text-danger">*</span>
+            </label>
+            <div class="input-group">
+              <input type="number"
+                     class="form-control"
+                     id="generate_cycle_count"
+                     name="cycle_count"
+                     min="1"
+                     max="365"
+                     step="1"
+                     value="{{ $defaultCycleCount }}"
+                     placeholder="{{ $unitPlaceholder }}"
+                     required>
+              <span class="input-group-text">{{ ucfirst($unitPlural) }}</span>
+            </div>
+            <div class="form-text mt-1 text-muted">
+              Frequency: <span class="badge bg-label-info">{{ $freqTitle }}</span>. Enter number of {{ $unitPlural }} (e.g., {{ $defaultCycleCount }} {{ $unitPlural }}).
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="btnSubmitGenerateCycles">
+            <i class="ri-add-circle-line me-1"></i> Generate Cycles
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+@endif
 
 @endsection

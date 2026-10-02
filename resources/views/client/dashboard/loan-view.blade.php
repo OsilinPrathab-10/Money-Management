@@ -19,19 +19,43 @@
     <!-- Loan Info -->
     <div class="col-md-4">
         <div class="card h-100 shadow-sm border-0">
-            <div class="card-header bg-label-primary">
+            <div class="card-header bg-label-primary d-flex justify-content-between align-items-center">
                 <h5 class="mb-0">Loan Information</h5>
+                <span class="badge bg-primary text-uppercase">{{ $loanAccount->status }}</span>
             </div>
             <div class="card-body pt-5">
+                @php
+                    $totalPayable = (float) $loanAccount->total_payable;
+                    $paidAmount = (float) $loanAccount->paid_amount;
+                    $pct = $totalPayable > 0 ? min(100, round(($paidAmount / $totalPayable) * 100, 1)) : 0;
+                    $paidEmisCount = $loanAccount->emis->where('status', 'paid')->count();
+                    $totalEmisCount = $loanAccount->emis->count();
+                @endphp
+
+                <!-- Repayment Progress -->
+                <div class="mb-4 p-3 bg-light rounded">
+                    <div class="d-flex justify-content-between align-items-center mb-1">
+                        <span class="fw-semibold text-heading fs-7">Repayment Progress</span>
+                        <span class="fw-bold text-primary fs-7">{{ $pct }}%</span>
+                    </div>
+                    <div class="progress" style="height: 8px;">
+                        <div class="progress-bar bg-primary" role="progressbar" style="width: {{ $pct }}%" aria-valuenow="{{ $pct }}" aria-valuemin="0" aria-valuemax="100"></div>
+                    </div>
+                    <div class="d-flex justify-content-between text-muted fs-8 mt-2">
+                        <span>Paid: {{ $paidEmisCount }}/{{ $totalEmisCount }} EMIs</span>
+                        <span>₹{{ number_format($paidAmount, 2) }} / ₹{{ number_format($totalPayable, 2) }}</span>
+                    </div>
+                </div>
+
                 <div class="info-container">
                     <ul class="list-unstyled mb-0">
                         <li class="mb-4">
                             <span class="fw-medium text-heading me-2">Account Number:</span>
-                            <span>{{ $loanAccount->account_number }}</span>
+                            <span class="fw-bold">{{ $loanAccount->account_number }}</span>
                         </li>
                         <li class="mb-4">
                             <span class="fw-medium text-heading me-2">Loan Product:</span>
-                            <span>{{ optional($loanAccount->loanApplication->product)->loan_name }}</span>
+                            <span>{{ optional($loanAccount->loanApplication->product)->loan_name ?? 'N/A' }}</span>
                         </li>
                         <li class="mb-4">
                             <span class="fw-medium text-heading me-2">Loan Amount:</span>
@@ -120,6 +144,8 @@
                                     <span class="badge bg-label-warning">Paid</span>
                                 @elseif($emi->status == 'paid')
                                     <span class="badge bg-label-success">Paid</span>
+                                @elseif($emi->status == 'closed')
+                                    <span class="badge bg-label-secondary">Closed</span>
                                 @elseif($emi->status == 'overdue')
                                     <span class="badge bg-danger">Overdue</span>
                                 @elseif($emi->status == 'partial')

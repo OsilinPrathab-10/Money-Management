@@ -14,10 +14,18 @@
           </div>
 
         <div class="p-6">
-          <form id="formApplyLoan" class="row g-5">
+          <form id="formApplyLoan" class="row g-5" novalidate>
             @csrf
-            <input type="hidden" name="client_id" value="{{ $client->id }}">
+            <input type="hidden" name="client_id" id="apply_client_id_hidden" value="{{ $client->id }}">
             
+            <!-- Chit Fund Details Panel (auto-loaded for this client) -->
+            <div class="col-12" id="chitDetailsPanel" style="display: none;">
+              <div class="alert alert-info border d-flex align-items-start gap-2 mb-0 py-2 px-3">
+                <i class="ri-hand-coin-line ri-20px mt-1"></i>
+                <div id="chitSummaryText"></div>
+              </div>
+            </div>
+
             <!-- Loan Mode Toggle -->
             <div class="col-12" id="loan_mode_container">
               <div class="d-flex align-items-center justify-content-between p-3 border rounded-3 bg-light">
@@ -35,9 +43,31 @@
               </div>
             </div>
             
+            @php
+              $modalLoanTypes = collect();
+              if (isset($loanProducts) && $loanProducts->isNotEmpty()) {
+                  $loanTypeIds = $loanProducts->pluck('loan_type_id')->filter()->unique();
+                  $modalLoanTypes = \App\Models\LoanType::whereIn('id', $loanTypeIds)->orderBy('name')->get();
+              }
+              if ($modalLoanTypes->isEmpty()) {
+                  $modalLoanTypes = \App\Models\LoanType::where('status', 1)->orderBy('name')->get();
+              }
+            @endphp
+
+            <!-- Loan Type Selection -->
+            <div class="col-md-6">
+              <label class="form-label fw-medium" for="loan_type_filter">Select Loan Type</label>
+              <select id="loan_type_filter" class="form-select select2 loan-type-filter" data-placeholder="All Loan Types">
+                <option value="">All Loan Types</option>
+                @foreach($modalLoanTypes as $type)
+                  <option value="{{ $type->id }}">{{ $type->name }}</option>
+                @endforeach
+              </select>
+            </div>
+
             <!-- Loan Product Selection -->
-            <div class="col-12">
-              <label class="form-label" for="loan_product">Select Loan Product <span class="text-danger">*</span></label>
+            <div class="col-md-6">
+              <label class="form-label fw-medium" for="loan_product">Select Loan Product <span class="text-danger">*</span></label>
               <select id="loan_product" name="loan_code" class="form-select select2" required data-placeholder="Select Loan Product">
                 <option></option>
                 @foreach($loanProducts as $product)
@@ -52,8 +82,11 @@
                     } else {
                         $displayInterestType = ucfirst($product->interest_type ?? 'Flat');
                     }
+                    $typeName = optional($product->loanType)->name ?? '';
                   @endphp
                   <option value="{{ $product->loan_code }}" 
+                          data-loan-type-id="{{ $product->loan_type_id }}"
+                          data-loan-type-name="{{ $typeName }}"
                           data-min-amount="{{ $product->loan_amount_min }}" 
                           data-max-amount="{{ $product->loan_amount_max }}"
                           data-min-tenure="{{ $product->min_tenture }}"
@@ -61,7 +94,11 @@
                           data-rate="{{ $product->interest_rate }}"
                           data-term-unit="{{ $product->term_unit }}"
                           data-interest-type="{{ $product->interest_type ?? 'flat' }}">
-                    {{ $product->loan_name }} ({{ $product->interest_rate }}% - {{ $displayInterestType }})
+                    {{ $product->loan_name }}
+                    @if($typeName)
+                      [{{ $typeName }}]
+                    @endif
+                    ({{ (float) $product->interest_rate === 0.0 ? 'Free Loan · 0%' : $product->interest_rate . '%' }} - {{ $displayInterestType }})
                   </option>
                 @endforeach
               </select>
@@ -103,10 +140,10 @@
                  <span class="badge bg-label-primary" id="display_tenure">12 Months</span>
                </div>
                <div class="input-group mb-2">
-                 <input type="number" class="form-control form-control-sm" id="tenure_input" name="tenure" value="12" min="1" step="1">
+                 <input type="number" class="form-control form-control-sm" id="tenure_input" name="tenure" value="" min="1" step="1">
                  <span class="input-group-text small">months</span>
                </div>
-               <input type="range" class="form-range" id="tenure_slider" name="tenure" min="1" max="60" step="1">
+               <input type="range" class="form-range" id="tenure_slider" min="1" max="60" step="1">
                <div class="d-flex justify-content-between">
                  <small class="text-muted" id="min_tenure_label">1 m</small>
                  <small class="text-muted" id="max_tenure_label">60 m</small>
@@ -118,7 +155,7 @@
               <label class="form-label" for="emi_day" id="emi_day_label">Monthly EMI Date <span class="text-danger">*</span></label>
               <select id="emi_day" name="emi_day" class="form-select select2" required data-placeholder="Select Date">
                 <option value="" disabled selected>Select Date</option>
-                @for($i = 1; $i <= 28; $i++)
+                @for($i = 1; $i <= 31; $i++)
                   <option value="{{ $i }}">{{ $i }}{{ $i == 1 ? 'st' : ($i == 2 ? 'nd' : ($i == 3 ? 'rd' : 'th')) }} of month</option>
                 @endfor
               </select>
@@ -147,45 +184,6 @@
               </div>
             </div>
 
-            <div class="col-md-4">
-              <label class="form-label" for="payment_method">Payment Method <span class="text-danger">*</span></label>
-              @php
-                $defaultPaymentMethods = [
-                  ['method' => 'manual_payment', 'name' => 'Manual Payment'],
-                  // ['method' => 'autopay_enach', 'name' => 'E-NACH (Auto-debit)'],
-                ];
-                $paymentMethods = (collect($activePaymentMethods ?? [])->isEmpty() ? collect($defaultPaymentMethods) : collect($activePaymentMethods))
-                    ->reject(fn($m) => (is_array($m) ? $m['method'] : $m->method) === 'autopay_enach');
-              @endphp
-              <select class="form-select select2" id="payment_method" name="payment_method" required data-placeholder="Select Method">
-                <option></option>
-                @foreach($paymentMethods as $method)
-                  @php
-                    $methodKey = is_array($method) ? $method['method'] : $method->method;
-                    $methodLabel = is_array($method) ? $method['name'] : $method->name;
-                  @endphp
-                  <option value="{{ $methodKey === 'manual_payment' ? 'manual' : ($methodKey === 'autopay_enach' ? 'e-nach' : $methodKey) }}">
-                    {{ $methodLabel }}
-                  </option>
-                @endforeach
-              </select>
-            </div>
-
-
-            <div class="col-md-4" id="gateway_wrapper" style="display: none;">
-              <label class="form-label" for="payment_gateway">Select Payment Gateway <span class="text-danger">*</span></label>
-              <select id="payment_gateway" name="payment_gateway" class="form-select select2" data-placeholder="Select Gateway">
-                <option></option>
-                @forelse($activeGateways ?? [] as $gateway)
-                  <option value="{{ $gateway->gateway === 'razor-pay' ? 'razorpay' : ($gateway->gateway === 'cash-free' ? 'cashfree' : ($gateway->gateway === 'pay-U' ? 'payu' : $gateway->gateway)) }}">
-                    {{ $gateway->name }}
-                  </option>
-                @empty
-                  <option value="" disabled>No active payment gateways configured</option>
-                @endforelse
-              </select>
-            </div>
-
             <!-- Summary / EMI Preview Card -->
             <div class="col-12">
               <div class="card bg-label-dark border-0 shadow-none">
@@ -209,7 +207,7 @@
             </div>
 
             <div class="col-12 text-center mt-6">
-              <button type="submit" class="btn btn-primary me-3">Submit Application</button>
+              <button type="submit" class="btn btn-primary me-3" formnovalidate>Submit Application</button>
               <button type="reset" class="btn btn-outline-secondary" data-bs-dismiss="modal" aria-label="Close">Cancel</button>
             </div>
           </form>

@@ -157,8 +157,9 @@ class TemplateCustomizer {
         this._setCookie(cookieName, color, 365)
       }
 
-      // Save to settings
+      // Save to settings (both keys — _loadSettings reads Color)
       this._setSetting('PrimaryColor', color)
+      this._setSetting('Color', color)
     }
 
     // Update color picker UI
@@ -548,9 +549,13 @@ class TemplateCustomizer {
   }
 
   _loadSettings() {
+    const layoutName = this._getLayoutName()
+    const isAdmin = !layoutName.includes('front')
+    const cookieColorName = isAdmin ? 'admin-primaryColor' : 'front-primaryColor'
+
     // Get settings
     const rtlOption = this._getSetting('Rtl')
-    const color = this._getSetting('Color')
+    const color = this._getSetting('Color') || this._getSetting('PrimaryColor') || this._getCookie(cookieColorName)
     const theme = this._getSetting('Theme')
     const skin = this._getSetting('Skin')
     const semiDark = this._getSetting('SemiDark') // Default value will be set from main.js
@@ -560,9 +565,6 @@ class TemplateCustomizer {
     const navbarOption = this._getSetting('FixedNavbarOption')
     const fixedFooter = this._getSetting('FixedFooter')
     const layoutType = this._getSetting('HeaderType')
-
-    const layoutName = this._getLayoutName()
-    const isAdmin = !layoutName.includes('front')
 
     const modeCookieName = isAdmin ? 'admin-mode' : 'front-mode'
     const colorPrefCookieName = isAdmin ? 'admin-colorPref' : 'front-colorPref'

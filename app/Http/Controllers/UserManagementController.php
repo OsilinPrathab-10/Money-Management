@@ -20,9 +20,9 @@ class UserManagementController extends Controller
     public function index(): View
     {
         // Get user statistics
-        $totalUsers = User::role(['Admin', 'Agent', 'Staff'])->count();
-        $activeUsers = User::role(['Admin', 'Agent', 'Staff'])->where('status', 'active')->count();
-        $inactiveUsers = User::role(['Admin', 'Agent', 'Staff'])->where('status', 'inactive')->count();
+        $totalUsers = User::whereHas('roles', fn ($q) => $q->whereIn('name', ['Admin', 'Agent', 'Staff', 'admin', 'agent', 'staff']))->count();
+        $activeUsers = User::whereHas('roles', fn ($q) => $q->whereIn('name', ['Admin', 'Agent', 'Staff', 'admin', 'agent', 'staff']))->where('status', 'active')->count();
+        $inactiveUsers = User::whereHas('roles', fn ($q) => $q->whereIn('name', ['Admin', 'Agent', 'Staff', 'admin', 'agent', 'staff']))->where('status', 'inactive')->count();
         $roles = Role::whereIn('name', ['Admin', 'Agent', 'Staff'])->get();
         $branches = Branch::all();
         $locations = Location::orderBy('name')->get();
@@ -49,7 +49,7 @@ class UserManagementController extends Controller
             4 => 'status',
         ];
 
-        $totalData = User::role(['Admin', 'Agent', 'Staff'])->count();
+        $totalData = User::whereHas('roles', fn ($q) => $q->whereIn('name', ['Admin', 'Agent', 'Staff', 'admin', 'agent', 'staff']))->count();
         $totalFiltered = $totalData;
 
         $limit = $request->input('length');
@@ -57,7 +57,7 @@ class UserManagementController extends Controller
         $order = $columns[$request->input('order.0.column')] ?? 'id';
         $dir = $request->input('order.0.dir') ?? 'desc';
 
-        $query = User::role(['Admin', 'Agent', 'Staff']);
+        $query = User::whereHas('roles', fn ($q) => $q->whereIn('name', ['Admin', 'Agent', 'Staff', 'admin', 'agent', 'staff']));
 
         // Search handling
         if (!empty($request->input('search.value'))) {
@@ -170,7 +170,6 @@ class UserManagementController extends Controller
                 'email' => $validated['email'],
                 'phone' => $validated['phone'],
                 'password' => bcrypt($validated['password']),
-                'plain_password' => $validated['password'],
                 'status' => 'active',
             ]);
 
@@ -242,13 +241,29 @@ class UserManagementController extends Controller
             
             if (!empty($validated['password'])) {
                 $user->password = bcrypt($validated['password']);
-                $user->plain_password = $validated['password'];
             }
             
             $user->save();
 
             if (!empty($validated['role'])) {
+                $previousWasAgent = $user->hasRole('Agent');
                 $user->syncRoles([$validated['role']]);
+
+                if ($validated['role'] === 'Agent') {
+                    app(\App\Services\AgentProfileService::class)->ensureAgentProfile($user);
+                } elseif ($previousWasAgent && $validated['role'] !== 'Agent') {
+                    $agent = \App\Models\Agent::where('user_id', $user->id)->first();
+                    if ($agent) {
+                        $service = app(\App\Services\AgentProfileService::class);
+                        if ($service->assignedClientCount($agent) > 0) {
+                            return response()->json([
+                                'success' => false,
+                                'message' => 'This user is an agent with assigned clients. Change the role from Staff Management so clients can be handed over to another agent.'
+                            ], 422);
+                        }
+                        $service->deactivateAgentProfile($agent);
+                    }
+                }
             }
 
             return response()->json([
@@ -334,7 +349,24 @@ class UserManagementController extends Controller
             }
 
             // Sync user roles (replaces existing roles)
+            $previousWasAgent = $user->hasRole('Agent');
             $user->syncRoles([$roleName]);
+
+            if ($roleName === 'Agent') {
+                app(\App\Services\AgentProfileService::class)->ensureAgentProfile($user);
+            } elseif ($previousWasAgent && $roleName !== 'Agent') {
+                $agent = \App\Models\Agent::where('user_id', $user->id)->first();
+                if ($agent) {
+                    $service = app(\App\Services\AgentProfileService::class);
+                    if ($service->assignedClientCount($agent) > 0) {
+                        return response()->json([
+                            'success' => false,
+                            'message' => 'This user is an agent with assigned clients. Change the role from Staff Management so clients can be handed over to another agent.'
+                        ], 422);
+                    }
+                    $service->deactivateAgentProfile($agent);
+                }
+            }
 
             return response()->json([
                 'success' => true,

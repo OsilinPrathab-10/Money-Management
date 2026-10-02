@@ -7,6 +7,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use App\Models\ClientLoanDocument;
 use App\Models\LoanAccount;
+use App\Support\CollectedDocuments;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\View;
 use Mpdf\Mpdf;
@@ -20,17 +21,45 @@ class ClientDocumentControllerApi extends Controller
         $user = Auth::user();
         $clientId = $user->client->id;
 
-        $documents = ClientLoanDocument::with('loanAccount')
+        $loanAccount = LoanAccount::with(['loanApplication.disbursementDetail', 'clientLoanDocuments'])
+            ->where('id', $loanAccountId)
             ->where('client_id', $clientId)
-            ->where('loan_account_id', $loanAccountId)
-            ->get()
+            ->first();
+
+        if (! $loanAccount) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Loan account not found.',
+            ], 404);
+        }
+
+        $generated = $loanAccount->clientLoanDocuments
             ->filter(fn ($doc) => $doc->isVisible())
             ->values();
+
+        $collected = CollectedDocuments::forLoanDisbursement(
+            $loanAccount->loanApplication?->disbursementDetail,
+            $loanAccount->loanApplication
+        );
 
         return response()->json([
             'success' => true,
             'message' => 'Documents fetched successfully.',
-            'data' => $documents,
+            'data' => $generated,
+            'disbursement_documents' => $collected,
+            'documents' => array_values(array_merge(
+                $collected,
+                $generated->map(function ($doc) {
+                    return [
+                        'type' => $doc->document_type,
+                        'title' => $doc->document_title ?: ucfirst(str_replace('_', ' ', (string) $doc->document_type)),
+                        'file_name' => $doc->file_name,
+                        'file_path' => $doc->file_path,
+                        'file_url' => $doc->file_url,
+                        'url' => $doc->file_url,
+                    ];
+                })->all()
+            )),
         ], 200);
     }
 

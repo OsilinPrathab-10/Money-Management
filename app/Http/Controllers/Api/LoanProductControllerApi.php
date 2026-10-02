@@ -11,18 +11,32 @@ class LoanProductControllerApi extends Controller
 {
     public function index(Request $request)
     {
-        $loans = LoanProduct::with('loanType')
+        $query = LoanProduct::with('loanType')
             ->where(function ($q) {
                 // Support both enum ('active') and legacy boolean/integer status columns
                 $q->where('status', 'active')->orWhere('status', 1);
-            })
-            ->orderByDesc('id')
-            ->get();
+            });
+
+        if ($request->filled('loan_type_id')) {
+            $query->where('loan_type_id', $request->input('loan_type_id'));
+        }
+
+        if ($request->filled('loan_code')) {
+            $query->where('loan_code', $request->input('loan_code'));
+        }
+
+        $loans = $query->orderBy('loan_name')->get();
+
+        $loanModes = [
+            ['value' => 'emi', 'label' => 'EMI', 'name' => 'Standard EMI', 'description' => 'Standard EMI (Principal + Interest)'],
+            ['value' => 'interest_only', 'label' => 'Open Loan', 'name' => 'Open Loan', 'description' => 'Open Loan / Kandhuvatti (Monthly Interest Only)'],
+        ];
 
         return response()->json([
             'status' => true,
             'message' => 'Loan products fetched successfully.',
             'data' => LoanProductResource::collection($loans),
+            'loan_modes' => $loanModes,
         ]);
     }
 

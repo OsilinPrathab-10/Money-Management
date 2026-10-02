@@ -439,23 +439,24 @@ class JournalService
      */
     public function createRevenueEntryJournal($revenueEntry)
     {
-        // Get the specific bank account's GL account
-        $bankGLAccount = $revenueEntry->bankAccount->glAccount;
-        if (!$bankGLAccount) {
-            throw new \Exception("Bank account must have a GL account assigned");
+        // Operational cashbook does not require GL — skip journal when not linked.
+        $bankAccount = $revenueEntry->bankAccount;
+        $bankGLAccount = $bankAccount?->glAccount ?? $bankAccount?->gl_account ?? null;
+        if (! $bankGLAccount) {
+            return null;
         }
 
-        // Use selected chart of account
+        // Use selected chart of account (optional after GL UI removal)
         $revenueAccount = $revenueEntry->chartOfAccount;
-        if (!$revenueAccount) {
-            throw new \Exception("Revenue account not found");
+        if (! $revenueAccount) {
+            return null;
         }
 
         // Validate amounts balance
         $this->validateBalance($revenueEntry->amount, $revenueEntry->amount);
 
         $journalEntry = JournalEntry::create([
-            'journal_date' => $revenueEntry->entry_date ?? now(),
+            'journal_date' => $revenueEntry->revenue_date ?? $revenueEntry->entry_date ?? now(),
             'entry_type' => 'automatic',
             'reference_type' => 'revenue',
             'reference_id' => $revenueEntry->id,
@@ -492,7 +493,7 @@ class JournalService
         try {
             UpdateBudgetSpending::dispatch($journalEntry);
         } catch (\Exception $e) {
-            return back()->with('error', $e->getMessage());
+            // Budget update is optional for operational posting
         }
 
         $this->updateAccountBalances($journalEntry);
@@ -505,23 +506,24 @@ class JournalService
      */
     public function createExpenseEntryJournal($expenseEntry)
     {
-        // Get the specific bank account's GL account
-        $bankGLAccount = $expenseEntry->bankAccount->glAccount;
-        if (!$bankGLAccount) {
-            throw new \Exception("Bank account must have a GL account assigned");
+        // Operational cashbook does not require GL — skip journal when not linked.
+        $bankAccount = $expenseEntry->bankAccount;
+        $bankGLAccount = $bankAccount?->glAccount ?? $bankAccount?->gl_account ?? null;
+        if (! $bankGLAccount) {
+            return null;
         }
 
-        // Use selected chart of account
+        // Use selected chart of account (optional after GL UI removal)
         $expenseAccount = $expenseEntry->chartOfAccount;
-        if (!$expenseAccount) {
-            throw new \Exception("Expense account not found");
+        if (! $expenseAccount) {
+            return null;
         }
 
         // Validate amounts balance
         $this->validateBalance($expenseEntry->amount, $expenseEntry->amount);
 
         $journalEntry = JournalEntry::create([
-            'journal_date' => $expenseEntry->entry_date ?? now(),
+            'journal_date' => $expenseEntry->expense_date ?? $expenseEntry->entry_date ?? now(),
             'entry_type' => 'automatic',
             'reference_type' => 'expense',
             'reference_id' => $expenseEntry->id,
@@ -558,7 +560,7 @@ class JournalService
         try {
             UpdateBudgetSpending::dispatch($journalEntry);
         } catch (\Exception $e) {
-            return back()->with('error', $e->getMessage());
+            // Budget update is optional for operational posting
         }
 
         $this->updateAccountBalances($journalEntry);
@@ -835,15 +837,26 @@ class JournalService
         // Get the specific bank accounts' GL accounts
         $fromBankGLAccount = $bankTransfer->fromAccount->glAccount;
         if (!$fromBankGLAccount) {
-            throw new \Exception( __("Source bank account must have a GL account assigned"));
+            $fromBankGLAccount = $bankTransfer->fromAccount->ensureGLAccount();
+            if (!$fromBankGLAccount) {
+                throw new \Exception( __("Source bank account must have a GL account assigned"));
+            }
         }
 
         $toBankGLAccount = $bankTransfer->toAccount->glAccount;
         if (!$toBankGLAccount) {
-            throw new \Exception( __("Destination bank account must have a GL account assigned"));
+            $toBankGLAccount = $bankTransfer->toAccount->ensureGLAccount();
+            if (!$toBankGLAccount) {
+                throw new \Exception( __("Destination bank account must have a GL account assigned"));
+            }
         }
 
         $bankChargesAccount = ChartOfAccount::where('account_code', '5510')->where('created_by', creatorId())->first();
+        if (!$bankChargesAccount && $bankTransfer->transfer_charges > 0) {
+            $bankChargesAccount = ChartOfAccount::where('account_name', 'like', '%Bank Charge%')
+                ->where('created_by', creatorId())
+                ->first();
+        }
 
         $totalDebit = $bankTransfer->transfer_amount + $bankTransfer->transfer_charges;
         $totalCredit = $bankTransfer->transfer_amount + $bankTransfer->transfer_charges;
@@ -879,7 +892,7 @@ class JournalService
             JournalEntryItem::create([
                 'journal_entry_id' => $journalEntry->id,
                 'account_id' => $bankChargesAccount->id,
-                'description' => 'Bank transfer charges',
+                'description' => 'Bank transfer charges for #' . $bankTransfer->transfer_number,
                 'debit_amount' => $bankTransfer->transfer_charges,
                 'credit_amount' => 0,
                 'creator_id' => Auth::id(),

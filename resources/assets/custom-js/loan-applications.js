@@ -14,7 +14,8 @@ $(function () {
     baseUrl += '/';
   }
 
-  if (isDarkStyle) {
+  const isDark = (typeof isDarkStyle !== 'undefined' && isDarkStyle) || (window.isDarkStyle || false);
+  if (isDark && config.colors_dark) {
     borderColor = config.colors_dark.borderColor;
     bodyBg = config.colors_dark.bodyBg;
     headingColor = config.colors_dark.headingColor;
@@ -26,6 +27,13 @@ $(function () {
 
   // Variable declaration for table
   var dt_loan_applications_table = $('.datatables-loan-applications');
+
+  // Apply dashboard / deep-link status filter before DataTable loads
+  const urlParamsEarly = new URLSearchParams(window.location.search);
+  const urlStatus = urlParamsEarly.get('status');
+  if (urlStatus && ['pending', 'approved', 'process', 'rejected', 'disbursed'].includes(urlStatus)) {
+    $('#statusFilter').val(urlStatus);
+  }
 
   // Loan Applications datatable
   if (dt_loan_applications_table.length) {
@@ -41,6 +49,8 @@ $(function () {
           d.from_date = $('#fromDate').val();
           d.to_date = $('#toDate').val();
           d.status = $('#statusFilter').val();
+          d.loan_mode = $('#loanModeFilter').val();
+          d.loan_type_id = $('#loanTypeFilter').val();
         }
       },
       columns: [
@@ -105,6 +115,13 @@ $(function () {
             var $status_label = full['status_label'];
             var $status_color = full['status_color'];
             return '<span class="badge rounded-pill bg-label-' + $status_color + '">' + $status_label + '</span>';
+          }
+        },
+        {
+          data: 'applied_at',
+          title: 'Applied On',
+          render: function (data) {
+            return '<span class="fw-medium">' + (data || 'N/A') + '</span>';
           }
         },
         {
@@ -176,8 +193,8 @@ $(function () {
       ]
     });
 
-    // Connect status/date filters to DataTable
-    $('#statusFilter, #fromDate, #toDate').on('change', function () {
+    // Connect status/date/mode/type filters to DataTable
+    $('#statusFilter, #loanModeFilter, #loanTypeFilter, #fromDate, #toDate').on('change', function () {
       dt_loan_applications.ajax.reload();
     });
 
@@ -260,17 +277,20 @@ $(function () {
 
       let placeholder = $this.attr('placeholder') || $this.data('placeholder') || 'Select Option';
       if ($this.attr('id') === 'apply_client_id') placeholder = 'Select Verified Client';
+      if ($this.attr('id') === 'loan_type_filter' || $this.hasClass('loan-type-filter')) placeholder = 'All Loan Types';
       if ($this.attr('id') === 'loan_product') placeholder = 'Select Loan Product';
       if ($this.attr('id') === 'payment_gateway') placeholder = 'Select Gateway';
       
       $this.select2({
-        dropdownParent: parent.find('.modal-content'), // Attach to modal content for better scrolling
+        dropdownParent: parent.find('.modal-content'),
         width: '100%',
         placeholder: placeholder,
         allowClear: true,
         closeOnSelect: true
       }).on('select2:select', function () {
         $(this).select2('close');
+      }).on('select2:clear', function () {
+        $(this).trigger('change');
       });
     });
 
@@ -309,13 +329,16 @@ $(function () {
     }
 
     // Eligibility Check on Client Selection
-    const submitBtn = formApplyLoan.find('button[type="submit"]');
-    const originalSubmitHtml = submitBtn.html();
-
-    $('#apply_client_id').on('change', function () {
+    $(document).on('change', '#apply_client_id', function () {
       const clientId = $(this).val();
+      const currentForm = $(this).closest('form');
+      const submitBtn = currentForm.find('button[type="submit"]');
+      const originalSubmitHtml = submitBtn.data('orig-html') || submitBtn.html();
+      submitBtn.data('orig-html', originalSubmitHtml);
+
       // Remove any previous eligibility alert
-      $('#eligibilityAlert').remove();
+      currentForm.find('#eligibilityAlert').remove();
+      currentForm.find('#chitDetailsPanel').hide();
       submitBtn.prop('disabled', false).html(originalSubmitHtml).removeAttr('title');
 
       if (!clientId) return;
@@ -329,24 +352,52 @@ $(function () {
         },
         success: function (res) {
           if (!res.eligible) {
-            // Show warning alert inside modal
             const alertHtml = `<div id="eligibilityAlert" class="alert alert-warning d-flex align-items-center gap-2 py-2 px-3 mb-0 mt-3" role="alert">
               <i class="ri-error-warning-line ri-20px"></i>
               <span>${res.message}</span>
             </div>`;
-            $('#apply_client_id').closest('.col-12').append(alertHtml);
+            currentForm.find('#apply_client_id').closest('.col-12').append(alertHtml);
 
-            // Disable submit button with tooltip
             submitBtn.prop('disabled', true)
               .html('<i class="ri-lock-line me-1"></i> Cannot Apply')
               .attr('title', res.message);
+          } else {
+            submitBtn.prop('disabled', false).html(originalSubmitHtml).removeAttr('title');
+          }
+
+          if (res.chit_details && res.chit_details.has_chit) {
+            renderChitDetails(res.chit_details);
           }
         },
         error: function () {
-          // Silently fail — the backend guard will still block submission
+          // Silently fail
         }
       });
     });
+
+    function renderChitDetails(chit) {
+      const fmt = (v) => '₹' + Number(v || 0).toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+
+      let html = '<div><strong>Client has ' + chit.total_groups + ' chit ' + (chit.total_groups === 1 ? 'group' : 'groups') + '</strong>';
+      html += ' — Total: <strong class="text-primary">' + fmt(chit.total_chit_value) + '</strong>';
+      html += ', Monthly: <strong>' + fmt(chit.total_monthly_installment) + '</strong>';
+      if (chit.total_overdue > 0) {
+        html += ', Overdue: <strong class="text-danger">' + fmt(chit.total_overdue) + '</strong>';
+      }
+      html += '</div>';
+
+      if (chit.groups && chit.groups.length) {
+        html += '<div class="mt-1" style="font-size: 0.82rem;">';
+        chit.groups.forEach(function (g, i) {
+          if (i > 0) html += ' &nbsp;|&nbsp; ';
+          html += '<span class="fw-semibold">' + g.group_code + '</span> <span class="text-muted">(' + fmt(g.chit_value) + ')</span>';
+        });
+        html += '</div>';
+      }
+
+      $('#chitSummaryText').html(html);
+      $('#chitDetailsPanel').slideDown(200);
+    }
     
     const productSelect = $('#loan_product');
     const amountInput = $('#loan_amount_input');
@@ -393,11 +444,88 @@ $(function () {
       updateEmiPreview(form);
     });
 
+    // Handle Loan Type Filter Change - Dynamically filters loan products
+    $(document).on('change', '.loan-type-filter, #loan_type_filter', function () {
+      const form = $(this).closest('form');
+      const selectedTypeId = String($(this).val() || '').trim();
+      const productSelect = form.find('#loan_product');
+      if (!productSelect.length) return;
+
+      // Cache all original options on first interaction
+      let allOptions = productSelect.data('all-product-options');
+      if (!allOptions || !allOptions.length) {
+        allOptions = productSelect.find('option').clone();
+        productSelect.data('all-product-options', allOptions);
+      }
+
+      const currentVal = productSelect.val();
+      productSelect.empty();
+      // Add empty placeholder
+      productSelect.append($('<option></option>'));
+
+      let matchingVal = null;
+      let matchingCount = 0;
+      let firstMatchingVal = null;
+
+      allOptions.each(function () {
+        const opt = $(this);
+        const optVal = opt.val();
+        if (!optVal) return;
+
+        const optTypeId = String(opt.data('loan-type-id') ?? '').trim();
+        if (!selectedTypeId || selectedTypeId === 'all' || optTypeId === selectedTypeId) {
+          productSelect.append(opt.clone());
+          matchingCount++;
+          if (!firstMatchingVal) {
+            firstMatchingVal = optVal;
+          }
+          if (optVal === currentVal) {
+            matchingVal = currentVal;
+          }
+        }
+      });
+
+      // Keep previous value if still valid; otherwise reset
+      if (matchingVal) {
+        productSelect.val(matchingVal);
+      } else {
+        productSelect.val('');
+        productSelect.trigger('change');
+      }
+
+      if (productSelect.hasClass('select2-hidden-accessible')) {
+        productSelect.trigger('change.select2');
+      }
+    });
+
     // Handle Product Change - Scoped to form
     $(document).on('change', '#loan_product', function () {
       const form = $(this).closest('form');
       const selected = $(this).find(':selected');
-      if (!selected.val()) return;
+
+      if (!selected.val()) {
+        form.find('#loan_amount_input').val('');
+        form.find('#loan_amount_slider').val(0);
+        form.find('#amount_range_info').text('Select a product first');
+        form.find('#min_amount_label').text('Min: ₹0');
+        form.find('#max_amount_label').text('Max: ₹0');
+        form.find('#preview_emi').text('₹0.00');
+        form.find('#preview_interest').text('₹0.00');
+        form.find('#preview_total').text('₹0.00');
+        return;
+      }
+
+      // Sync Loan Type filter if a product is picked directly
+      const productTypeId = selected.data('loan-type-id');
+      if (productTypeId) {
+        const typeFilter = form.find('.loan-type-filter, #loan_type_filter');
+        if (typeFilter.length && String(typeFilter.val() || '') !== String(productTypeId)) {
+          typeFilter.val(String(productTypeId));
+          if (typeFilter.hasClass('select2-hidden-accessible')) {
+            typeFilter.trigger('change.select2');
+          }
+        }
+      }
 
       const interestType = selected.data('interest-type') || 'flat';
       const loanModeContainer = form.find('#loan_mode_container');
@@ -429,10 +557,12 @@ $(function () {
 
       const tenInput = form.find('#tenure_input');
       const tenSlider = form.find('#tenure_slider');
-      tenInput.attr({ min: minTen, max: maxTen }).val(minTen);
-      tenSlider.attr({ min: minTen, max: maxTen }).val(minTen);
-      form.find('#min_tenure_label').text(`${minTen} ${termUnit === 'weeks' ? 'w' : (termUnit === 'days' ? 'd' : 'm')}`);
-      form.find('#max_tenure_label').text(`${maxTen} ${termUnit === 'weeks' ? 'w' : (termUnit === 'days' ? 'd' : 'm')}`);
+      const safeMinTen = Math.max(1, minTen);
+      const safeMaxTen = Math.max(safeMinTen, maxTen);
+      tenInput.attr({ min: safeMinTen, max: safeMaxTen }).val(safeMinTen);
+      tenSlider.attr({ min: safeMinTen, max: safeMaxTen }).val(safeMinTen);
+      form.find('#min_tenure_label').text(`${safeMinTen} ${termUnit === 'weeks' ? 'w' : (termUnit === 'days' ? 'd' : 'm')}`);
+      form.find('#max_tenure_label').text(`${safeMaxTen} ${termUnit === 'weeks' ? 'w' : (termUnit === 'days' ? 'd' : 'm')}`);
       
       // Update unit labels
       form.find('.input-group-text.small').text(termUnit);
@@ -444,19 +574,22 @@ $(function () {
       const freqValue = termUnit === 'days' ? 'daily' : (termUnit === 'weeks' ? 'weekly' : 'monthly');
       form.find('#repayment_frequency').val(freqValue).trigger('change');
 
-      // Set initial slider range based on product, but default monthly to 60 if not specified
-      let finalMaxTen = maxTen;
-      if (freqValue === 'monthly' && maxTen > 60) finalMaxTen = 60;
+      // Set initial slider range based on product, ensuring min never exceeds max
+      let finalMaxTen = safeMaxTen;
+      if (freqValue === 'monthly' && maxTen > 60) {
+        finalMaxTen = Math.max(safeMinTen, 60);
+      }
+      finalMaxTen = Math.max(safeMinTen, finalMaxTen);
       
-      tenSlider.attr({ min: minTen, max: finalMaxTen }).val(minTen);
-      tenInput.attr({ min: minTen, max: finalMaxTen }).val(minTen);
+      tenSlider.attr({ min: safeMinTen, max: finalMaxTen });
+      tenInput.attr({ min: safeMinTen, max: finalMaxTen });
 
       // Update UI Info
       form.find('#amount_range_info').text(`Min: ${formatRupeeLabel(minAmt)} | Max: ${formatRupeeLabel(maxAmt)}`).show();
       form.find('#min_amount_label').text(`Min: ${formatRupeeLabel(minAmt)}`).show();
       form.find('#max_amount_label').text(`Max: ${formatRupeeLabel(maxAmt)}`).show();
       form.find('#min_tenure_label').text(`${minTen} ${termUnit}`).show();
-      form.find('#max_tenure_label').text(`${maxTen} ${termUnit}`).show();
+      form.find('#max_tenure_label').text(`${finalMaxTen} ${termUnit}`).show();
       
       // Update Tenure Labels
       form.find('label[for="tenure"]').text(`Tenure (${termUnit.charAt(0).toUpperCase() + termUnit.slice(1)})`);
@@ -521,23 +654,39 @@ $(function () {
       if (frequency === 'daily') maxLimit = 365;
       else if (frequency === 'weekly') maxLimit = 104;
       
-      // If product has a specific max, respect it but cap at frequency limit if reasonable
-      const productMax = parseInt(form.find('#loan_product :selected').data('max-tenure')) || 0;
-      const finalMax = productMax > 0 ? productMax : maxLimit;
+      // If product has a specific min/max, respect it and guarantee min <= max
+      const productSelected = form.find('#loan_product :selected');
+      const productMin = parseInt(productSelected.data('min-tenure')) || 1;
+      const productMax = parseInt(productSelected.data('max-tenure')) || 0;
+      
+      let finalMin = Math.max(1, productMin);
+      let finalMax = productMax > 0 ? productMax : maxLimit;
+      if (finalMax < finalMin) {
+        finalMax = finalMin;
+      }
 
       const tenureSliderLocal = form.find('#tenure_slider');
       const tenureInputLocal = form.find('#tenure_input');
 
-      tenureSliderLocal.attr('max', finalMax);
-      tenureInputLocal.attr('max', finalMax);
+      tenureSliderLocal.attr({ min: finalMin, max: finalMax });
+      tenureInputLocal.attr({ min: finalMin, max: finalMax });
+
+      // Clamp current value to [finalMin, finalMax]
+      let currentVal = parseInt(tenureInputLocal.val(), 10);
+      if (isNaN(currentVal) || currentVal < finalMin) {
+        currentVal = finalMin;
+      } else if (currentVal > finalMax) {
+        currentVal = finalMax;
+      }
+      tenureInputLocal.val(currentVal);
+      tenureSliderLocal.val(currentVal);
       
       form.find('label[for="tenure"]').html(`${tenureLabel} <span class="text-danger">*</span>`);
       form.find('.input-group-text.small').text(unitLabel.toLowerCase());
       tenureInputLocal.attr('placeholder', tenurePlaceholder);
       
       // Update Range Info Labels to match new unit
-      const currentMin = tenureSliderLocal.attr('min') || 1;
-      form.find('#min_tenure_label').text(`${currentMin} ${unitLabel.charAt(0).toLowerCase()}`);
+      form.find('#min_tenure_label').text(`${finalMin} ${unitLabel.charAt(0).toLowerCase()}`);
       form.find('#max_tenure_label').text(`${finalMax} ${unitLabel.charAt(0).toLowerCase()}`);
       
       syncTenureDisplay(form);
@@ -548,12 +697,31 @@ $(function () {
       updateEmiPreview(form);
     });
 
+    function parseFormDate(value) {
+      if (!value) return null;
+      const raw = String(value).trim();
+      const dmy = raw.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+      let parsed = null;
+      if (dmy) {
+        parsed = new Date(parseInt(dmy[3], 10), parseInt(dmy[2], 10) - 1, parseInt(dmy[1], 10));
+      } else {
+        parsed = new Date(raw);
+      }
+      return isNaN(parsed.getTime()) ? null : parsed;
+    }
+
+    function daysInMonthForForm(form, dateOverride) {
+      const date = dateOverride || parseFormDate(form.find('#emi_start_date').val()) || new Date();
+      return new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
+    }
+
     // Refactor EmiDay options to be reusable
     function updateEmiDayOptions(frequency, form) {
       if (!form || !form.length) return;
       const emiDaySelect = form.find('#emi_day');
       const emiDayWrapper = form.find('#emi_day_wrapper');
       const emiDayLabel = form.find('#emi_day_label');
+      const previousValue = emiDaySelect.val();
 
       // If Select2 is already applied, temporarily destroy
       const emiDayHadSelect2 = emiDaySelect.hasClass('select2-hidden-accessible');
@@ -573,6 +741,9 @@ $(function () {
         days.forEach((day, index) => {
           emiDaySelect.append(`<option value="${index + 1}">${day}</option>`);
         });
+        if (previousValue && parseInt(previousValue, 10) >= 1 && parseInt(previousValue, 10) <= 7) {
+          emiDaySelect.val(String(parseInt(previousValue, 10)));
+        }
       } else if (frequency === 'daily') {
         emiDayWrapper.hide();
         emiDaySelect.prop('required', false);
@@ -582,10 +753,14 @@ $(function () {
       } else {
         emiDayWrapper.show();
         if (emiDayLabel.length) emiDayLabel.html('EMI Date <span class="text-danger">*</span>');
+        const maxDay = daysInMonthForForm(form);
         emiDaySelect.empty();
         emiDaySelect.append('<option value="" disabled selected>Select Date</option>');
-        for (let i = 1; i <= 28; i++) {
-          emiDaySelect.append(`<option value="${i}">${i}${i === 1 ? 'st' : (i === 2 ? 'nd' : (i === 3 ? 'rd' : 'th'))} of month</option>`);
+        for (let i = 1; i <= maxDay; i++) {
+          emiDaySelect.append(`<option value="${i}">${i}${getOrdinal(i)} of month</option>`);
+        }
+        if (previousValue && parseInt(previousValue, 10) >= 1 && parseInt(previousValue, 10) <= maxDay) {
+          emiDaySelect.val(String(parseInt(previousValue, 10)));
         }
       }
 
@@ -637,9 +812,12 @@ $(function () {
         if (current && current.getDate() === targetDay) return; // Already in sync!
 
         let targetDate = current ? new Date(current.getTime()) : new Date();
-        targetDate.setDate(targetDay);
+        const maxForMonth = new Date(targetDate.getFullYear(), targetDate.getMonth() + 1, 0).getDate();
+        targetDate.setDate(Math.min(targetDay, maxForMonth));
         if (targetDate < new Date()) {
           targetDate.setMonth(targetDate.getMonth() + 1);
+          const nextMax = new Date(targetDate.getFullYear(), targetDate.getMonth() + 1, 0).getDate();
+          targetDate.setDate(Math.min(targetDay, nextMax));
         }
         picker.setDate(targetDate, true);
       }
@@ -650,6 +828,37 @@ $(function () {
       const frequency = form.find('#repayment_frequency').val();
       const emiDaySelect = form.find('#emi_day');
       const weekdayDisplay = form.find('#emi_weekday_display');
+
+      if (frequency === 'monthly' || !frequency) {
+        const maxDay = daysInMonthForForm(form, date);
+        const currentVal = parseInt(emiDaySelect.val(), 10);
+        const optionCount = emiDaySelect.find('option').filter(function () {
+          return this.value && !this.disabled;
+        }).length;
+        if (optionCount !== maxDay) {
+          const emiDayHadSelect2 = emiDaySelect.hasClass('select2-hidden-accessible');
+          if (emiDayHadSelect2) {
+            try { emiDaySelect.select2('destroy'); } catch (e) {}
+          }
+          emiDaySelect.empty();
+          emiDaySelect.append('<option value="" disabled>Select Date</option>');
+          for (let i = 1; i <= maxDay; i++) {
+            emiDaySelect.append(`<option value="${i}">${i}${getOrdinal(i)} of month</option>`);
+          }
+          if (emiDayHadSelect2) {
+            emiDaySelect.select2({
+              dropdownParent: emiDaySelect.closest('.modal-content'),
+              width: '100%',
+              placeholder: 'Select Date',
+              allowClear: true,
+              closeOnSelect: true
+            });
+          }
+          if (currentVal && currentVal <= maxDay) {
+            emiDaySelect.val(String(currentVal));
+          }
+        }
+      }
       
       // Update weekday display
       const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -745,6 +954,7 @@ $(function () {
       if (isInterestOnly) {
         // Kandhuvatti Mode UI
         tenureWrapper.fadeOut();
+        form.find('#tenure_input, #tenure_slider').prop('disabled', true);
         modeDescription.text('Interest Only (Kandhuvatti) - Open Loan');
         emiLabelText.removeClass('text-primary').addClass('text-muted');
         kandhuvattiLabelText.removeClass('text-muted').addClass('text-danger');
@@ -760,6 +970,7 @@ $(function () {
       } else {
         // EMI Mode UI
         tenureWrapper.fadeIn();
+        form.find('#tenure_input, #tenure_slider').prop('disabled', false);
         modeDescription.text('Standard EMI (Principal + Interest)');
         emiLabelText.removeClass('text-muted').addClass('text-primary');
         kandhuvattiLabelText.removeClass('text-danger').addClass('text-muted');
@@ -875,6 +1086,15 @@ $(function () {
 
     // Remove duplicate backdrops if modal was opened more than once (Bootstrap instance issue).
     $(document).on('hidden.bs.modal', '#modalApplyLoan, #modalApplyLoanGeneric', function () {
+      const currentModal = $(this);
+      const form = currentModal.find('form');
+      const productSelect = form.find('#loan_product');
+      const allOptions = productSelect.data('all-product-options');
+      if (productSelect.length && allOptions && allOptions.length) {
+        productSelect.empty().append(allOptions.clone()).val('');
+      }
+      form.find('.loan-type-filter, #loan_type_filter').val('');
+
       const backdrops = document.querySelectorAll('.modal-backdrop');
       if (backdrops.length > 1) {
         backdrops.forEach((el, index) => {
@@ -894,6 +1114,11 @@ $(function () {
       
       // Use a small timeout to ensure DOM and Select2 are fully ready
       setTimeout(() => {
+        const productSelect = currentModal.find('#loan_product');
+        if (productSelect.length && !productSelect.data('all-product-options')) {
+          productSelect.data('all-product-options', productSelect.find('option').clone());
+        }
+
         initModalSelect2(currentModal);
 
         // Explicitly trigger frequency change to populate day/date options
@@ -914,42 +1139,260 @@ $(function () {
         }
         updateEmiPreview(currentModal.find('form'));
         toggleGatewayField(currentModal.find('#payment_method').val());
+
+        // Auto-load chit details & eligibility for specific client modal (pre-filled client_id)
+        const hiddenClientId = currentModal.find('#apply_client_id_hidden').val();
+        if (hiddenClientId) {
+          const form = currentModal.find('form');
+          const submitBtn = form.find('button[type="submit"]');
+          const originalSubmitHtml = submitBtn.data('orig-html') || submitBtn.html();
+          submitBtn.data('orig-html', originalSubmitHtml);
+          form.find('#eligibilityAlert').remove();
+
+          $.ajax({
+            url: `${baseUrl}loan-application/check-eligibility`,
+            type: 'POST',
+            data: {
+              client_id: hiddenClientId,
+              _token: $('meta[name="csrf-token"]').attr('content')
+            },
+            success: function (res) {
+              if (!res.eligible) {
+                const alertHtml = `<div id="eligibilityAlert" class="alert alert-warning d-flex align-items-center gap-2 py-2 px-3 mb-3" role="alert">
+                  <i class="ri-error-warning-line ri-20px"></i>
+                  <span>${res.message}</span>
+                </div>`;
+                form.find('#chitDetailsPanel').before(alertHtml);
+
+                submitBtn.prop('disabled', true)
+                  .html('<i class="ri-lock-line me-1"></i> Cannot Apply')
+                  .attr('title', res.message);
+              } else {
+                submitBtn.prop('disabled', false).html(originalSubmitHtml).removeAttr('title');
+              }
+              if (res.chit_details && res.chit_details.has_chit) {
+                renderChitDetails(res.chit_details);
+              }
+            }
+          });
+        }
       }, 50);
     });
 
-    formApplyLoan.on('submit', function (e) {
+    // Ensure forms have novalidate to bypass any unwanted native HTML5 constraint blocking
+    $('#formApplyLoan, #formApplyLoanGeneric').attr('novalidate', 'novalidate');
+    $(document).on('click', '#formApplyLoan button[type="submit"], #formApplyLoanGeneric button[type="submit"]', function () {
+      $(this).closest('form').attr('novalidate', 'novalidate');
+      $(this).attr('formnovalidate', 'formnovalidate');
+    });
+
+    // Delegated submit handler for Quick Apply Loan modals
+    $(document).on('submit', '#formApplyLoan, #formApplyLoanGeneric', function (e) {
       e.preventDefault();
-      
-      // Basic validation
-      if (!formApplyLoan[0] || !formApplyLoan[0].checkValidity()) {
-        if (formApplyLoan[0]) formApplyLoan[0].reportValidity();
+      const currentForm = this;
+      const $form = $(currentForm);
+      const btn = $form.find('button[type="submit"]');
+      const origBtnHtml = btn.html();
+
+      // Reset previous validation state
+      $form.find('.is-invalid').removeClass('is-invalid');
+      $form.find('.select2-selection').removeClass('border-danger');
+
+      const isInterestOnly = $form.find('.loan-mode-toggle').is(':checked');
+
+      // 1. Validate Client
+      const clientId = $form.find('[name="client_id"]').val();
+      if (!clientId) {
+        const clientSelect = $form.find('#apply_client_id');
+        if (clientSelect.length) {
+          clientSelect.next('.select2-container').find('.select2-selection').addClass('border-danger');
+        }
         Swal.fire({
           title: 'Validation Error',
-          text: 'Please fill all required fields before submitting.',
+          text: 'Please select a verified client.',
           icon: 'warning',
           customClass: { confirmButton: 'btn btn-primary' }
         });
         return;
       }
 
-      const btn = $(this).find('button[type="submit"]'),
-            orig = btn.html();
+      // 2. Validate Loan Product
+      const productSelect = $form.find('#loan_product');
+      const loanCode = productSelect.val();
+      if (!loanCode) {
+        productSelect.next('.select2-container').find('.select2-selection').addClass('border-danger');
+        Swal.fire({
+          title: 'Validation Error',
+          text: 'Please select a loan product.',
+          icon: 'warning',
+          customClass: { confirmButton: 'btn btn-primary' }
+        });
+        return;
+      }
+
+      // 3. Validate Loan Amount
+      const amtInput = $form.find('#loan_amount_input');
+      const loanAmount = parseFloat(amtInput.val()) || 0;
+      const minAmt = parseFloat(amtInput.attr('min')) || 0;
+      const maxAmt = parseFloat(amtInput.attr('max')) || 0;
+
+      if (!loanAmount || loanAmount <= 0) {
+        amtInput.addClass('is-invalid').focus();
+        Swal.fire({
+          title: 'Validation Error',
+          text: 'Please enter a valid loan amount.',
+          icon: 'warning',
+          customClass: { confirmButton: 'btn btn-primary' }
+        });
+        return;
+      }
+
+      if (minAmt > 0 && loanAmount < minAmt) {
+        amtInput.addClass('is-invalid').focus();
+        Swal.fire({
+          title: 'Validation Error',
+          text: `Loan amount cannot be less than ₹${minAmt.toLocaleString('en-IN')}.`,
+          icon: 'warning',
+          customClass: { confirmButton: 'btn btn-primary' }
+        });
+        return;
+      }
+
+      if (maxAmt > 0 && loanAmount > maxAmt) {
+        amtInput.addClass('is-invalid').focus();
+        Swal.fire({
+          title: 'Validation Error',
+          text: `Loan amount cannot exceed ₹${maxAmt.toLocaleString('en-IN')}.`,
+          icon: 'warning',
+          customClass: { confirmButton: 'btn btn-primary' }
+        });
+        return;
+      }
+
+      // 4. Validate Repayment Frequency
+      const freqSelect = $form.find('#repayment_frequency');
+      const frequency = freqSelect.val() || 'monthly';
+      if (!frequency) {
+        freqSelect.next('.select2-container').find('.select2-selection').addClass('border-danger');
+        Swal.fire({
+          title: 'Validation Error',
+          text: 'Please select a repayment frequency.',
+          icon: 'warning',
+          customClass: { confirmButton: 'btn btn-primary' }
+        });
+        return;
+      }
+
+      // 5. Validate Tenure (only required if standard EMI mode)
+      const tenureInput = $form.find('#tenure_input');
+      const tenureSlider = $form.find('#tenure_slider');
+
+      if (isInterestOnly) {
+        tenureInput.prop('disabled', true).removeAttr('required');
+        tenureSlider.prop('disabled', true);
+      } else {
+        tenureInput.prop('disabled', false);
+        tenureSlider.prop('disabled', false);
+
+        let tenVal = parseInt(tenureInput.val(), 10);
+        let tenMin = parseInt(tenureInput.attr('min'), 10) || 1;
+        let tenMax = parseInt(tenureInput.attr('max'), 10) || 1000;
+
+        if (tenMin > tenMax) {
+          const temp = tenMin;
+          tenMin = tenMax;
+          tenMax = temp;
+        }
+
+        if (isNaN(tenVal) || tenVal < tenMin || tenVal > tenMax) {
+          tenureInput.addClass('is-invalid').focus();
+          Swal.fire({
+            title: 'Validation Error',
+            text: `Tenure must be between ${tenMin} and ${tenMax}.`,
+            icon: 'warning',
+            customClass: { confirmButton: 'btn btn-primary' }
+          });
+          return;
+        }
+      }
+
+      // 6. Validate EMI Day / Date
+      const emiDaySelect = $form.find('#emi_day');
+      let emiDayVal = emiDaySelect.val();
+
+      if (frequency === 'daily') {
+        emiDayVal = '1';
+      } else if (!emiDayVal) {
+        emiDaySelect.next('.select2-container').find('.select2-selection').addClass('border-danger');
+        Swal.fire({
+          title: 'Validation Error',
+          text: frequency === 'weekly' ? 'Please select an EMI collection day.' : 'Please select a monthly EMI date.',
+          icon: 'warning',
+          customClass: { confirmButton: 'btn btn-primary' }
+        });
+        return;
+      }
+
+      // 7. Validate EMI Start Date
+      const startDateInput = $form.find('#emi_start_date');
+      const emiStartDate = startDateInput.val();
+      if (!emiStartDate) {
+        startDateInput.addClass('is-invalid').focus();
+        Swal.fire({
+          title: 'Validation Error',
+          text: 'Please select an EMI start date.',
+          icon: 'warning',
+          customClass: { confirmButton: 'btn btn-primary' }
+        });
+        return;
+      }
+
+      // Build payload data cleanly
+      let formArray = $form.serializeArray();
+
+      // Ensure loan_mode is always explicitly present
+      formArray = formArray.filter(item => item.name !== 'loan_mode');
+      formArray.push({ name: 'loan_mode', value: isInterestOnly ? 'interest_only' : 'emi' });
+
+      // Ensure emi_day is present
+      formArray = formArray.filter(item => item.name !== 'emi_day');
+      formArray.push({ name: 'emi_day', value: emiDayVal });
 
       btn.prop('disabled', true).html('<span class="spinner-border spinner-border-sm me-1"></span> Submitting...');
 
       $.ajax({
         url: `${baseUrl}loan-application/quick-apply`,
         type: 'POST',
-        data: $(this).serialize(),
+        headers: {
+          'X-CSRF-TOKEN': $('meta[name="csrf-token"]').attr('content')
+        },
+        data: $.param(formArray),
         success: function (res) {
           if (res.success) {
             Swal.fire({
               title: 'Success!',
-              text: res.message,
+              text: res.message || 'Loan application submitted successfully!',
               icon: 'success',
               customClass: { confirmButton: 'btn btn-primary' }
             }).then(() => {
-              window.location.reload();
+              if (res.redirect_path) {
+                const cleanPath = String(res.redirect_path).replace(/^\/+/, '');
+                window.location.href = `${baseUrl}${cleanPath}`;
+              } else if (res.redirect) {
+                try {
+                  const targetUrl = new URL(res.redirect, window.location.origin);
+                  if (targetUrl.origin !== window.location.origin) {
+                    const cleanPath = targetUrl.pathname.replace(/^\/+/, '');
+                    window.location.href = `${baseUrl}${cleanPath}${targetUrl.search}${targetUrl.hash}`;
+                  } else {
+                    window.location.href = res.redirect;
+                  }
+                } catch (e) {
+                  window.location.href = res.redirect;
+                }
+              } else {
+                window.location.reload();
+              }
             });
           } else {
             Swal.fire({
@@ -958,15 +1401,28 @@ $(function () {
               icon: 'error',
               customClass: { confirmButton: 'btn btn-primary' }
             });
-            btn.prop('disabled', false).html(orig);
+            btn.prop('disabled', false).html(origBtnHtml);
           }
         },
         error: function (xhr) {
-          btn.prop('disabled', false).html(orig);
+          btn.prop('disabled', false).html(origBtnHtml);
+
+          let errMsg = 'Something went wrong while submitting the application.';
+          if (xhr.responseJSON?.message) {
+            errMsg = xhr.responseJSON.message;
+          }
+          if (xhr.responseJSON?.errors) {
+            const errList = Object.values(xhr.responseJSON.errors).flat();
+            if (errList.length) {
+              errMsg = errList.join('<br>');
+            }
+          }
+
           Swal.fire({
             icon: 'error',
-            title: 'Error!',
-            text: xhr.responseJSON?.message || 'Something went wrong'
+            title: 'Application Error',
+            html: errMsg,
+            customClass: { confirmButton: 'btn btn-primary' }
           });
         }
       });

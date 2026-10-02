@@ -43,16 +43,18 @@
   <meta charset="utf-8">
   <title>{{ __('Bill aging') }}</title>
   <style>
-    body { font-family: DejaVu Sans, sans-serif; font-size: 11px; color: #333; }
+    @page { size: A4 landscape; margin: 10mm; }
+    body { font-family: DejaVu Sans, sans-serif; font-size: 10px; color: #333; margin: 0; }
     h2 { font-size: 16px; margin-bottom: 8px; }
     .muted { color: #666; font-size: 10px; margin-bottom: 16px; }
-    table { border-collapse: collapse; width: 100%; margin-bottom: 20px; }
-    th, td { border: 1px solid #999; padding: 6px 8px; text-align: left; }
-    th { background: #f3f4f6; }
+    table { border-collapse: collapse; width: 100%; margin-bottom: 20px; table-layout: fixed; word-wrap: break-word; }
+    th, td { border: 1px solid #999; padding: 6px 8px; font-size: 9px; text-align: left; vertical-align: top; word-break: break-word; mso-number-format: "\@"; }
+    th { background: #666cff; color: #ffffff; font-weight: bold; }
     .num { text-align: right; }
   </style>
 </head>
 <body>
+  @include('admin.reports.partials.download-branding')
   <h2>{{ __('Bill aging') }}</h2>
   <p class="muted">{{ __('As of') }}: <strong>{{ $asOf }}</strong></p>
   <table>

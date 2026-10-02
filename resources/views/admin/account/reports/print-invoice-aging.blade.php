@@ -64,7 +64,7 @@
 @endsection
 
 @section('content')
-<div class="container-xxl flex-grow-1 container-p-y">
+<div class="account-module">
   
   <!-- Header Section -->
   <div class="card report-header-card mb-4">

@@ -238,6 +238,9 @@ document.addEventListener('DOMContentLoaded', function () {
     });
 
     confirmDisburseBtn.addEventListener('click', function () {
+      if (confirmDisburseBtn.dataset.busy === '1') {
+        return;
+      }
       const transactionIdValue = transactionIdInput?.value.trim();
       const utrNumberValue = utrNumberInput?.value.trim();
 
@@ -279,6 +282,9 @@ document.addEventListener('DOMContentLoaded', function () {
         showToast('danger', 'Missing Details', 'Please fill in all required fields including Disbursement Date.');
         return;
       }
+
+      confirmDisburseBtn.dataset.busy = '1';
+      disburseBtn.dataset.busy = '1';
 
       disburseOriginalText = disburseOriginalText || disburseBtn.innerHTML;
       confirmOriginalText = confirmOriginalText || confirmDisburseBtn.innerHTML;
@@ -338,6 +344,8 @@ document.addEventListener('DOMContentLoaded', function () {
             }, 1500);
           } else {
             showToast('danger', 'Error', data.message || 'Failed to disburse loan');
+            disburseBtn.dataset.busy = '0';
+            confirmDisburseBtn.dataset.busy = '0';
             disburseBtn.disabled = false;
             disburseBtn.innerHTML = disburseOriginalText;
             confirmDisburseBtn.disabled = false;
@@ -347,6 +355,8 @@ document.addEventListener('DOMContentLoaded', function () {
         .catch(error => {
           console.error('Error:', error);
           showToast('danger', 'Error', 'Failed to disburse loan');
+          disburseBtn.dataset.busy = '0';
+          confirmDisburseBtn.dataset.busy = '0';
           disburseBtn.disabled = false;
           disburseBtn.innerHTML = disburseOriginalText;
           confirmDisburseBtn.disabled = false;
@@ -355,6 +365,9 @@ document.addEventListener('DOMContentLoaded', function () {
     });
 
     disburseModalEl.addEventListener('hidden.bs.modal', function () {
+      if (confirmDisburseBtn.dataset.busy === '1') {
+        return;
+      }
       confirmDisburseBtn.disabled = false;
       confirmDisburseBtn.innerHTML = confirmOriginalText || confirmDisburseBtn.innerHTML;
       if (!document.body.contains(disburseBtn)) {

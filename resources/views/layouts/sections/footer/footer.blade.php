@@ -3,8 +3,6 @@
       isset($configData['contentLayout']) && $configData['contentLayout'] === 'compact'
           ? 'container-xxl'
           : 'container-fluid';
-  $companyName = get_setting('company_name', get_setting('footer_company_name', config('app.name', 'Company')));
-  $companyWebsite = get_setting('company_website', url('/'));
 @endphp
 
 <!-- Footer-->
@@ -16,9 +14,9 @@
         <script>
           document.write(new Date().getFullYear());
         </script>
-        <a href="{{ $companyWebsite }}"
+        <a href="https://codepluse.com/"
           target="_blank"
-          class="footer-link fw-medium">{{ $companyName }}</a>
+          class="footer-link fw-medium">Codepluse Gen pvt Ltd</a>
           <span> - All rights reserved.</span>
       </div>
     </div>

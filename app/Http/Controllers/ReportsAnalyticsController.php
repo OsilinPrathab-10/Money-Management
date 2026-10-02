@@ -6,17 +6,15 @@ use App\Models\Client;
 use App\Models\LoanApplication;
 use App\Models\LoanAccount;
 use App\Models\Emi;
-use App\Models\Appearance;
 use App\Models\Location;
 use App\Models\LoanProduct;
-use App\Models\LoanType;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Carbon\Carbon;
-use Illuminate\Support\Facades\Log;
-use App\Helpers\AppearanceHelper;
-use Barryvdh\DomPDF\Facade\Pdf;
+use App\Support\DateRangePreset;
+use App\Support\ReportExporter;
 
 class ReportsAnalyticsController extends Controller
 {
@@ -25,10 +23,8 @@ class ReportsAnalyticsController extends Controller
      */
     public function clients(Request $request)
     {
-        // Filters for table and aggregates
+        [$fromDate, $toDate] = DateRangePreset::applyToRequest($request);
         $filterStatus = $request->input('status', 'all');
-        $fromDate = $request->input('from_date');
-        $toDate = $request->input('to_date');
         $sortOption = $request->input('sort', 'newest');
         $location_id = $request->input('location_id');
 
@@ -187,9 +183,8 @@ class ReportsAnalyticsController extends Controller
         
         $clientsQuery = Client::with('user');
 
+        [$fromDate, $toDate] = DateRangePreset::applyToRequest($request);
         $status = $request->input('status');
-        $fromDate = $request->input('from_date');
-        $toDate = $request->input('to_date');
         $sort = $request->input('sort');
         $location_id = $request->input('location_id');
 
@@ -225,21 +220,173 @@ class ReportsAnalyticsController extends Controller
                 break;
         }
 
+        $clientsQuery = Client::with(['user', 'location']);
         $clients = $clientsQuery
             ->select('clients.*')
             ->get()
             ->map(function($client, $index) {
+                $name = $client->client_name ?: ($client->user?->name ?? 'N/A');
+                $email = $client->client_email ?: ($client->user?->email ?? 'N/A');
+                $phone = $client->client_phone ?: ($client->alternate_phone ?? 'N/A');
+                $location = $client->location?->name ?? 'N/A';
+
                 return [
                     'S.No' => $index + 1,
-                    'Name' => $client->user?->name ?? 'N/A',
-                    'Email' => $client->user?->email ?? 'N/A',
-                    'Phone' => $client->client_phone ?? 'N/A',
-                    'Status' => ucfirst($client->status),
-                    'Registered Date' => $client->created_at->format('Y-m-d'),
+                    'Client Name' => $name,
+                    'Email' => $email,
+                    'Phone' => $phone,
+                    'Location / Branch' => $location,
+                    'Aadhaar Number' => $client->aadhaar_number ?? 'N/A',
+                    'City' => $client->city ?? 'N/A',
+                    'District' => $client->district ?? 'N/A',
+                    'Pincode' => $client->pincode ?? 'N/A',
+                    'Status' => ucfirst($client->status ?? 'active'),
+                    'Registered Date' => $client->created_at ? $client->created_at->format('Y-m-d') : 'N/A',
                 ];
             });
 
         return $this->exportData($clients, 'clients_report', $format);
+    }
+
+    /**
+     * Closed / fully repaid / overdue status used by the loan report.
+     */
+    private function loanReportStatus($loan): string
+    {
+        $status = strtolower(trim((string) ($loan->status ?? 'active')));
+        if (in_array($status, ['closed', 'completed', 'foreclosed'], true)
+            || $loan->closed_at !== null
+            || $loan->is_foreclosed
+            || (float) ($loan->outstanding_amount ?? 0) <= 0.05) {
+            return 'closed';
+        }
+
+        $today = Carbon::now()->startOfDay();
+        $hasOverdue = $loan->relationLoaded('emis')
+            ? $loan->emis->contains(function ($emi) use ($today) {
+                if (! in_array(strtolower((string) $emi->status), ['pending', 'overdue', 'partial'], true)) {
+                    return false;
+                }
+                if ((float) ($emi->pending_amount ?? 0) <= 0) {
+                    return false;
+                }
+                $due = $emi->due_date ? Carbon::parse($emi->due_date)->startOfDay() : null;
+
+                return $due && $due->lt($today);
+            })
+            : $loan->emis()->where(function ($q) {
+                $this->constrainOverdueEmis($q);
+            })->exists();
+
+        return $hasOverdue ? 'overdue' : ($status !== '' ? $status : 'active');
+    }
+
+    /**
+     * Closed / fully repaid loans.
+     */
+    private function constrainClosedLoans($query): void
+    {
+        $query->where(function ($q) {
+            $q->whereRaw("LOWER(TRIM(COALESCE(status, ''))) IN ('closed', 'completed', 'foreclosed')")
+                ->orWhereNotNull('closed_at')
+                ->orWhere('is_foreclosed', 1)
+                ->orWhere('outstanding_amount', '<=', 0.05);
+        });
+    }
+
+    /**
+     * Loans that are still open (not closed or fully repaid).
+     */
+    private function constrainOpenLoans($query): void
+    {
+        $query->where(function ($q) {
+            $q->whereRaw("LOWER(TRIM(COALESCE(status, ''))) NOT IN ('closed', 'completed', 'foreclosed')")
+                ->whereNull('closed_at')
+                ->where(function ($foreclosed) {
+                    $foreclosed->where('is_foreclosed', 0)->orWhereNull('is_foreclosed');
+                })
+                ->where('outstanding_amount', '>', 0.05);
+        });
+    }
+
+    /**
+     * Unpaid EMIs that are past their due date.
+     */
+    private function constrainOverdueEmis($query): void
+    {
+        $today = Carbon::now()->startOfDay()->toDateString();
+        $query->whereDate('due_date', '<', $today)
+            ->whereIn('status', ['pending', 'overdue', 'partial'])
+            ->where('pending_amount', '>', 0);
+    }
+
+    /**
+     * Apply common filters for Loans Report and Exports.
+     */
+    private function applyLoanFilterQuery($query, Request $request, bool $includeStatus = true)
+    {
+        $status = $request->input('status', 'all');
+        [$fromDate, $toDate] = DateRangePreset::applyToRequest($request);
+        $location_id = $request->input('location_id');
+        $loan_product_id = $request->input('loan_product_id');
+
+        if ($includeStatus && $status && $status !== 'all') {
+            $statusLower = strtolower(trim($status));
+            if ($statusLower === 'closed') {
+                $this->constrainClosedLoans($query);
+            } elseif ($statusLower === 'active') {
+                $this->constrainOpenLoans($query);
+                $query->whereDoesntHave('emis', fn ($eq) => $this->constrainOverdueEmis($eq));
+            } elseif ($statusLower === 'overdue') {
+                $this->constrainOpenLoans($query);
+                $query->whereHas('emis', fn ($eq) => $this->constrainOverdueEmis($eq));
+            } else {
+                $query->whereRaw('LOWER(TRIM(status)) = ?', [$statusLower]);
+            }
+        }
+
+        if ($location_id) {
+            $query->whereHas('client', function($q) use ($location_id) {
+                $q->where('location_id', $location_id);
+            });
+        }
+
+        if ($loan_product_id) {
+            $selectedProduct = is_numeric($loan_product_id)
+                ? LoanProduct::find($loan_product_id)
+                : LoanProduct::where('loan_code', $loan_product_id)->first();
+
+            if ($selectedProduct) {
+                $query->where(function($q) use ($selectedProduct, $loan_product_id) {
+                    $q->where('loan_code', $selectedProduct->loan_code)
+                      ->orWhere('loan_code', $loan_product_id);
+                    if (Schema::hasColumn('loan_accounts', 'loan_product_id')) {
+                        $q->orWhere('loan_product_id', $selectedProduct->id);
+                    }
+                });
+            } else {
+                $query->where(function($q) use ($loan_product_id) {
+                    $q->where('loan_code', $loan_product_id);
+                    if (Schema::hasColumn('loan_accounts', 'loan_product_id')) {
+                        $q->orWhere('loan_product_id', $loan_product_id);
+                    }
+                });
+            }
+        }
+
+        if ($fromDate) {
+            $query->where(function($q) use ($fromDate) {
+                $q->whereDate('created_at', '>=', $fromDate)
+                  ->orWhereDate('disbursed_at', '>=', $fromDate);
+            });
+        }
+
+        if ($toDate) {
+            $query->where(function($q) use ($toDate) {
+                $q->whereDate('created_at', '<=', $toDate)
+                  ->orWhereDate('disbursed_at', '<=', $toDate);
+            });
+        }
     }
 
     /**
@@ -248,118 +395,61 @@ class ReportsAnalyticsController extends Controller
     public function loans(Request $request)
     {
         // Filters for loans table and aggregates
+        [$fromDate, $toDate] = DateRangePreset::applyToRequest($request);
         $filterStatus = $request->input('status', 'all');
-        $fromDate = $request->input('from_date');
-        $toDate = $request->input('to_date');
         $sortOption = $request->input('sort', 'newest');
         $location_id = $request->input('location_id');
-        $loan_type_id = $request->input('loan_type_id');
-        $product_id = $request->input('product_id');
-        $loan_mode = $request->input('loan_mode');
+        $loan_product_id = $request->input('loan_product_id');
 
-        // Common filter application helper
-        $applyFilters = function ($query) use ($location_id, $loan_type_id, $product_id, $loan_mode, $fromDate, $toDate) {
-            if ($location_id) {
-                $query->whereHas('client', function ($q) use ($location_id) {
-                    $q->where('location_id', $location_id);
-                });
-            }
+        // Loan products for dropdown filter
+        $loanProducts = LoanProduct::orderBy('loan_name')->get();
 
-            if ($loan_type_id) {
-                $query->where(function ($q) use ($loan_type_id) {
-                    $q->whereIn('loan_code', function ($sq) use ($loan_type_id) {
-                        $sq->select('loan_code')->from('loan_products')->where('loan_type_id', $loan_type_id);
-                    })->orWhereHas('loanApplication', function ($sq) use ($loan_type_id) {
-                        $sq->whereIn('loan_code', function ($ssq) use ($loan_type_id) {
-                            $ssq->select('loan_code')->from('loan_products')->where('loan_type_id', $loan_type_id);
-                        });
-                    });
-                });
-            }
-
-            if ($product_id) {
-                $product = LoanProduct::find($product_id);
-                if ($product) {
-                    $query->where(function ($q) use ($product) {
-                        $q->where('loan_code', $product->loan_code)
-                          ->orWhereHas('loanApplication', function ($sq) use ($product) {
-                              $sq->where('loan_code', $product->loan_code);
-                          });
-                    });
-                }
-            }
-
-            if ($loan_mode && $loan_mode !== 'all') {
-                if ($loan_mode === 'emi') {
-                    $query->where(function ($sq) {
-                        $sq->where('loan_mode', 'emi')
-                          ->orWhereNull('loan_mode');
-                    });
-                } else {
-                    $query->where('loan_mode', $loan_mode);
-                }
-            }
-
-            if ($fromDate) {
-                $query->where('created_at', '>=', Carbon::parse($fromDate)->startOfDay());
-            }
-
-            if ($toDate) {
-                $query->where('created_at', '<=', Carbon::parse($toDate)->endOfDay());
-            }
-        };
-
-        // Base Query for Aggregates
+        // Base query for aggregates (same location / product / period as the table)
         $baseLoanQuery = LoanAccount::query();
-        $applyFilters($baseLoanQuery);
+        $this->applyLoanFilterQuery($baseLoanQuery, $request, false);
 
-        // Loans by status (filtered)
-        $rawLoanStatusCounts = (clone $baseLoanQuery)
-            ->selectRaw('LOWER(TRIM(status)) as status, count(*) as count')
-            ->groupBy('status')
-            ->get();
+        $totalLoans = (clone $baseLoanQuery)->count();
 
-        $loanStatusCounts = $rawLoanStatusCounts->pluck('count', 'status')->map(fn($count) => (int) $count);
+        $closedLoans = (clone $baseLoanQuery);
+        $this->constrainClosedLoans($closedLoans);
+        $closedLoans = $closedLoans->count();
 
-        $totalLoans = $rawLoanStatusCounts->sum('count');
-        $activeLoans = $loanStatusCounts['active'] ?? 0;
-        $closedLoans = $loanStatusCounts['closed'] ?? 0;
-        $overdueLoans = $loanStatusCounts['overdue'] ?? 0;
+        $overdueLoans = (clone $baseLoanQuery);
+        $this->constrainOpenLoans($overdueLoans);
+        $overdueLoans = $overdueLoans->whereHas('emis', fn ($eq) => $this->constrainOverdueEmis($eq))->count();
 
-        $loanStatusOrder = ['active', 'closed', 'overdue', 'pending'];
-        $formatLoanStatus = fn(string $status) => Str::title(str_replace('_', ' ', $status));
+        $onTrackLoans = (clone $baseLoanQuery);
+        $this->constrainOpenLoans($onTrackLoans);
+        $onTrackLoans = $onTrackLoans->whereDoesntHave('emis', fn ($eq) => $this->constrainOverdueEmis($eq))->count();
 
-        $loansByStatus = collect($loanStatusOrder)
-            ->map(function ($status) use ($loanStatusCounts, $formatLoanStatus) {
-                $count = $loanStatusCounts[$status] ?? 0;
+        // Active in the chart is on-track only. Overdue stays a separate slice so
+        // ApexCharts Total (sum of slices) equals unique loans, not Active+Overdue.
+        $activeLoans = $onTrackLoans;
+        $formatLoanStatus = fn (string $status) => Str::title(str_replace('_', ' ', $status));
 
-                return [
-                    'status' => $status,
-                    'label' => $formatLoanStatus($status),
-                    'count' => $count,
-                ];
-            })
-            ->filter(fn($item) => $item['count'] > 0)
-            ->values();
+        $loansByStatus = collect([
+            ['status' => 'active', 'label' => 'Active', 'count' => $activeLoans],
+            ['status' => 'closed', 'label' => 'Closed', 'count' => $closedLoans],
+            ['status' => 'overdue', 'label' => 'Overdue', 'count' => $overdueLoans],
+        ])->filter(fn ($item) => $item['count'] > 0)->values();
 
-        $rawLoanStatusCounts->each(function ($item) use (&$loansByStatus, $loanStatusOrder, $formatLoanStatus) {
-            if (!in_array($item->status, $loanStatusOrder, true)) {
-                $loansByStatus->push([
-                    'status' => $item->status,
-                    'label' => $formatLoanStatus($item->status),
-                    'count' => (int) $item->count,
-                ]);
-            }
-        });
+        $loanStatusCounts = collect([
+            'active' => $activeLoans,
+            'closed' => $closedLoans,
+            'overdue' => $overdueLoans,
+        ]);
 
         // Total loan amount disbursed
         $totalDisbursed = (clone $baseLoanQuery)->sum('loan_amount');
-        $totalOutstanding = (clone $baseLoanQuery)->where('status', 'active')->sum('outstanding_amount');
+        $totalOutstanding = (clone $baseLoanQuery)->where(function($q) {
+            $q->whereRaw("LOWER(TRIM(status)) IN ('active', 'disbursed', 'approved', 'process')")
+              ->whereNull('closed_at')
+              ->where('is_foreclosed', 0);
+        })->sum('outstanding_amount');
         $totalPaid = (clone $baseLoanQuery)->sum('paid_amount');
 
         // Loans disbursed per month (last 12 months)
-        $rawLoansPerMonth = (clone $baseLoanQuery)
-            ->select(
+        $rawLoansPerMonth = (clone $baseLoanQuery)->select(
                 DB::raw('DATE_FORMAT(disbursed_at, "%Y-%m") as month'),
                 DB::raw('count(*) as count'),
                 DB::raw('sum(loan_amount) as total_amount')
@@ -384,8 +474,7 @@ class ReportsAnalyticsController extends Controller
         });
 
         // Loans by product
-        $loansByProduct = (clone $baseLoanQuery)
-            ->select('loan_code', DB::raw('count(*) as count'))
+        $loansByProduct = (clone $baseLoanQuery)->select('loan_code', DB::raw('count(*) as count'))
             ->groupBy('loan_code')
             ->get();
 
@@ -393,12 +482,8 @@ class ReportsAnalyticsController extends Controller
         $avgLoanAmount = (float) ((clone $baseLoanQuery)->avg('loan_amount') ?? 0);
 
         // Filters for loans table
-        $loansTableQuery = LoanAccount::with(['client.user']);
-        $applyFilters($loansTableQuery);
-
-        if ($filterStatus !== 'all') {
-            $loansTableQuery->where('status', $filterStatus);
-        }
+        $loansTableQuery = LoanAccount::with(['client.user', 'loanProduct', 'emis']);
+        $this->applyLoanFilterQuery($loansTableQuery, $request);
 
         switch ($sortOption) {
             case 'oldest':
@@ -424,15 +509,20 @@ class ReportsAnalyticsController extends Controller
 
         $latestLoans = $loansTableQuery->paginate(15)->withQueryString();
 
-        $availableStatuses = $loanStatusCounts->keys()->map(fn($status) => [
+        $defaultStatuses = ['active', 'closed', 'overdue', 'pending', 'disbursed', 'approved'];
+        $dbStatuses = $loanStatusCounts->keys()->toArray();
+        $allStatuses = collect($defaultStatuses)
+            ->merge($dbStatuses)
+            ->unique()
+            ->values();
+
+        $availableStatuses = $allStatuses->map(fn($status) => [
             'value' => $status,
             'label' => $formatLoanStatus($status)
         ]);
 
-        // Dropdown collections
+        // Locations for Area filter dropdown
         $locations = Location::all();
-        $loanTypes = LoanType::where('status', 1)->orWhereHas('products')->orderBy('name')->get();
-        $products = LoanProduct::with('loanType')->orderBy('loan_name')->get();
 
         return view('admin.report-analytics.loans.loans', compact(
             'totalLoans',
@@ -453,8 +543,8 @@ class ReportsAnalyticsController extends Controller
             'toDate',
             'sortOption',
             'locations',
-            'loanTypes',
-            'products'
+            'loanProducts',
+            'loan_product_id'
         ));
     }
 
@@ -464,70 +554,10 @@ class ReportsAnalyticsController extends Controller
     public function exportLoans(Request $request)
     {
         $format = $request->get('format', 'csv');
-        
-        $loansQuery = LoanAccount::with(['client.user']);
-
-        $status = $request->input('status');
-        $location_id = $request->input('location_id');
-        $loan_type_id = $request->input('loan_type_id');
-        $product_id = $request->input('product_id');
-        $loan_mode = $request->input('loan_mode');
-        $fromDate = $request->input('from_date');
-        $toDate = $request->input('to_date');
         $sort = $request->input('sort');
 
-        if ($location_id) {
-            $loansQuery->whereHas('client', function ($q) use ($location_id) {
-                $q->where('location_id', $location_id);
-            });
-        }
-
-        if ($loan_type_id) {
-            $loansQuery->where(function ($q) use ($loan_type_id) {
-                $q->whereIn('loan_code', function ($sq) use ($loan_type_id) {
-                    $sq->select('loan_code')->from('loan_products')->where('loan_type_id', $loan_type_id);
-                })->orWhereHas('loanApplication', function ($sq) use ($loan_type_id) {
-                    $sq->whereIn('loan_code', function ($ssq) use ($loan_type_id) {
-                        $ssq->select('loan_code')->from('loan_products')->where('loan_type_id', $loan_type_id);
-                    });
-                });
-            });
-        }
-
-        if ($product_id) {
-            $product = LoanProduct::find($product_id);
-            if ($product) {
-                $loansQuery->where(function ($q) use ($product) {
-                    $q->where('loan_code', $product->loan_code)
-                      ->orWhereHas('loanApplication', function ($sq) use ($product) {
-                          $sq->where('loan_code', $product->loan_code);
-                      });
-                });
-            }
-        }
-
-        if ($loan_mode && $loan_mode !== 'all') {
-            if ($loan_mode === 'emi') {
-                $loansQuery->where(function ($sq) {
-                    $sq->where('loan_mode', 'emi')
-                      ->orWhereNull('loan_mode');
-                });
-            } else {
-                $loansQuery->where('loan_mode', $loan_mode);
-            }
-        }
-
-        if ($status && $status !== 'all') {
-            $loansQuery->where('status', $status);
-        }
-
-        if ($fromDate) {
-            $loansQuery->where('created_at', '>=', Carbon::parse($fromDate)->startOfDay());
-        }
-
-        if ($toDate) {
-            $loansQuery->where('created_at', '<=', Carbon::parse($toDate)->endOfDay());
-        }
+        $loansQuery = LoanAccount::with(['client.user', 'client.location', 'loanProduct', 'emis']);
+        $this->applyLoanFilterQuery($loansQuery, $request);
 
         switch ($sort) {
             case 'oldest':
@@ -551,22 +581,53 @@ class ReportsAnalyticsController extends Controller
                 break;
         }
         
+        $today = Carbon::today();
         $loans = $loansQuery
             ->select('loan_accounts.*')
             ->get()
-            ->map(function($loan, $index) {
+            ->map(function($loan, $index) use ($today) {
+                $effectiveStatus = $this->loanReportStatus($loan);
+
+                $clientName = $loan->client?->client_name ?: ($loan->client?->user?->name ?? 'N/A');
+                $clientPhone = $loan->client?->client_phone ?: ($loan->client?->alternate_phone ?? 'N/A');
+                $productName = $loan->loanProduct?->loan_name ?? $loan->loan_code ?? 'N/A';
+                $overdueAmount = $loan->emis
+                    ->filter(function ($emi) use ($today) {
+                        if (! in_array(strtolower((string) $emi->status), ['pending', 'overdue', 'partial'], true)) {
+                            return false;
+                        }
+                        $due = $emi->due_date ? Carbon::parse($emi->due_date)->startOfDay() : null;
+
+                        return $due && $due->lt($today);
+                    })
+                    ->sum('pending_amount');
+                $loanEndDate = $loan->emis->max('due_date');
+
                 return [
                     'S.No' => $index + 1,
-                    'Client' => $loan->client?->user?->name ?? 'N/A',
-                    'Loan Code' => $loan->loan_code,
-                    'Amount (₹)' => number_format($loan->loan_amount, 0),
-                    'Outstanding (₹)' => number_format($loan->outstanding_amount, 2),
-                    'Status' => ucfirst($loan->status),
-                    'Disbursed Date' => $loan->disbursed_at ? $loan->disbursed_at->format('Y-m-d') : 'N/A',
+                    'Account Number' => $loan->account_number ?? $loan->customer_loan_account_number ?? $loan->id,
+                    'Client' => $clientName,
+                    'Phone' => $clientPhone,
+                    'Loan Product' => $productName,
+                    'Loan Amount (₹)' => number_format((float) ($loan->loan_amount ?? 0), 2),
+                    'Total Paid (₹)' => number_format((float) $loan->total_paid, 2),
+                    'Outstanding (₹)' => number_format((float) ($loan->outstanding_amount ?? 0), 2),
+                    'Overdue (₹)' => number_format((float) $overdueAmount, 2),
+                    'Loan End Date' => $loanEndDate ? Carbon::parse($loanEndDate)->format('d M Y') : 'N/A',
+                    'Status' => ucfirst(str_replace('_', ' ', $effectiveStatus)),
                 ];
             });
 
-        return $this->exportData($loans, 'loans_report', $format);
+        $statusLower = strtolower(trim((string) $request->input('status', 'all')));
+        $title = $statusLower === 'overdue' ? 'Overdue Loans' : $this->getReportTitle('loans_report');
+
+        return ReportExporter::download(
+            $loans,
+            $format,
+            'loans_report',
+            $title,
+            $request->except(['format', 'page', '_export'])
+        );
     }
 
     /**
@@ -575,9 +636,8 @@ class ReportsAnalyticsController extends Controller
     public function applications(Request $request)
     {
         // Filters for applications table and aggregates
+        [$fromDate, $toDate] = DateRangePreset::applyToRequest($request);
         $filterStatus = $request->input('status', 'all');
-        $fromDate = $request->input('from_date');
-        $toDate = $request->input('to_date');
         $sortOption = $request->input('sort', 'newest');
         $location_id = $request->input('location_id');
         $product_id = $request->input('product_id');
@@ -722,17 +782,15 @@ class ReportsAnalyticsController extends Controller
             case 'name_asc':
                 $applicationsTableQuery
                     ->leftJoin('clients', 'loan_applications.client_id', '=', 'clients.id')
-                    ->leftJoin('users', 'clients.user_id', '=', 'users.id')
                     ->select('loan_applications.*')
-                    ->orderBy('users.name', 'asc')
+                    ->orderBy('clients.client_name', 'asc')
                     ->orderBy('loan_applications.created_at', 'desc');
                 break;
             case 'name_desc':
                 $applicationsTableQuery
                     ->leftJoin('clients', 'loan_applications.client_id', '=', 'clients.id')
-                    ->leftJoin('users', 'clients.user_id', '=', 'users.id')
                     ->select('loan_applications.*')
-                    ->orderBy('users.name', 'desc')
+                    ->orderBy('clients.client_name', 'desc')
                     ->orderBy('loan_applications.created_at', 'desc');
                 break;
             case 'amount_high':
@@ -795,9 +853,8 @@ class ReportsAnalyticsController extends Controller
         
         $applicationsQuery = LoanApplication::with(['client.user', 'product']);
 
+        [$fromDate, $toDate] = DateRangePreset::applyToRequest($request);
         $status = $request->input('status');
-        $fromDate = $request->input('from_date');
-        $toDate = $request->input('to_date');
         $sort = $request->input('sort');
         $location_id = $request->input('location_id');
         $product_id = $request->input('product_id');
@@ -854,7 +911,7 @@ class ReportsAnalyticsController extends Controller
                 return [
                     'S.No' => $index + 1,
                     'Application No' => $app->application_number,
-                    'Client Name' => $app->client?->user?->name ?? 'N/A',
+                    'Client Name' => $app->client?->client_name ?: ($app->client?->user?->name ?? 'N/A'),
                     'Loan Product' => $app->product?->loan_name ?? $app->loan_code,
                     'Amount (₹)' => number_format($app->loan_amount, 0),
                     'Tenure' => $app->tenure . ' months',
@@ -872,9 +929,8 @@ class ReportsAnalyticsController extends Controller
     public function emi(Request $request)
     {
         // Filters for EMI table and aggregates
+        [$fromDate, $toDate] = DateRangePreset::applyToRequest($request);
         $filterStatus = $request->input('status', 'all');
-        $fromDate = $request->input('from_date');
-        $toDate = $request->input('to_date');
         $sortOption = $request->input('sort', 'newest');
         $location_id = $request->input('location_id');
         $product_id = $request->input('product_id');
@@ -951,34 +1007,54 @@ class ReportsAnalyticsController extends Controller
 
         // Total EMI amounts
         $totalEmiAmount = Emi::sum('total_amount');
-        $paidEmiAmount = Emi::where('status', 'paid')->sum('paid_amount');
+        $paidEmiAmount = Emi::where('status', 'paid')->sum('paid_amount') + Emi::where('status', 'partial')->sum('partial_paid_amount');
         $pendingEmiAmount = Emi::where('status', 'pending')->sum('total_amount');
         $overdueEmiAmount = Emi::where('status', 'overdue')->sum('total_amount');
 
         // EMI collection per month (last 12 months)
-        $rawEmiCollectionPerMonth = Emi::select(
+        $windowStart = Carbon::now()->subMonths(11)->startOfMonth();
+        $windowEnd = Carbon::now()->endOfMonth();
+
+        $rawEmiDuePerMonth = Emi::select(
                 DB::raw('DATE_FORMAT(due_date, "%Y-%m") as month'),
                 DB::raw('count(*) as count'),
-                DB::raw('sum(total_amount) as total_amount'),
-                DB::raw('sum(CASE WHEN status = "paid" THEN paid_amount ELSE 0 END) as collected_amount')
+                DB::raw('sum(total_amount) as total_amount')
             )
             ->whereNotNull('due_date')
-            ->where('due_date', '>=', Carbon::now()->subMonths(11)->startOfMonth())
+            ->whereBetween('due_date', [$windowStart, $windowEnd])
             ->groupBy('month')
             ->orderBy('month', 'asc')
-            ->get();
+            ->get()
+            ->keyBy('month');
+
+        $rawEmiCollectedPerMonth = \App\Models\EmiCollection::whereIn('status', ['verified', 'in_progress', 'approved', 'success', 'paid'])
+            ->where(function ($q) use ($windowStart, $windowEnd) {
+                $q->whereBetween('collected_at', [$windowStart, $windowEnd])
+                  ->orWhere(function ($q2) use ($windowStart, $windowEnd) {
+                      $q2->whereNull('collected_at')
+                         ->whereBetween('created_at', [$windowStart, $windowEnd]);
+                  });
+            })
+            ->select(
+                DB::raw('DATE_FORMAT(COALESCE(collected_at, created_at), "%Y-%m") as month'),
+                DB::raw('SUM(amount) as collected_amount')
+            )
+            ->groupBy('month')
+            ->get()
+            ->keyBy('month');
 
         $emiMonthsWindow = collect(range(0, 11))->map(fn($i) => Carbon::now()->subMonths(11 - $i)->startOfMonth());
 
-        $emiCollectionPerMonth = $emiMonthsWindow->map(function (Carbon $date) use ($rawEmiCollectionPerMonth) {
+        $emiCollectionPerMonth = $emiMonthsWindow->map(function (Carbon $date) use ($rawEmiDuePerMonth, $rawEmiCollectedPerMonth) {
             $monthKey = $date->format('Y-m');
-            $matching = $rawEmiCollectionPerMonth->firstWhere('month', $monthKey);
+            $dueMatching = $rawEmiDuePerMonth->get($monthKey);
+            $colMatching = $rawEmiCollectedPerMonth->get($monthKey);
 
             return [
                 'month' => $date->format('M Y'),
-                'count' => $matching ? (int) $matching->count : 0,
-                'total_amount' => $matching ? (float) $matching->total_amount : 0,
-                'collected_amount' => $matching ? (float) $matching->collected_amount : 0,
+                'count' => $dueMatching ? (int) $dueMatching->count : 0,
+                'total_amount' => $dueMatching ? (float) $dueMatching->total_amount : 0,
+                'collected_amount' => $colMatching ? (float) $colMatching->collected_amount : 0,
             ];
         });
 
@@ -987,14 +1063,16 @@ class ReportsAnalyticsController extends Controller
             ? ($paidEmiAmount / $totalEmiAmount) * 100 
             : 0;
 
-        // Upcoming EMIs (next 30 days)
-        $upcomingEmis = Emi::where('status', 'pending')
-            ->whereBetween('due_date', [Carbon::now(), Carbon::now()->addDays(30)])
-            ->count();
+        // Upcoming EMIs (due today or within next 30 days, status pending or partial)
+        $todayStart = Carbon::today()->startOfDay();
+        $upcomingEnd = Carbon::today()->addDays(30)->endOfDay();
 
-        $upcomingEmiAmount = Emi::where('status', 'pending')
-            ->whereBetween('due_date', [Carbon::now(), Carbon::now()->addDays(30)])
-            ->sum('total_amount');
+        $upcomingEmisQuery = (clone $baseEmiQuery)
+            ->whereIn('status', ['pending', 'partial'])
+            ->whereBetween('due_date', [$todayStart, $upcomingEnd]);
+
+        $upcomingEmis = (clone $upcomingEmisQuery)->count();
+        $upcomingEmiAmount = (clone $upcomingEmisQuery)->sum('total_amount');
 
         // Filters for EMI table
         $filterStatus = $request->input('status', 'all');
@@ -1105,24 +1183,24 @@ class ReportsAnalyticsController extends Controller
     {
         $format = $request->get('format', 'csv');
         
-        $emisQuery = Emi::with(['loanAccount.loanApplication.client.user']);
+        $emisQuery = Emi::with(['loanAccount.client.user', 'loanAccount.client.location', 'loanAccount.loanApplication.client.user', 'loanAccount.loanApplication.client.location']);
 
+        [$fromDate, $toDate] = DateRangePreset::applyToRequest($request);
         $status = $request->input('status');
-        $fromDate = $request->input('from_date');
-        $toDate = $request->input('to_date');
         $sort = $request->input('sort');
         $location_id = $request->input('location_id');
         $product_id = $request->input('product_id');
 
         if ($location_id) {
-            $emisQuery->whereHas('loanAccount.loanApplication.client', function($q) use ($location_id) {
+            $emisQuery->whereHas('loanAccount.client', function($q) use ($location_id) {
                 $q->where('location_id', $location_id);
             });
         }
 
         if ($product_id) {
-            $emisQuery->whereHas('loanAccount.loanApplication.product', function($q) use ($product_id) {
-                $q->where('id', $product_id);
+            $emisQuery->whereHas('loanAccount', function($q) use ($product_id) {
+                $q->where('loan_product_id', $product_id)
+                  ->orWhereHas('loanApplication', fn($app) => $app->where('loan_product_id', $product_id));
             });
         }
 
@@ -1165,17 +1243,21 @@ class ReportsAnalyticsController extends Controller
             ->map(function($emi, $index) {
                 $loanAccount = $emi->loanAccount;
                 $loanApplication = optional($loanAccount)->loanApplication;
-                $client = optional($loanApplication)->client;
-                $user = optional($client)->user;
+                $client = optional($loanAccount)->client ?? optional($loanApplication)->client;
+
+                $clientName = optional($client)->client_name ?: (optional($client)->user?->name ?? 'N/A');
+                $clientPhone = optional($client)->client_phone ?: (optional($client)->alternate_phone ?? 'N/A');
+                $location = optional($client)->location?->name ?? 'N/A';
 
                 return [
                     'S.No' => $index + 1,
+                    'Loan Account No' => optional($loanAccount)->account_number ?? optional($loanAccount)->customer_loan_account_number ?? 'N/A',
                     'Application No' => $emi->application_number
                         ?? optional($loanAccount)->application_number
-                        ?? optional($loanApplication)->application_number,
-                    'Client Name' => $user->name
-                        ?? optional($client)->client_name
-                        ?? 'N/A',
+                        ?? optional($loanApplication)->application_number ?? 'N/A',
+                    'Client Name' => $clientName,
+                    'Client Phone' => $clientPhone,
+                    'Location / Branch' => $location,
                     'Instalment' => '#' . $emi->instalment_number,
                     'Due Date' => $emi->due_date ? $emi->due_date->format('Y-m-d') : 'N/A',
                     'EMI Amount (₹)' => number_format($emi->total_amount ?? 0, 2),
@@ -1194,192 +1276,15 @@ class ReportsAnalyticsController extends Controller
      */
     private function exportData($data, $filename, $format = 'csv')
     {
-        if ($format === 'csv') {
-            return $this->exportCSV($data, $filename);
-        } elseif ($format === 'excel') {
-            return $this->exportExcel($data, $filename);
-        } elseif ($format === 'pdf') {
-            return $this->exportPDF($data, $filename);
-        }
-
-        return response()->json(['error' => 'Invalid format'], 400);
+        return ReportExporter::download(
+            $data,
+            $format,
+            $filename,
+            $this->getReportTitle($filename),
+            request()->except(['format', 'page', '_export'])
+        );
     }
 
-    /**
-     * Export as CSV
-     */
-    private function exportCSV($data, $filename)
-    {
-        $headers = [
-            'Content-Type' => 'text/csv',
-            'Content-Disposition' => "attachment; filename=\"{$filename}_" . date('Y-m-d') . ".csv\"",
-        ];
-
-        $callback = function() use ($data) {
-            $file = fopen('php://output', 'w');
-            
-            // Add headers
-            if ($data->isNotEmpty()) {
-                fputcsv($file, array_keys($data->first()));
-            }
-            
-            // Add data
-            foreach ($data as $row) {
-                fputcsv($file, $row);
-            }
-            
-            fclose($file);
-        };
-
-        return response()->stream($callback, 200, $headers);
-    }
-
-    /**
-     * Export as Excel (using CSV with .xlsx extension for simplicity)
-     */
-    private function exportExcel($data, $filename)
-    {
-        $headers = [
-            'Content-Type' => 'application/vnd.ms-excel',
-            'Content-Disposition' => "attachment; filename=\"{$filename}_" . date('Y-m-d') . ".xls\"",
-        ];
-
-        $callback = function() use ($data) {
-            $file = fopen('php://output', 'w');
-            
-            // Add headers
-            if ($data->isNotEmpty()) {
-                fputcsv($file, array_keys($data->first()));
-            }
-            
-            // Add data
-            foreach ($data as $row) {
-                fputcsv($file, $row);
-            }
-            
-            fclose($file);
-        };
-
-        return response()->stream($callback, 200, $headers);
-    }
-
-    /**
-     * Export as PDF using dynamic_document template
-     */
-    private function exportPDF($data, $filename)
-    {
-        try {
-            $reportTitle = $this->getReportTitle($filename);
-            $tableHtml = $this->generateReportTable($data);
-            
-            $logoData = $this->resolveLogoData();
-            
-            $pdf = Pdf::loadView('pdf.dynamic_document', [
-                'header' => '',
-                'footer' => '',
-                'body' => $tableHtml,
-                'logo' => ($logoData['is_base64'] ?? false) ? $logoData['logo'] : null,
-                'is_base64' => $logoData['is_base64'] ?? false,
-                'loan' => (object)['application_number' => 'N/A'],
-                'client' => (object)[],
-                'title' => $reportTitle,
-                'company' => [
-                    'name' => AppearanceHelper::get('title', 'Loan App'),
-                    'subtitle' => AppearanceHelper::get('subtitle', '')
-                ],
-                'companyName' => AppearanceHelper::get('title', 'Loan App'),
-                'applicationNumber' => 'N/A',
-                'clientName' => 'System',
-                'consentTimestamp' => now()->format('d-m-Y H:i:s'),
-                'registeredMobile' => 'N/A',
-                'clientIp' => request()->ip()
-            ])->setPaper('A4', 'portrait')
-              ->setOptions([
-                  'isHtml5ParserEnabled' => true,
-                  'isRemoteEnabled' => true,
-                  'defaultFont' => 'sans-serif',
-                  'tempDir' => storage_path('app/public'),
-                  'chroot'  => [
-                      base_path(),
-                      public_path(),
-                      storage_path('app/public')
-                  ],
-              ]);
-
-            $pdf->setPaper('A4', 'portrait');
-            
-            $fileName = "{$filename}_" . date('Y-m-d') . ".pdf";
-            
-            return $pdf->download($fileName);
-        } catch (\Exception $e) {
-            Log::error('PDF Export Error: ' . $e->getMessage());
-            Log::error($e->getTraceAsString());
-            
-            $errorMsg = 'Failed to generate PDF. Please ensure the PDF engine is correctly configured.';
-            if (app()->environment('local') || config('app.debug')) {
-                $errorMsg .= ' Error: ' . $e->getMessage();
-            }
-            
-            return response()->json([
-                'success' => false,
-                'message' => $errorMsg
-            ], 500);
-        }
-    }
-
-    /**
-     * Generate HTML table for report data
-     */
-    private function generateReportTable($data)
-    {
-        if ($data->isEmpty()) {
-            return '<p class="text-center text-muted">No data available for this report.</p>';
-        }
-
-        $headers = array_keys($data->first());
-        
-        $html = '<div>';
-        $html .= '<table class="table table-striped table-bordered" style="width: 100%; border-collapse: collapse; margin: 20px 0;">';
-        
-        // Table headers
-        $html .= '<thead style="background-color: #f8f9fa;">';
-        $html .= '<tr>';
-        foreach ($headers as $header) {
-            $align = 'left';
-            if (in_array($header, ['S.No', 'Sl. No', 'Sl No', 'ID'], true)) $align = 'center';
-            if (strpos($header, 'Amount') !== false || strpos($header, '₹') !== false || $header === 'Principal' || $header === 'Interest') $align = 'right';
-            
-            $html .= '<th style="padding: 10px 5px; border: 1px solid #dee2e6; font-weight: 600; text-align: ' . $align . '; font-size: 11px;">' . htmlspecialchars($header) . '</th>';
-        }
-        $html .= '</tr>';
-        $html .= '</thead>';
-        
-        // Table body
-        $html .= '<tbody>';
-        foreach ($data as $row) {
-            $html .= '<tr>';
-            foreach ($row as $key => $cell) {
-                $align = 'left';
-                if (in_array($key, ['S.No', 'Sl. No', 'Sl No', 'ID'], true)) $align = 'center';
-                if (strpos($key, 'Amount') !== false || strpos($key, '₹') !== false || $key === 'Principal' || $key === 'Interest') $align = 'right';
-
-                $html .= '<td style="padding: 8px 5px; border: 1px solid #dee2e6; font-size: 10px; text-align: ' . $align . ';">' . htmlspecialchars($cell ?? 'N/A') . '</td>';
-            }
-            $html .= '</tr>';
-        }
-        $html .= '</tbody>';
-        
-        $html .= '</table>';
-        $html .= '</div>';
-        
-        // Add summary info
-        $html .= '<div style="margin-top: 20px; padding: 15px; background-color: #f8f9fa; border-radius: 5px;">';
-        $html .= '<p style="margin: 0; font-size: 14px;"><strong>Total Records:</strong> ' . $data->count() . '</p>';
-        $html .= '<p style="margin: 5px 0 0 0; font-size: 12px; color: #6c757d;">Generated on: ' . now()->format('d-m-Y H:i:s') . '</p>';
-        $html .= '</div>';
-        
-        return $html;
-    }
 
     /**
      * Get report title based on filename
@@ -1396,46 +1301,5 @@ class ReportsAnalyticsController extends Controller
         return $titles[$filename] ?? 'Report';
     }
 
-    /**
-     * Resolve logo data for PDF
-     */
-    private function resolveLogoData(): array
-    {
-        $appearance = Appearance::where('type', 'web')->first();
-        
-        if (!$appearance || !$appearance->logo) {
-            return ['logo' => null, 'is_base64' => false];
-        }
-
-        $logoPath = $appearance->logo;
-        $candidatePaths = [
-            storage_path('app/public/' . $logoPath),
-            public_path('storage/' . $logoPath),
-            public_path($logoPath)
-        ];
-
-        foreach ($candidatePaths as $path) {
-            if ($path && file_exists($path) && is_file($path)) {
-                try {
-                    $type = pathinfo($path, PATHINFO_EXTENSION);
-                    $data = file_get_contents($path);
-                    $base64 = 'data:image/' . $type . ';base64,' . base64_encode($data);
-
-                    return [
-                        'logo' => $base64,
-                        'is_base64' => true
-                    ];
-                } catch (\Exception $e) {
-                    Log::warning('Failed to base64 encode logo: ' . $e->getMessage());
-                }
-            }
-        }
-
-        // Fallback to URL if file exists in public but path resolution failed
-        return [
-            'logo' => asset('storage/' . $logoPath),
-            'is_base64' => false
-        ];
-    }
 
 }

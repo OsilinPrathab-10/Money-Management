@@ -23,6 +23,7 @@ use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Storage;
 use App\Models\Client;
 use App\Models\PaymentMethod;
+use App\Models\LoanConfiguration;
 use App\Models\PaymentGateway;
 
 class LoanApplicationsController extends Controller
@@ -53,7 +54,7 @@ class LoanApplicationsController extends Controller
 
         $stats = [
             'total' => (clone $baseQuery)->count(),
-            'pending' => $statusCounts['pending'] ?? 0,
+            'pending' => ($statusCounts['pending'] ?? 0) + ($statusCounts['applied'] ?? 0),
             'process' => ($statusCounts['process'] ?? 0) + ($statusCounts['in_progress'] ?? 0),
             'disbursed' => $statusCounts['disbursed'] ?? 0,
             'rejected' => $statusCounts['rejected'] ?? 0,
@@ -89,6 +90,7 @@ class LoanApplicationsController extends Controller
             'rejected_applications' => $stats['rejected'],
             'verifiedClients' => $verifiedClients,
             'loanProducts' => $loanProducts,
+            'loanTypes' => \App\Models\LoanType::orderBy('name')->get(),
             'activePaymentMethods' => $activePaymentMethods,
             'activeGateways' => $activeGateways
         ]);
@@ -99,10 +101,10 @@ class LoanApplicationsController extends Controller
         $application->load(['client', 'product.loanType', 'loanAccount', 'disbursementDetail', 'applicationDetail']);
 
         // Agent guard: agents can only view applications for clients they added
-        if (auth()->user()->hasRole('Agent')) {
+        if (auth()->user()->hasRole('Agent') && !auth()->user()->hasAnyRole(['Admin', 'Staff', 'Super Admin', 'admin', 'staff'])) {
             $agentId = optional(auth()->user()->agent)->id;
             $client = $application->client;
-            if (!$agentId || ($client->added_by !== $agentId && $client->assigned_to !== $agentId)) {
+            if (!$agentId || !$client || ($client->added_by !== $agentId && $client->assigned_to !== $agentId)) {
                 abort(403, 'You do not have permission to view this application.');
             }
         }
@@ -237,17 +239,23 @@ class LoanApplicationsController extends Controller
             ], 403);
         }
 
+        $emiDayMax = LoanApplication::maxEmiDayFor(
+            $application->term_unit,
+            $request->input('emi_start_date') ?: $application->emi_start_date
+        );
+
         $request->validate([
             'approved_amount' => 'required|numeric|min:1',
             'interest_rate' => 'required|numeric',
             'tenure' => 'required|integer',
-            'emi_day' => 'required|integer|min:1|max:31',
+            'emi_day' => 'required|integer|min:1|max:' . $emiDayMax,
             'emi_start_date' => 'nullable|date',
             'live_photo' => 'nullable|string', // Base64
             'cash_photo' => 'nullable|string', // Base64
             'terms_accepted' => 'required|accepted',
         ], [
             'terms_accepted.accepted' => 'You must accept the Terms and Conditions for safety.',
+            'emi_day.max' => 'EMI day cannot be greater than ' . $emiDayMax . ' for the selected start month.',
         ]);
 
         if (empty($request->live_photo) && empty($request->cash_photo)) {
@@ -354,6 +362,7 @@ class LoanApplicationsController extends Controller
                 'processing_fee' => 'nullable|numeric|min:0',
                 'document_charges' => 'nullable|numeric|min:0',
                 'other_charges' => 'nullable|numeric|min:0',
+                'banking_charges' => 'nullable|numeric|min:0',
                 'bank_name' => 'nullable|string|max:100',
                 'account_number' => 'nullable|string|max:50',
                 'holder_name' => 'nullable|string|max:100',
@@ -362,7 +371,22 @@ class LoanApplicationsController extends Controller
                 'utr_number' => 'nullable|string|max:100',
                 'disbursed_at' => 'nullable|date',
                 'emi_start_date' => 'nullable|date',
+                'internal_bank_account_id' => 'required|exists:bank_accounts,id',
+                'collateral_document' => 'nullable|file|mimes:pdf,jpg,jpeg,png,doc,docx|max:10240',
+                'other_document'      => 'nullable|file|mimes:pdf,jpg,jpeg,png,doc,docx|max:10240',
             ]);
+
+            $collateralPath = null;
+            if ($request->hasFile('collateral_document')) {
+                $collateralPath = $request->file('collateral_document')->store('uploads/disbursements', 'public');
+            }
+
+            $otherPath = null;
+            if ($request->hasFile('other_document')) {
+                $otherPath = $request->file('other_document')->store('uploads/disbursements', 'public');
+            }
+
+            $fullCustomerAccountNumber = 'TEMP_' . uniqid();
 
             // Set default values if not provided
             $product = $application->product;
@@ -378,7 +402,44 @@ class LoanApplicationsController extends Controller
             $ifscCode = $validated['ifsc_code'] ?? 'N/A';
             $disburseAt = $validated['disbursed_at'] ? Carbon::parse($validated['disbursed_at']) : now();
 
+            // Balance checking logic
+            $principal = $application->loan_amount;
+            $processingFee = $request->has('processing_fee') ? (float)$request->processing_fee : (optional($product)->processing_fee ?? 0);
+            $documentCharges = $request->has('document_charges') ? (float)$request->document_charges : (optional($product)->document_charges ?? 0);
+            $otherCharges = $request->has('other_charges') ? (float)$request->other_charges : (optional($product)->other_charges ?? 0);
+            $bankingCharges = $request->has('banking_charges') ? (float)$request->banking_charges : (optional($product)->banking_charges ?? 0);
+            // Banking charges are a company bank cost — do not reduce the client handover amount.
+            $clientDeductions = $processingFee + $documentCharges + $otherCharges;
+            $netDisbursedAmount = max($principal - $clientDeductions, 0);
+            $companyOutflow = $netDisbursedAmount + max(0, $bankingCharges);
+
+            $internalBank = \App\Models\Account\BankAccount::find($validated['internal_bank_account_id']);
+            if (!$internalBank) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Please select a valid internal bank account.'
+                ], 422);
+            }
+            if ($internalBank->current_balance < $companyOutflow) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Insufficient funds. The selected bank account (' . $internalBank->bank_name . ') has a balance of ₹' . number_format($internalBank->current_balance, 2) . ', which is less than the required outflow of ₹' . number_format($companyOutflow, 2) . ' (client payout ₹' . number_format($netDisbursedAmount, 2) . ($bankingCharges > 0 ? ' + bank transfer charges ₹' . number_format($bankingCharges, 2) : '') . ').'
+                ], 422);
+            }
+
             DB::beginTransaction();
+
+            $application = LoanApplication::whereKey($application->id)->lockForUpdate()->firstOrFail();
+
+            if (in_array($application->status, ['disbursed', 'closed', 'rejected'], true)
+                || LoanAccount::where('loan_application_id', $application->id)->exists()) {
+                DB::rollBack();
+
+                return response()->json([
+                    'success' => false,
+                    'message' => 'This loan has already been disbursed.',
+                ], 422);
+            }
 
             $client = $application->client;
 
@@ -386,6 +447,8 @@ class LoanApplicationsController extends Controller
             $application->update([
                 'status' => 'disbursed',
                 'disbursed_at' => $disburseAt,
+                'collateral_document' => $collateralPath,
+                'other_document' => $otherPath,
             ]);
 
             $principal = $application->loan_amount;
@@ -393,8 +456,8 @@ class LoanApplicationsController extends Controller
             $annualRate = (float)($application->interest_rate ?? 0);
             $isInterestOnly = ($application->loan_mode ?? 'emi') === 'interest_only';
 
-            if ($annualRate <= 0 || (!$isInterestOnly && $tenure <= 0)) {
-                throw new \Exception('Invalid loan configuration: interest rate or tenure missing');
+            if ($annualRate < 0 || ($isInterestOnly && $annualRate <= 0) || (!$isInterestOnly && $tenure <= 0)) {
+                throw new \Exception('Invalid loan configuration: interest rate or tenure missing. Free Loans must use standard EMI mode with 0% interest.');
             }
 
             $emiService = new EmiCalculator();
@@ -449,18 +512,20 @@ class LoanApplicationsController extends Controller
             // Calculate EMI Start Date based on configuration
             $startDateObj = null;
             if ($application->emi_start_year && $application->emi_start_month && $application->emi_start_day) {
-                $startDateObj = Carbon::create($application->emi_start_year, $application->emi_start_month, $application->emi_start_day);
+                $startDateObj = Carbon::create((int) $application->emi_start_year, (int) $application->emi_start_month, (int) $application->emi_start_day);
+            } elseif (! empty($application->emi_start_date)) {
+                $startDateObj = Carbon::parse($application->emi_start_date);
+            }
                 
-                // Subtract 1 period ONLY for standard EMI because generateSchedule adds 1 period for the first EMI.
-                // For Kandhuvatti (interest_only), the loop uses the date directly without adding for i=1.
-                if (!$isInterestOnly) {
-                    if ($frequency === 'daily') {
-                        $startDateObj->subDay();
-                    } elseif ($frequency === 'weekly') {
-                        $startDateObj->subWeek();
-                    } else {
-                        $startDateObj->subMonth();
-                    }
+            // Subtract 1 period ONLY for standard EMI because generateSchedule adds 1 period for the first EMI.
+            // For Kandhuvatti (interest_only), the loop uses the date directly without adding for i=1.
+            if ($startDateObj && !$isInterestOnly) {
+                if ($frequency === 'daily') {
+                    $startDateObj->subDay();
+                } elseif ($frequency === 'weekly') {
+                    $startDateObj = \App\Support\CalendarWeek::addWeeks($startDateObj, -1);
+                } else {
+                    $startDateObj->subMonth();
                 }
             }
 
@@ -488,6 +553,8 @@ class LoanApplicationsController extends Controller
             $processingFee = $request->has('processing_fee') ? (float)$request->processing_fee : (optional($product)->processing_fee ?? 0);
             $documentCharges = $request->has('document_charges') ? (float)$request->document_charges : (optional($product)->document_charges ?? 0);
             $otherCharges = $request->has('other_charges') ? (float)$request->other_charges : (optional($product)->other_charges ?? 0);
+            $bankingCharges = $request->has('banking_charges') ? (float)$request->banking_charges : (optional($product)->banking_charges ?? 0);
+            // Banking charges are company bank cost — excluded from client net disbursed.
             $totalCharges = $processingFee + $documentCharges + $otherCharges;
             $netDisbursedAmount = max($principal - $totalCharges, 0);
 
@@ -497,6 +564,7 @@ class LoanApplicationsController extends Controller
             $details['applied_processing_fee'] = $processingFee;
             $details['applied_document_charges'] = $documentCharges;
             $details['applied_other_charges'] = $otherCharges;
+            $details['applied_banking_charges'] = $bankingCharges;
             $applicationDetail->details = $details;
             $applicationDetail->save();
 
@@ -509,6 +577,7 @@ class LoanApplicationsController extends Controller
             $account = LoanAccount::create([
                 'loan_application_id' => $application->id,
                 'client_id' => $application->client_id,
+                'customer_loan_account_number' => $fullCustomerAccountNumber,
                 'application_number' => $application->application_number,
                 'loan_code' => $application->loan_code,
                 'loan_mode' => $application->loan_mode ?? 'emi',
@@ -544,7 +613,93 @@ class LoanApplicationsController extends Controller
                 'ifsc_code' => $ifscCode,
                 'disbursement_amount' => $netDisbursedAmount,
                 'disburse_at' => $disburseAt,
+                'internal_bank_account_id' => $internalBank->id,
+                'collateral_document' => $collateralPath,
+                'other_document' => $otherPath,
             ]);
+
+            // Create bank transaction debit (client handover only)
+            $bankTxService = app(\App\Services\Account\BankTransactionsService::class);
+            $txDescription = 'Loan Disbursement for Account ' . $account->customer_loan_account_number . ' - ' . $client->client_name;
+            $bankTxService->createLoanDisbursementTransaction(
+                $internalBank->id,
+                $netDisbursedAmount,
+                $utrNumber,
+                $txDescription,
+                $disburseAt,
+                \App\Services\Account\AccountingTags::MODULE_LOAN,
+                \App\Services\Account\AccountingTags::ENTRY_DISBURSEMENT
+            );
+
+            $chitAccounting = app(\App\Services\Account\ChitAccountingService::class);
+            $disburseDate = $disburseAt instanceof \Carbon\Carbon
+                ? $disburseAt->toDateString()
+                : (string) $disburseAt;
+
+            // Company bank transfer charges — separate bank debit + expense, not deducted from client.
+            $chitAccounting->recordBankTransferCharges(
+                (int) $internalBank->id,
+                (float) $bankingCharges,
+                ($utrNumber ?: $account->customer_loan_account_number) . '-BANKCHG',
+                $disburseDate,
+                \App\Services\Account\AccountingTags::MODULE_LOAN,
+                'Loan',
+                (string) $account->customer_loan_account_number,
+                (string) $client->client_name,
+                (float) $netDisbursedAmount
+            );
+
+            // Retained disbursement fees → Day Book revenues (tagged). Banking charges are a bank debit + expense.
+            $loanFeeLines = [
+                [
+                    'amount' => round((float) $processingFee, 2),
+                    'name' => 'Loan Processing Fee',
+                    'code' => 'LOAN-PROC',
+                    'entry' => \App\Services\Account\AccountingTags::ENTRY_PROC_FEE,
+                    'label' => 'processing fee',
+                    'suffix' => 'PROC',
+                ],
+                [
+                    'amount' => round((float) $documentCharges, 2),
+                    'name' => 'Loan Document Fee',
+                    'code' => 'LOAN-DOC',
+                    'entry' => \App\Services\Account\AccountingTags::ENTRY_DOC_FEE,
+                    'label' => 'document fee',
+                    'suffix' => 'DOC',
+                ],
+                [
+                    'amount' => round((float) $otherCharges, 2),
+                    'name' => 'Loan Other Charges',
+                    'code' => 'LOAN-OTHER',
+                    'entry' => \App\Services\Account\AccountingTags::ENTRY_OTHER_FEE,
+                    'label' => 'other charges',
+                    'suffix' => 'OTHER',
+                ],
+            ];
+            foreach ($loanFeeLines as $fee) {
+                if ($fee['amount'] <= 0.009) {
+                    continue;
+                }
+                try {
+                    $chitAccounting->postExternalRevenue(
+                        $fee['name'],
+                        $fee['code'],
+                        $fee['amount'],
+                        "Loan {$fee['label']} — {$account->customer_loan_account_number} — {$client->client_name}",
+                        ($utrNumber ?: $account->customer_loan_account_number) . '-' . $fee['suffix'],
+                        $disburseDate,
+                        $internalBank->id,
+                        \App\Services\Account\AccountingTags::MODULE_LOAN,
+                        $fee['entry']
+                    );
+                } catch (\Throwable $e) {
+                    \Illuminate\Support\Facades\Log::warning('Loan fee revenue post failed', [
+                        'loan_account' => $account->customer_loan_account_number,
+                        'fee_code' => $fee['code'],
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+            }
 
             // Save user-uploaded loan agreement PDF to client_loan_documents
             if ($application->loan_agreement_pdf) {
@@ -564,67 +719,10 @@ class LoanApplicationsController extends Controller
             // Note: Loan sanction letter and repayment schedule are auto-generated by GenerateDocument event
 
             if ($application->loan_mode === 'interest_only') {
-                // For Kandhuvatti, we create 12 initial interest cycles (as requested)
-                $exactInterest = $principal * ($application->interest_rate / 100);
-                $interestPerCycle = round($exactInterest);
-                $totalInterest = round($exactInterest * 12);
-                
-                // For open loans, use the selected EMI start date if set; fallback to 1 period after disbursement date
-                $currentDate = null;
-                if ($application->emi_start_year && $application->emi_start_month && $application->emi_start_day) {
-                    $currentDate = Carbon::create($application->emi_start_year, $application->emi_start_month, $application->emi_start_day);
-                } else {
-                    $currentDate = $disburseAt->copy();
-                    if ($frequency === 'daily') {
-                        $currentDate->addDay();
-                    } elseif ($frequency === 'weekly') {
-                        $currentDate->addWeek();
-                    } else {
-                        $currentDate->addMonth();
-                    }
-                }
-                
-                for ($i = 1; $i <= 12; $i++) {
-                    // Adjust date for each instalment (1st one is on start date, then add frequency)
-                    if ($i > 1) {
-                        if ($frequency === 'daily') {
-                            $currentDate->addDay();
-                        } elseif ($frequency === 'weekly') {
-                            $currentDate->addWeek();
-                        } else {
-                            $currentDate->addMonth();
-                        }
-                    }
-
-                    // Deduct cumulative difference from the 12th (last) EMI
-                    $currentInterest = ($i === 12) ? ($totalInterest - ($interestPerCycle * 11)) : $interestPerCycle;
-
-                    $emi = Emi::create([
-                        'loan_account_id'    => $account->id,
-                        'instalment_number'  => $i,
-                        'principal_amount'   => 0,
-                        'interest_amount'    => $currentInterest,
-                        'total_amount'       => $currentInterest,
-                        'due_date'           => $currentDate->format('Y-m-d'),
-                        'previous_balance'   => 0,
-                        'total_due'          => $currentInterest,
-                        'pending_amount'     => $currentInterest,
-                        'paid_amount'        => 0,
-                        'status'             => 'pending',
-                    ]);
-
-                    if ($client->assigned_to) {
-                        \App\Models\EmiAgentAssignment::updateOrCreate(
-                            ['emi_id' => $emi->id],
-                            [
-                                'agent_id' => $client->assigned_to,
-                                'status' => 'assigned',
-                                'assigned_at' => now(),
-                                'remarks' => 'Auto-assigned upon loan disbursement'
-                            ]
-                        );
-                    }
-                }
+                // Open loans have no fixed tenure, so cycles are never projected
+                // forward. Only cycles already due exist; the rest appear as
+                // their due dates arrive (loans:sync-open-cycles).
+                app(\App\Services\OpenLoanCycleService::class)->syncDueCycles($account);
             } else {
                 foreach ($scheduleData['schedule'] as $item) {
 
@@ -732,6 +830,7 @@ class LoanApplicationsController extends Controller
     {
         $statusColors = [
             'pending' => 'warning',
+            'applied' => 'warning',
             'approved' => 'success',
             'process' => 'primary',
             'in_progress' => 'primary',
@@ -796,10 +895,30 @@ class LoanApplicationsController extends Controller
 
         if ($request->has('status') && !empty($request->status)) {
             if ($request->status === 'process' || $request->status === 'in_progress') {
-                $query->where('status', 'process');
+                $query->whereIn('status', ['process', 'in_progress']);
+            } elseif ($request->status === 'pending' || $request->status === 'applied') {
+                $query->whereIn('status', ['pending', 'applied']);
             } else {
                 $query->where('status', $request->status);
             }
+        }
+
+        // Filter by loan_mode (Standard EMI vs Open Loan)
+        if ($request->filled('loan_mode')) {
+            if ($request->loan_mode === 'interest_only') {
+                $query->where('loan_mode', 'interest_only');
+            } elseif ($request->loan_mode === 'emi') {
+                $query->where(function ($q) {
+                    $q->whereNull('loan_mode')->orWhere('loan_mode', '!=', 'interest_only');
+                });
+            }
+        }
+
+        // Filter by loan_type_id
+        if ($request->filled('loan_type_id')) {
+            $query->whereHas('product', function ($q) use ($request) {
+                $q->where('loan_type_id', $request->loan_type_id);
+            });
         }
 
         // Search handling
@@ -833,7 +952,7 @@ class LoanApplicationsController extends Controller
                 $amountValue = $application->loan_amount;
 
                 return [
-                'id' => $application->getRouteKey(),
+                    'id' => $application->getRouteKey(),
                     'application_number' => $application->application_number,
                     'loan_name' => optional($application->product)->loan_name ?? 'N/A',
                     'loan_amount' => $amountValue && $amountValue > 0
@@ -846,10 +965,11 @@ class LoanApplicationsController extends Controller
                     'borrower_phone' => optional($application->client)->client_phone ?? 'N/A',
                     'zone' => optional(optional($application->client)->location)->name ?? 'N/A',
                     'client_id' => $application->client_id,
+                    'applied_at' => $application->applied_date->format('d-m-Y'),
                     'status' => $application->status,
                     'status_label' => match ($application->status) {
                         'process', 'in_progress' => 'In Progress',
-                        'pending' => 'Pending Approval',
+                        'pending', 'applied' => 'Pending Approval',
                         default => ucfirst($application->status),
                     },
                     'status_color' => $statusColors[$application->status] ?? 'secondary',
@@ -876,7 +996,7 @@ class LoanApplicationsController extends Controller
         $frequency = $request->input('frequency', 'monthly');
         $interestType = $request->input('interest_type', 'flat');
 
-        if ($principal <= 0 || $annualRate <= 0 || $tenure <= 0) {
+        if ($principal <= 0 || $annualRate < 0 || $tenure <= 0) {
             return response()->json([
                 'emi' => 0,
                 'total_interest' => 0,
@@ -905,6 +1025,11 @@ class LoanApplicationsController extends Controller
      */
     public function storeQuickApplication(Request $request): JsonResponse
     {
+        $emiDayMax = LoanApplication::maxEmiDayFor(
+            $request->input('repayment_frequency'),
+            $request->input('emi_start_date')
+        );
+
         $validated = $request->validate([
             'client_id' => 'required|exists:clients,id',
             'loan_code' => 'required|exists:loan_products,loan_code',
@@ -912,10 +1037,11 @@ class LoanApplicationsController extends Controller
             'loan_mode' => 'nullable|in:emi,interest_only',
             'tenure' => 'required_if:loan_mode,emi|nullable|integer|min:0',
             'repayment_frequency' => 'required|in:daily,weekly,monthly',
-            'emi_day' => 'required|integer|min:1',
+            'emi_day' => 'required|integer|min:1|max:' . $emiDayMax,
             'emi_start_date' => 'required|date',
-            'payment_method' => 'required|in:manual,e-nach',
-            'payment_gateway' => 'required_if:payment_method,e-nach|nullable|in:razorpay,cashfree,payu',
+            'applied_at' => 'nullable|date',
+        ], [
+            'emi_day.max' => 'EMI day cannot be greater than ' . $emiDayMax . ' for the selected start month.',
         ]);
 
         // Eligibility Check: Block if client has a pending loan
@@ -942,21 +1068,28 @@ class LoanApplicationsController extends Controller
             }
         }
 
-        try {
-            $product = LoanProduct::where('loan_code', $validated['loan_code'])->firstOrFail();
-            
-            DB::beginTransaction();
-
-            // Frequency specific emi_day adjustment/default
             $emiDay = (int)$validated['emi_day'];
             if ($validated['repayment_frequency'] === 'daily') {
                 $emiDay = 1; // Default for daily
             }
 
             $emiStartDate = Carbon::parse($validated['emi_start_date']);
+            if ($validated['repayment_frequency'] === 'monthly' && $emiDay > $emiStartDate->daysInMonth) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'EMI day cannot be greater than ' . $emiStartDate->daysInMonth . ' for ' . $emiStartDate->format('F Y') . '.',
+                ], 422);
+            }
+
+        try {
+            $product = LoanProduct::where('loan_code', $validated['loan_code'])->firstOrFail();
+            
+            DB::beginTransaction();
 
             $loanMode = $validated['loan_mode'] ?? 'emi';
-            if ($product->interest_type === 'reducing' || $product->interest_type === 'declining_balance') {
+            if ((float) $product->interest_rate === 0.0
+                || $product->interest_type === 'reducing'
+                || $product->interest_type === 'declining_balance') {
                 $loanMode = 'emi';
             }
 
@@ -973,11 +1106,17 @@ class LoanApplicationsController extends Controller
                 'emi_start_year' => $emiStartDate->year,
                 'emi_start_month' => $emiStartDate->month,
                 'emi_start_day' => $emiStartDate->day,
-                'payment_method' => $validated['payment_method'],
-                'payment_gateway' => $validated['payment_method'] === 'e-nach' ? $validated['payment_gateway'] : null,
+                'payment_method' => 'manual',
+                'payment_gateway' => null,
+                'applied_at' => !empty($validated['applied_at']) ? Carbon::parse($validated['applied_at']) : now(),
             ]);
 
             DB::commit();
+
+            event(new \App\Events\NewLoanApplicationEvent(
+                $application,
+                auth()->user()?->hasRole('Agent') ? 'agent' : 'admin'
+            ));
 
             // Send SMS Notification
             try {
@@ -994,10 +1133,14 @@ class LoanApplicationsController extends Controller
                 Log::error('Loan submission SMS failed: ' . $e->getMessage());
             }
 
+            $routeKey = $application->getRouteKey();
+            $redirectPath = 'loan-application/view/' . $routeKey;
+
             return response()->json([
                 'success' => true,
                 'message' => 'Loan application submitted successfully!',
-                'redirect' => route('loan-application-view', $application->getRouteKey())
+                'redirect_path' => $redirectPath,
+                'redirect' => url($redirectPath),
             ]);
 
         } catch (\Throwable $e) {
@@ -1023,19 +1166,89 @@ class LoanApplicationsController extends Controller
             ->whereIn('status', ['pending', 'approved', 'process', 'in_progress'])
             ->first();
 
-        if ($pendingApplication) {
-            $reason = "Client has a {$pendingApplication->status} loan application (#{$pendingApplication->application_number}).";
+        $eligible = true;
+        $message = 'Client is eligible for a new loan.';
 
-            return response()->json([
-                'eligible' => false,
-                'message' => $reason
-            ]);
+        if ($pendingApplication) {
+            $eligible = false;
+            $message = "Client has a {$pendingApplication->status} loan application (#{$pendingApplication->application_number}).";
         }
 
+        $chitDetails = $this->getClientChitDetails($clientId);
+
         return response()->json([
-            'eligible' => true,
-            'message' => 'Client is eligible for a new loan.'
+            'eligible' => $eligible,
+            'message' => $message,
+            'chit_details' => $chitDetails,
         ]);
+    }
+
+    /**
+     * Get chit fund details for a client (used during loan application)
+     */
+    private function getClientChitDetails(int $clientId): array
+    {
+        $memberships = \App\Models\GroupMember::with(['group.scheme'])
+            ->involvingClient($clientId)
+            ->whereIn('status', ['active', 'approved', 'applied'])
+            ->get();
+
+        if ($memberships->isEmpty()) {
+            return ['has_chit' => false];
+        }
+
+        $memberIds = $memberships->pluck('id');
+
+        $installments = \App\Models\Installment::whereIn('member_id', $memberIds)->get();
+
+        $today = Carbon::now()->startOfDay();
+
+        $totalChitValue = 0;
+        $totalMonthlyInstallment = 0;
+        $groups = [];
+
+        foreach ($memberships as $membership) {
+            $group = $membership->group;
+            if (! $group) {
+                continue;
+            }
+
+            $groupInstallments = $installments->where('member_id', $membership->id);
+            $overdueInstallments = $groupInstallments->filter(fn ($i) => ! in_array($i->status, ['paid', 'waived']) && $i->due_date && $i->due_date->lt($today));
+            $overdueAmount = $overdueInstallments->sum(fn ($i) => max(0, (float) $i->amount + (float) $i->penalty_amount - (float) $i->paid_amount));
+
+            $totalChitValue += (float) $group->chit_value;
+            $totalMonthlyInstallment += (float) $group->installment_amount;
+
+            $groups[] = [
+                'group_code' => $group->group_code,
+                'scheme_name' => $group->scheme->name ?? '—',
+                'chit_value' => (float) $group->chit_value,
+                'installment_amount' => (float) $group->installment_amount,
+                'status' => $group->status,
+                'total_installments' => $groupInstallments->count(),
+                'paid_count' => $groupInstallments->where('status', 'paid')->count(),
+                'overdue_count' => $overdueInstallments->count(),
+                'overdue_amount' => round($overdueAmount, 2),
+                'total_paid' => round($groupInstallments->sum('paid_amount'), 2),
+                'total_balance' => round($groupInstallments->sum(fn ($i) => max(0, (float) $i->amount + (float) $i->penalty_amount - (float) $i->paid_amount)), 2),
+            ];
+        }
+
+        $totalOverdue = collect($groups)->sum('overdue_amount');
+        $totalBalance = collect($groups)->sum('total_balance');
+        $totalPaid = collect($groups)->sum('total_paid');
+
+        return [
+            'has_chit' => true,
+            'total_groups' => count($groups),
+            'total_chit_value' => round($totalChitValue, 2),
+            'total_monthly_installment' => round($totalMonthlyInstallment, 2),
+            'total_overdue' => round($totalOverdue, 2),
+            'total_balance' => round($totalBalance, 2),
+            'total_paid' => round($totalPaid, 2),
+            'groups' => $groups,
+        ];
     }
 
     /**
@@ -1059,8 +1272,11 @@ class LoanApplicationsController extends Controller
             $application->applicationDetail()->delete();
             $application->disbursementDetail()->delete();
             // Delete associated loan account if it exists
-            if ($application->loanAccount()->exists()) {
-                $application->loanAccount()->delete();
+            $loanAccount = $application->loanAccount;
+            if ($loanAccount) {
+                // Purge associated bank transactions and accounting logs
+                app(\App\Services\ClientAccountingCleanupService::class)->purgeForLoanAccount($loanAccount);
+                $loanAccount->delete();
             }
             // Delete the application itself
             $application->delete();

@@ -17,10 +17,26 @@ class AdminOrStaff
     public function handle(Request $request, Closure $next): Response
     {
         if (!Auth::check()) {
+            if ($request->expectsJson() || $request->ajax()) {
+                return response()->json([
+                    'success' => false,
+                    'status' => false,
+                    'message' => 'Your session has expired. Please refresh the page and login again.',
+                ], 401);
+            }
+
             return redirect('/');
         }
 
         if (!Auth::user()->hasAnyRole(['Admin', 'Staff', 'Agent'])) {
+            if ($request->expectsJson() || $request->ajax()) {
+                return response()->json([
+                    'success' => false,
+                    'status' => false,
+                    'message' => 'You do not have permission to access this area.',
+                ], 403);
+            }
+
             abort(403, 'You do not have permission to access this area.');
         }
 

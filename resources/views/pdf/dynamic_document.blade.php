@@ -8,23 +8,26 @@
     $loanData = $loan ?? null;
     $clientData = $client
         ?? ($loanData->client ?? null)
-        ?? ($loanData->loanApplication->client ?? null);
+        ?? ($loanData?->loanApplication?->client ?? null);
 
     $clientNameParts = array_filter([
-        $clientData->first_name ?? null,
-        $clientData->last_name ?? null,
+        $clientData?->first_name ?? null,
+        $clientData?->last_name ?? null,
     ]);
 
     $clientName = trim(implode(' ', $clientNameParts));
     if ($clientName === '') {
-        $clientName = $clientData->client_name ?? ($clientData->name ?? 'Valued Client');
+        $clientName = $clientData?->client_name ?? ($clientData?->name ?? 'Valued Client');
     }
 
     $applicationNumber = $loanData->application_number
-        ?? ($loanData->loanApplication->application_number ?? null)
+        ?? ($loanData?->loanApplication?->application_number ?? null)
         ?? ($loanData->account_number ?? 'N/A');
 
-    $registeredMobile = $clientData->phone ?? 'N/A';
+    $registeredMobile = $clientData?->client_phone
+        ?? $clientData?->phone
+        ?? $clientData?->mobile_no
+        ?? 'N/A';
 
     $clientIp = request()->ip() ?? 'N/A';
 
@@ -40,43 +43,44 @@
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8"/>
     <title>{{ $title ?? 'Document' }}</title>
     <style>
-        @page {
-            margin: 100px 50px 80px 50px;
-        }
-        
         body {
             font-family: 'Noto Sans', 'DejaVu Sans', sans-serif;
-            font-size: 12px;
-            line-height: 1.6;
+            font-size: 10px;
+            line-height: 1.5;
             color: #000;
         }
 
     header {
         width: 100%;
-        margin-bottom: 20px;
+        margin-bottom: 15px;
     }
 
     .header-container {
         background: #fff;
-        padding: 15px 0;
+        padding: 10px 0;
         width: 100%;
         border-bottom: 2px solid #ddd;
     }
 
+    .header-table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+
     .header-left {
-        float: left;
         width: 50%;
         text-align: left;
+        vertical-align: top;
     }
 
     .header-right {
-        float: right;
         width: 50%;
         text-align: right;
+        vertical-align: top;
     }
 
     .application-number {
-        font-size: 12px;
+        font-size: 11px;
         font-weight: 600;
         color: #333;
         margin: 0 0 4px 0;
@@ -84,7 +88,7 @@
     }
 
     .application-date {
-        font-size: 13px;
+        font-size: 12px;
         color: {{ $primaryColor }};
         margin: 0;
         line-height: 1.4;
@@ -92,7 +96,7 @@
     }
 
     .application-time {
-        font-size: 13px;
+        font-size: 12px;
         color: {{ $primaryColor }};
         margin: 4px 0 0 0;
         line-height: 1.4;
@@ -120,15 +124,6 @@
     }
 
     .logo-text {
-        font-size: 14px;
-        font-weight: 700;
-        color: #333;
-        text-transform: uppercase;
-        letter-spacing: 0.8px;
-        display: inline-block;
-    }
-
-    .logo-text {
         font-size: 12px;
         font-weight: 700;
         color: #333;
@@ -137,15 +132,13 @@
         display: inline-block;
     }
 
-    footer {
-        position: fixed;
-        bottom: -40px;
-        left: 0;
-        right: 0;
+    .document-footer {
         text-align: center;
-        font-size: 10px;
+        font-size: 9px;
         color: #666;
-        padding: 10px 0;
+        padding: 8px 0 0 0;
+        margin-top: 16px;
+        border-top: 1px solid #ddd;
     }
 
     .footer-content {
@@ -155,7 +148,7 @@
 
     .footer-consent {
         margin-top: 4px;
-        font-size: 10px;
+        font-size: 9px;
         font-weight: 600;
         color: #2f2f2f;
     }
@@ -167,18 +160,18 @@
     .document-wrapper {
         border: none;
         border-radius: 0;
-        padding: 20px 32px 36px;
+        padding: 10px 15px 20px;
         background: #ffffff;
         box-shadow: none;
     }
 
     .document-title {
         text-align: center;
-        font-size: 20px;
+        font-size: 18px;
         font-weight: 700;
         text-transform: uppercase;
         letter-spacing: 1px;
-        margin: 12px 0 20px 0;
+        margin: 8px 0 15px 0;
         color: #222;
     }
 
@@ -187,39 +180,44 @@
     }
 
     .content-section p {
-        margin-bottom: 12px;
+        margin-bottom: 10px;
     }
 
     .content-section ul {
-        margin: 0 0 12px 18px;
+        margin: 0 0 10px 18px;
         padding: 0;
     }
 
     .content-section li {
-        margin-bottom: 6px;
+        margin-bottom: 4px;
     }
 
     .content-section table {
         width: 100%;
         border-collapse: collapse;
-        margin: 15px 0;
-        font-size: 12px;
+        margin: 10px 0;
+        font-size: 9px;
+        table-layout: auto;
+        word-wrap: break-word;
     }
 
     .content-section table th,
     .content-section table td {
-        padding: 8px 10px;
+        padding: 6px 8px;
         border: 1px solid #d9dde7;
         text-align: left;
+        word-break: break-word;
+        mso-number-format: "\@";
     }
 
     .content-section table thead td,
     .content-section table thead th {
-        background-color: #f5f5f5;
+        background-color: #666cff;
+        color: #ffffff;
         font-weight: 700;
         text-align: center;
-        border: 1px solid #ccc;
-        padding: 10px 8px;
+        border: 1px solid #5256cc;
+        padding: 8px 6px;
     }
 
     .content-section table tbody td {
@@ -236,36 +234,45 @@
 </head>
 <body>
 
-  <header>
-    <div class="header-container">
-      <div class="header-left">
-        <p class="application-date">Date : {{ $generatedDate }}</p>
-        <p class="application-time">Time : {{ $generatedTime }}</p>
-      </div>
-      <div class="header-right">
-        <div class="logo-wrapper">
-          @if(!empty($logo))
-            <img src="{{ $logo }}" alt="Logo" class="logo-img" onerror="this.style.display='none';">
-          @else
-            <span class="logo-text">{{ $companyName }}</span>
-          @endif
-          <div class="logo-title">{{ $companyName }}</div>
-        </div>
-      </div>
-    </div>
-  </header>
-
-  <main>
-      <div class="document-wrapper">
-          @if(!empty($title))
-            <div class="document-title">{{ $title }}</div>
-          @endif
-
-          <div class="content-section">
-              {!! $body !!}
+  <div class="header-container">
+    <table class="header-table">
+      <tr>
+        <td class="header-left">
+          <p class="application-date">Date : {{ $generatedDate }}</p>
+          <p class="application-time">Time : {{ $generatedTime }}</p>
+        </td>
+        <td class="header-right">
+          <div class="logo-wrapper">
+            @if(!empty($reportBranding['logo'] ?? $logo))
+              <img src="{{ $reportBranding['logo'] ?? $logo }}" alt="Logo" class="logo-img" width="120" height="40">
+            @else
+              <span class="logo-text">{{ $reportBranding['name'] ?? $companyName }}</span>
+            @endif
+            <div class="logo-title">{{ $reportBranding['name'] ?? $companyName }}</div>
+            @if(!empty($reportBranding['address']))
+              <div style="max-width: 260px; margin-top: 3px; font-size: 9px; line-height: 1.3; color: #666; text-align: right;">
+                {{ $reportBranding['address'] }}
+              </div>
+            @endif
           </div>
+        </td>
+      </tr>
+    </table>
+  </div>
+
+  <div class="document-wrapper">
+      @if(!empty($title))
+        <div class="document-title">{{ $title }}</div>
+      @endif
+
+      @if(!empty($header))
+        <div class="content-section">{!! $header !!}</div>
+      @endif
+
+      <div class="content-section">
+          {!! $body !!}
       </div>
-  </main>
+  </div>
 
 </body>
 </html>

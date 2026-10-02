@@ -8,7 +8,8 @@
   let emiChart;
   let scheduleData = [];
   let latestScheduleRequest = 0;
-  const baseUrl = window.baseUrl || document.documentElement.getAttribute('data-base-url') + '/' || window.location.origin + '/';
+  const rawBaseUrl = window.baseUrl || document.documentElement.getAttribute('data-base-url') || window.location.origin || '';
+  const baseUrl = rawBaseUrl.endsWith('/') ? rawBaseUrl : rawBaseUrl + '/';
 
   // Initialize on page load
   document.addEventListener('DOMContentLoaded', function () {
@@ -307,6 +308,8 @@
 
     // Get unique years from schedule
     const years = [...new Set(normalizedSchedule.map(item => {
+      const match = /^(\d{4})/.exec(String(item.due_date || ''));
+      if (match) return parseInt(match[1], 10);
       const date = new Date(item.due_date);
       return isNaN(date.getTime()) ? new Date().getFullYear() : date.getFullYear();
     }))].sort((a, b) => a - b);
@@ -353,7 +356,9 @@
     tbody.innerHTML = '';
 
     const filteredSchedule = schedule.filter(item => {
-      return new Date(item.due_date).getFullYear() === parseInt(year);
+      const match = /^(\d{4})/.exec(String(item.due_date || ''));
+      const itemYear = match ? parseInt(match[1], 10) : new Date(item.due_date).getFullYear();
+      return itemYear === parseInt(year);
     });
 
     filteredSchedule.forEach((item, index) => {

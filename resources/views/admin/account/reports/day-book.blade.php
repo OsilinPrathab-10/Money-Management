@@ -19,7 +19,7 @@
 @endphp
 
 @section('content')
-<div class="container-xxl flex-grow-1 container-p-y">
+<div class="account-module">
   <div class="d-flex flex-wrap justify-content-between align-items-center mb-4">
     <h4 class="fw-bold mb-0">
       <i class="ri-book-open-line text-warning me-2"></i>{{ $pageTitle ?? __('Day Book Report') }}

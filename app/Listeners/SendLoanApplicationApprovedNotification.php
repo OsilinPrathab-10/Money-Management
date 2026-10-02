@@ -2,63 +2,23 @@
 
 namespace App\Listeners;
 
-use Illuminate\Contracts\Queue\ShouldQueue;
-use Illuminate\Queue\InteractsWithQueue;
+use App\Events\LoanApplicationApproved;
+use App\Services\AppNotificationService;
 use Illuminate\Support\Facades\Log;
-use App\Services\PushNotificationService;
 use Throwable;
 
 class SendLoanApplicationApprovedNotification
 {
-    protected PushNotificationService $fcm;
+    public function __construct(protected AppNotificationService $notifications) {}
 
-    /**
-     * Create the event listener.
-     */
-    public function __construct(PushNotificationService $fcm)
-    {
-        $this->fcm = $fcm;
-    }
-
-    /**
-     * Handle the event.
-     */
-    public function handle(object $event): void
+    public function handle(LoanApplicationApproved $event): void
     {
         try {
-            $client = $event->client;
-            if (!$client) {
-                Log::warning('No client found in event');
+            if (! $event->client || ! $event->application) {
                 return;
             }
 
-            $user = $client->user;
-            if (!$user) {
-                Log::warning('No user associated with client', ['client_id' => $client->id]);
-                return;
-            }
-
-            $devices = $user->userDevice()->get() ?? collect();
-
-            if ($devices->isEmpty()) {
-                Log::info('No devices found for client to send push', [
-                    'client_id' => $client->id,
-                    'user_id' => $user->id,
-                ]);
-                return;
-            }
-
-            foreach ($devices as $device) {
-                $this->fcm->sendPushNotification(
-                    $device->device_token,
-                    "Application Approved 🎉",
-                    "Your Application ₹{$event->application->application_number} approved by Management.",
-                    [
-                        'screen' => 'approved',
-                        'application_number' => (string) $event->application->application_number,
-                    ]
-                );
-            }
+            $this->notifications->loanApproved($event->client, $event->application);
         } catch (Throwable $e) {
             Log::error('SendLoanApplicationApprovedNotification failed: ' . $e->getMessage(), [
                 'trace' => $e->getTraceAsString(),

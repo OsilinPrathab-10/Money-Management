@@ -28,12 +28,14 @@ class User extends Authenticatable
      */
     protected $fillable = [
         'name',
+        'nickname',
         'role_id',
         'phone',
         'email',
         'password',
-        'plain_password',
         'status',
+        'use_custom_menus',
+        'fcm_token',
     ];
 
     /**
@@ -56,7 +58,13 @@ class User extends Authenticatable
         return [
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
+            'use_custom_menus' => 'boolean',
         ];
+    }
+
+    public function menuAssignments()
+    {
+        return $this->hasMany(UserMenu::class);
     }
 
     public function client()

@@ -1,7 +1,12 @@
-{{-- Loan-management style: view / edit / delete (+ optional approve/post) as Remix icons --}}
 @php
     $viewUrl = $viewUrl ?? null;
+    $viewModalTarget = $viewModalTarget ?? null;
+    $viewModalClass = $viewModalClass ?? '';
+    $viewModalData = $viewModalData ?? [];
     $editUrl = $editUrl ?? null;
+    $editModalTarget = $editModalTarget ?? null;
+    $editModalClass = $editModalClass ?? '';
+    $editModalData = $editModalData ?? [];
     $deleteRoute = $deleteRoute ?? null;
     $approveUrl = $approveUrl ?? null;
     $postUrl = $postUrl ?? null;
@@ -9,12 +14,40 @@
     $confirm = $deleteConfirm ?? __('Are you sure you want to delete this?');
 @endphp
 <div class="d-inline-flex align-items-center flex-wrap gap-1 account-table-actions">
-  @if ($viewUrl)
+  @if ($viewModalTarget)
+    <button
+      type="button"
+      class="btn btn-sm btn-icon btn-text-secondary rounded-pill {{ $viewModalClass }}"
+      title="{{ __('View Details') }}"
+      aria-label="{{ __('View') }}"
+      data-bs-toggle="modal"
+      data-bs-target="{{ $viewModalTarget }}"
+      @foreach ($viewModalData as $attr => $value)
+        {{ $attr }}="{{ $value }}"
+      @endforeach
+    >
+      <i class="icon-base ri ri-eye-line icon-18px text-info"></i>
+    </button>
+  @elseif ($viewUrl)
     <a href="{{ $viewUrl }}" class="btn btn-sm btn-icon btn-text-secondary rounded-pill" title="{{ __('View') }}" aria-label="{{ __('View') }}">
       <i class="icon-base ri ri-eye-line icon-18px text-info"></i>
     </a>
   @endif
-  @if ($editUrl)
+  @if ($editModalTarget)
+    <button
+      type="button"
+      class="btn btn-sm btn-icon btn-text-secondary rounded-pill {{ $editModalClass }}"
+      title="{{ __('Edit') }}"
+      aria-label="{{ __('Edit') }}"
+      data-bs-toggle="modal"
+      data-bs-target="{{ $editModalTarget }}"
+      @foreach ($editModalData as $attr => $value)
+        {{ $attr }}="{{ $value }}"
+      @endforeach
+    >
+      <i class="icon-base ri ri-pencil-line icon-18px text-primary"></i>
+    </button>
+  @elseif ($editUrl)
     <a href="{{ $editUrl }}" class="btn btn-sm btn-icon btn-text-secondary rounded-pill" title="{{ __('Edit') }}" aria-label="{{ __('Edit') }}">
       <i class="icon-base ri ri-pencil-line icon-18px text-primary"></i>
     </a>

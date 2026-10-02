@@ -58,6 +58,25 @@
         min-width: 1000px;
         white-space: nowrap;
     }
+    #addAgentModal .nav-pills .nav-link {
+        color: var(--bs-heading-color);
+        transition: all 0.25s ease-in-out;
+        border: 1px solid transparent;
+    }
+    #addAgentModal .nav-pills .nav-link.active {
+        background-color: var(--bs-primary) !important;
+        color: #fff !important;
+        box-shadow: 0 4px 12px rgba(var(--bs-primary-rgb), 0.25);
+    }
+    #addAgentModal .input-group-text {
+        border-end-width: 0;
+    }
+    #addAgentModal .input-group-merge .form-control {
+        border-start-width: 0;
+    }
+    #addAgentModal .input-group-merge .form-control:focus {
+        border-color: var(--bs-primary);
+    }
 </style>
 @endsection
 
@@ -67,6 +86,7 @@
         'resources/assets/custom-js/agent-collections.js'
     ])
 <script>
+document.addEventListener('DOMContentLoaded', function() {
     /**
      * 1. GLOBAL FUNCTIONS (Defined first for immediate availability)
      */
@@ -259,91 +279,88 @@
     /**
      * 4. UI INITIALIZATION (Run after DOM load)
      */
-    $(document).ready(function() {
-        $('.select2-modal').each(function() {
-            $(this).select2({
-                dropdownParent: $(this).closest('.modal'),
-                placeholder: $(this).data('placeholder'),
-                allowClear: true,
-                width: '100%'
-            });
+    $('.select2-modal').each(function() {
+        $(this).select2({
+            dropdownParent: $(this).closest('.modal'),
+            placeholder: $(this).data('placeholder'),
+            allowClear: true,
+            width: '100%'
         });
     });
 
-    document.addEventListener('DOMContentLoaded', function() {
-        // Initialize DataTables
-        var bulkAgentAttTable = $('#bulkAgentAttTable').DataTable({
-            dom: '<"row"<"col-sm-12 col-md-6"><"col-sm-12 col-md-6"f>>t<"row"<"col-sm-12 col-md-6"i><"col-sm-12 col-md-6"p>>',
-            pageLength: 25,
-            lengthMenu: [10, 25, 50, 100],
-            language: { search: "" },
-            columnDefs: [{ orderable: false, targets: [0, 5] }], 
-            drawCallback: function() { 
-                $('.dataTables_filter input').addClass('form-control form-control-sm').attr('placeholder', 'Search marked agents...');
-                let info = this.api().page.info();
-                this.api().column(1, {search:'applied', order:'applied'}).nodes().each(function(cell, i) {
-                    cell.innerHTML = i + 1 + info.start;
-                });
-            }
-        });
-
-        var monthlyAgentAttTable = $('#monthlyAgentAttTable').DataTable({
-            dom: '<"row"<"col-sm-12 col-md-6"l><"col-sm-12 col-md-6"f>>t<"row"<"col-sm-12 col-md-6"i><"col-sm-12 col-md-6"p>>',
-            pageLength: 25,
-            lengthMenu: [10, 25, 50, 100],
-            language: { search: "" },
-            ordering: false,
-            drawCallback: function() {
-                let info = this.api().page.info();
-                this.api().column(0, {search:'applied', order:'applied'}).nodes().each(function(cell, i) {
-                    cell.innerHTML = i + 1 + info.start;
-                });
-            }
-        });
-
-        // Tab Persistence
-        let activeTab = sessionStorage.getItem('agentActiveTab') || window.location.hash;
-        let activeSubTab = sessionStorage.getItem('agentActiveSubTab');
-        
-        if (activeTab) {
-            const triggerEl = document.querySelector(`button[data-bs-target="${activeTab}"]`);
-            if (triggerEl) {
-                new bootstrap.Tab(triggerEl).show();
-                if (activeTab === '#navs-attendance' && activeSubTab) {
-                    setTimeout(() => {
-                        const subTriggerEl = document.querySelector(`button[data-bs-target="${activeSubTab}"]`);
-                        if (subTriggerEl) new bootstrap.Tab(subTriggerEl).show();
-                    }, 150);
-                }
-            }
-        }
-
-        document.querySelectorAll('button[data-bs-toggle="tab"]').forEach(link => {
-            link.addEventListener('shown.bs.tab', e => {
-                const target = e.target.getAttribute('data-bs-target');
-                if (target.startsWith('#navs-')) {
-                    sessionStorage.setItem('agentActiveTab', target);
-                    window.history.replaceState(null, null, target);
-                } else if (target.startsWith('#att-')) {
-                    sessionStorage.setItem('agentActiveSubTab', target);
-                }
+    // Initialize DataTables
+    var bulkAgentAttTable = $('#bulkAgentAttTable').DataTable({
+        dom: '<"row"<"col-sm-12 col-md-6"><"col-sm-12 col-md-6"f>>t<"row"<"col-sm-12 col-md-6"i><"col-sm-12 col-md-6"p>>',
+        pageLength: 25,
+        lengthMenu: [10, 25, 50, 100],
+        language: { search: "" },
+        columnDefs: [{ orderable: false, targets: [0, 5] }], 
+        drawCallback: function() { 
+            $('.dataTables_filter input').addClass('form-control form-control-sm').attr('placeholder', 'Search marked agents...');
+            let info = this.api().page.info();
+            this.api().column(1, {search:'applied', order:'applied'}).nodes().each(function(cell, i) {
+                cell.innerHTML = i + 1 + info.start;
             });
-        });
+        }
+    });
 
-        // URL Params handling
-        const search = window.location.search;
-        if (search.includes('month') || search.includes('year') || search.includes('date')) {
-            const mainTriggerEl = document.querySelector('button[data-bs-target="#navs-attendance"]');
-            if (mainTriggerEl) {
-                new bootstrap.Tab(mainTriggerEl).show();
-                const subTarget = (search.includes('month') || search.includes('year')) ? '#att-report' : '#att-daily';
+    var monthlyAgentAttTable = $('#monthlyAgentAttTable').DataTable({
+        dom: '<"row"<"col-sm-12 col-md-6"l><"col-sm-12 col-md-6"f>>t<"row"<"col-sm-12 col-md-6"i><"col-sm-12 col-md-6"p>>',
+        pageLength: 25,
+        lengthMenu: [10, 25, 50, 100],
+        language: { search: "" },
+        ordering: false,
+        drawCallback: function() {
+            let info = this.api().page.info();
+            this.api().column(0, {search:'applied', order:'applied'}).nodes().each(function(cell, i) {
+                cell.innerHTML = i + 1 + info.start;
+            });
+        }
+    });
+
+    // Tab Persistence
+    let activeTab = sessionStorage.getItem('agentActiveTab') || window.location.hash;
+    let activeSubTab = sessionStorage.getItem('agentActiveSubTab');
+    
+    if (activeTab) {
+        const triggerEl = document.querySelector(`button[data-bs-target="${activeTab}"]`);
+        if (triggerEl) {
+            new bootstrap.Tab(triggerEl).show();
+            if (activeTab === '#navs-attendance' && activeSubTab) {
                 setTimeout(() => {
-                    const subTriggerEl = document.querySelector(`button[data-bs-target="${subTarget}"]`);
+                    const subTriggerEl = document.querySelector(`button[data-bs-target="${activeSubTab}"]`);
                     if (subTriggerEl) new bootstrap.Tab(subTriggerEl).show();
                 }, 150);
             }
         }
+    }
+
+    document.querySelectorAll('button[data-bs-toggle="tab"]').forEach(link => {
+        link.addEventListener('shown.bs.tab', e => {
+            const target = e.target.getAttribute('data-bs-target');
+            if (target.startsWith('#navs-')) {
+                sessionStorage.setItem('agentActiveTab', target);
+                window.history.replaceState(null, null, target);
+            } else if (target.startsWith('#att-')) {
+                sessionStorage.setItem('agentActiveSubTab', target);
+            }
+        });
     });
+
+    // URL Params handling
+    const search = window.location.search;
+    if (search.includes('month') || search.includes('year') || search.includes('date')) {
+        const mainTriggerEl = document.querySelector('button[data-bs-target="#navs-attendance"]');
+        if (mainTriggerEl) {
+            new bootstrap.Tab(mainTriggerEl).show();
+            const subTarget = (search.includes('month') || search.includes('year')) ? '#att-report' : '#att-daily';
+            setTimeout(() => {
+                const subTriggerEl = document.querySelector(`button[data-bs-target="${subTarget}"]`);
+                if (subTriggerEl) new bootstrap.Tab(subTriggerEl).show();
+            }, 150);
+        }
+    }
+});
 </script>
 @endsection
 
@@ -915,108 +932,293 @@
     </div>
 </div>
 
-<!-- All Previous Modals (Add Agent, Delete, etc.) remain here -->
+<!-- Modal: Add New Agent (Redesigned UI) -->
 <div class="modal fade" id="addAgentModal" tabindex="-1" aria-hidden="true">
-     <div class="modal-dialog modal-lg modal-dialog-centered" role="document">
-      <div class="modal-content">
-        <div class="modal-header">
-          <h5 class="modal-title" id="modalTitle">Add New Agent</h5>
-          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+  <div class="modal-dialog modal-lg modal-dialog-centered" role="document">
+    <div class="modal-content border-0 shadow-lg">
+      <div class="modal-header bg-label-primary border-bottom py-3 px-4">
+        <div class="d-flex align-items-center gap-3">
+          <div class="avatar avatar-md bg-primary rounded-3 d-flex align-items-center justify-content-center text-white shadow-sm">
+            <i class="ri-user-add-line fs-3"></i>
+          </div>
+          <div>
+            <h5 class="modal-title fw-bold mb-0 text-primary" id="modalTitle">Add New Agent</h5>
+            <small class="text-muted">Fill out agent information across personal, territory, bank, and security sections</small>
+          </div>
         </div>
-        <form id="agentForm">
-          <div class="modal-body">
-            <div class="row">
-              <div class="col-md-6 mb-3">
-                <label for="agentName" class="form-label">Name <span class="text-danger">*</span></label>
-                <input type="text" class="form-control" id="agentName" name="name" placeholder="Enter agent name" required pattern="[A-Za-z\s]+" title="Only alphabets and spaces are allowed" oninput="this.value=this.value.replace(/[^A-Za-z\\s]/g,'')">
-                <div class="invalid-feedback" id="nameError"></div>
-              </div>
-              
-              <div class="col-md-6 mb-3">
-                <label for="agentEmail" class="form-label">Email <span class="text-danger">*</span></label>
-                <input type="email" class="form-control" id="agentEmail" name="email" placeholder="Enter email" required>
-                <div class="invalid-feedback" id="emailError"></div>
-              </div>
-            </div>
-
-            <div class="row">
-              <div class="col-md-6 mb-3">
-                <label for="agentPhone" class="form-label">Phone <span class="text-danger">*</span></label>
-                <input type="text" class="form-control" id="agentPhone" name="phone" placeholder="Enter phone number" maxlength="10" oninput="this.value=this.value.replace(/[^0-9]/g,'')" pattern="[0-9]{10}" inputmode="numeric" required>
-                <div class="invalid-feedback" id="phoneError"></div>
-              </div>
-
-              <div class="col-md-6 mb-3">
-                <label for="agentPincode" class="form-label">Pincode <span class="text-danger">*</span></label>
-                <input type="text" class="form-control" id="agentPincode" name="pincode" placeholder="Enter pincode" maxlength="6" pattern="[0-9]*" inputmode="numeric" required>
-                <div class="invalid-feedback" id="pincodeError"></div>
-              </div>
-            </div>
-            
-            <div class="row">
-              <div class="col-12 mb-3">
-                <label for="agentLocation" class="form-label">Location <span class="text-danger">*</span></label>
-              <select class="form-select select2" id="agentLocation" name="location_id" required>
-                  <option value="" selected disabled>Select location</option>
-                  @foreach($locations as $loc)
-                  <option value="{{ $loc->id }}">{{ $loc->name }}, {{ $loc->city }}, {{ $loc->state }}</option>
-                  @endforeach
-                </select>
-                <div class="invalid-feedback" id="locationError"></div>
-              </div>
-            </div>
-            
-            <div class="mb-3">
-              <label for="agentAddress" class="form-label">Address <span class="text-danger">*</span></label>
-              <textarea class="form-control" id="agentAddress" name="address" rows="2" placeholder="Enter address" required></textarea>
-              <div class="invalid-feedback" id="addressError"></div>
-            </div>
-
-            <div class="row">
-              <div class="col-md-6 mb-3">
-                <label for="agentCity" class="form-label">City <span class="text-danger">*</span></label>
-                <input type="text" class="form-control" id="agentCity" name="city" placeholder="Enter city" oninput="this.value=this.value.replace(/[^a-zA-Z\s.]/g,'')" required>
-                <div class="invalid-feedback" id="cityError"></div>
-              </div>
-
-              <div class="col-md-6 mb-3">
-                <label for="agentState" class="form-label">State <span class="text-danger">*</span></label>
-                <input type="text" class="form-control" id="agentState" name="state" placeholder="Enter state" oninput="this.value=this.value.replace(/[^a-zA-Z\s.]/g,'')" required>
-                <div class="invalid-feedback" id="stateError"></div>
-              </div>
-            </div>
-
-            <div class="row">
-              <div class="col-md-6 mb-3">
-                <label for="agentPassword" class="form-label">Password <span class="text-danger">*</span></label>
-                <div class="input-group">
-                  <input type="password" class="form-control" id="agentPassword" name="password" placeholder="Enter password" required>
-                  <button class="btn btn-outline-secondary" type="button" data-action="toggle-password" data-target="#agentPassword">
-                    <i class="ri-eye-off-line"></i>
-                  </button>
-                </div>
-                <div class="invalid-feedback d-block" id="passwordError"></div>
-              </div>
-
-              <div class="col-md-6 mb-3">
-                <label for="agentConfirmPassword" class="form-label">Confirm Password <span class="text-danger">*</span></label>
-                <div class="input-group">
-                  <input type="password" class="form-control" id="agentConfirmPassword" name="confirm_password" placeholder="Confirm password" required>
-                  <button class="btn btn-outline-secondary" type="button" data-action="toggle-password" data-target="#agentConfirmPassword">
-                    <i class="ri-eye-off-line"></i>
-                  </button>
-                </div>
-                <div class="invalid-feedback d-block" id="confirmPasswordError"></div>
-              </div>
-            </div>
-          </div>
-          <div class="modal-footer">
-            <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
-            <button type="submit" class="btn btn-primary" id="submitBtn">Save Agent</button>
-          </div>
-        </form>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
       </div>
+
+      <form id="agentForm" class="needs-validation" novalidate autocomplete="off">
+        <!-- Hidden dummy fields to block browser credential autofill -->
+        <input type="text" class="d-none" style="display:none !important;" aria-hidden="true" tabindex="-1">
+        <input type="password" class="d-none" style="display:none !important;" aria-hidden="true" tabindex="-1">
+        <div class="modal-body p-4">
+          <!-- Step Nav Tabs -->
+          <ul class="nav nav-pills nav-justified mb-4 p-1 bg-body-tertiary rounded-3 border" id="agentModalTabs" role="tablist">
+            <li class="nav-item" role="presentation">
+              <button class="nav-link active rounded-3 py-2 px-2 d-flex align-items-center justify-content-center gap-2" id="tab-personal-tab" data-bs-toggle="pill" data-bs-target="#tab-personal" type="button" role="tab" aria-controls="tab-personal" aria-selected="true">
+                <i class="ri-user-3-line fs-5"></i>
+                <span class="d-none d-sm-inline fw-medium">1. Personal</span>
+              </button>
+            </li>
+            <li class="nav-item" role="presentation">
+              <button class="nav-link rounded-3 py-2 px-2 d-flex align-items-center justify-content-center gap-2" id="tab-location-tab" data-bs-toggle="pill" data-bs-target="#tab-location" type="button" role="tab" aria-controls="tab-location" aria-selected="false">
+                <i class="ri-map-pin-2-line fs-5"></i>
+                <span class="d-none d-sm-inline fw-medium">2. Territory</span>
+              </button>
+            </li>
+            <li class="nav-item" role="presentation">
+              <button class="nav-link rounded-3 py-2 px-2 d-flex align-items-center justify-content-center gap-2" id="tab-bank-tab" data-bs-toggle="pill" data-bs-target="#tab-bank" type="button" role="tab" aria-controls="tab-bank" aria-selected="false">
+                <i class="ri-bank-card-line fs-5"></i>
+                <span class="d-none d-sm-inline fw-medium">3. Bank Details</span>
+              </button>
+            </li>
+            <li class="nav-item" role="presentation">
+              <button class="nav-link rounded-3 py-2 px-2 d-flex align-items-center justify-content-center gap-2" id="tab-security-tab" data-bs-toggle="pill" data-bs-target="#tab-security" type="button" role="tab" aria-controls="tab-security" aria-selected="false">
+                <i class="ri-shield-keyhole-line fs-5"></i>
+                <span class="d-none d-sm-inline fw-medium">4. Security</span>
+              </button>
+            </li>
+          </ul>
+
+          <!-- Tab Contents -->
+          <div class="tab-content border-0 p-0" id="agentModalTabContent">
+            
+            <!-- Tab 1: Personal & Compensation -->
+            <div class="tab-pane fade show active" id="tab-personal" role="tabpanel" aria-labelledby="tab-personal-tab">
+              <div class="card border mb-0 shadow-none bg-body-tertiary">
+                <div class="card-body p-3">
+                  <div class="d-flex align-items-center gap-2 text-primary fw-semibold mb-3">
+                    <i class="ri-user-star-line fs-5"></i>
+                    <span>Personal Profile & Monthly Compensation</span>
+                  </div>
+
+                  <div class="row g-3">
+                    <div class="col-md-6">
+                      <label for="agentName" class="form-label fw-medium">Full Name <span class="text-danger">*</span></label>
+                      <div class="input-group input-group-merge">
+                        <span class="input-group-text"><i class="ri-user-line text-muted"></i></span>
+                        <input type="text" class="form-control" id="agentName" name="name" placeholder="John Doe" required pattern="[A-Za-z\s.]+" title="Only alphabets and spaces are allowed" oninput="this.value=this.value.replace(/[^A-Za-z\\s.]/g,'')">
+                      </div>
+                      <div class="invalid-feedback d-block" id="nameError"></div>
+                    </div>
+
+                    <div class="col-md-6">
+                      <label for="agentEmail" class="form-label fw-medium">Email Address <span class="text-danger">*</span></label>
+                      <div class="input-group input-group-merge">
+                        <span class="input-group-text"><i class="ri-mail-line text-muted"></i></span>
+                        <input type="email" class="form-control" id="agentEmail" name="email" placeholder="agent@example.com" required autocomplete="off">
+                      </div>
+                      <div class="invalid-feedback d-block" id="emailError"></div>
+                    </div>
+
+                    <div class="col-md-6">
+                      <label for="agentPhone" class="form-label fw-medium">Phone Number <span class="text-danger">*</span></label>
+                      <div class="input-group input-group-merge">
+                        <span class="input-group-text"><i class="ri-phone-line text-muted"></i></span>
+                        <input type="text" class="form-control" id="agentPhone" name="phone" placeholder="9876543210" maxlength="10" oninput="this.value=this.value.replace(/[^0-9]/g,'')" pattern="[0-9]{10}" inputmode="numeric" required>
+                      </div>
+                      <div class="invalid-feedback d-block" id="phoneError"></div>
+                    </div>
+
+                    <div class="col-md-6">
+                      <label for="agentSalary" class="form-label fw-medium">Monthly Fixed Salary (₹) <span class="text-danger">*</span></label>
+                      <div class="input-group input-group-merge">
+                        <span class="input-group-text"><i class="ri-money-rupee-circle-line text-muted"></i></span>
+                        <input type="number" class="form-control" id="agentSalary" name="salary_amount" placeholder="25000" min="0" required>
+                      </div>
+                      <div class="invalid-feedback d-block" id="salaryAmountError"></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Tab 2: Territory & Address -->
+            <div class="tab-pane fade" id="tab-location" role="tabpanel" aria-labelledby="tab-location-tab">
+              <div class="card border mb-0 shadow-none bg-body-tertiary">
+                <div class="card-body p-3">
+                  <div class="d-flex align-items-center gap-2 text-primary fw-semibold mb-3">
+                    <i class="ri-map-pin-user-line fs-5"></i>
+                    <span>Assigned Territory & Address</span>
+                  </div>
+
+                  <div class="row g-3">
+                    <div class="col-12">
+                      <label for="agentLocation" class="form-label fw-medium">Assigned Service Location <span class="text-danger">*</span></label>
+                      <select class="form-select select2" id="agentLocation" name="location_id" required>
+                        <option value="" selected disabled>Select assigned location/branch</option>
+                        @foreach($locations as $loc)
+                        <option value="{{ $loc->id }}">{{ $loc->name }}, {{ $loc->city }}, {{ $loc->state }}</option>
+                        @endforeach
+                      </select>
+                      <div class="invalid-feedback d-block" id="locationError"></div>
+                    </div>
+
+                    <div class="col-12">
+                      <label for="agentAddress" class="form-label fw-medium">Full Residential Address <span class="text-danger">*</span></label>
+                      <textarea class="form-control" id="agentAddress" name="address" rows="2" placeholder="Enter street address, building/door no." required></textarea>
+                      <div class="invalid-feedback d-block" id="addressError"></div>
+                    </div>
+
+                    <div class="col-md-4">
+                      <label for="agentCity" class="form-label fw-medium">City <span class="text-danger">*</span></label>
+                      <input type="text" class="form-control" id="agentCity" name="city" placeholder="Enter city" oninput="this.value=this.value.replace(/[^a-zA-Z\s.]/g,'')" required>
+                      <div class="invalid-feedback d-block" id="cityError"></div>
+                    </div>
+
+                    <div class="col-md-4">
+                      <label for="agentState" class="form-label fw-medium">State <span class="text-danger">*</span></label>
+                      <input type="text" class="form-control" id="agentState" name="state" placeholder="Enter state" oninput="this.value=this.value.replace(/[^a-zA-Z\s.]/g,'')" required>
+                      <div class="invalid-feedback d-block" id="stateError"></div>
+                    </div>
+
+                    <div class="col-md-4">
+                      <label for="agentPincode" class="form-label fw-medium">Pincode <span class="text-danger">*</span></label>
+                      <input type="text" class="form-control" id="agentPincode" name="pincode" placeholder="600001" maxlength="6" pattern="[0-9]*" inputmode="numeric" required>
+                      <div class="invalid-feedback d-block" id="pincodeError"></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Tab 3: Bank Details -->
+            <div class="tab-pane fade" id="tab-bank" role="tabpanel" aria-labelledby="tab-bank-tab">
+              <div class="card border mb-0 shadow-none bg-body-tertiary">
+                <div class="card-body p-3">
+                  <div class="d-flex align-items-center justify-content-between mb-3">
+                    <div class="d-flex align-items-center gap-2 text-primary fw-semibold">
+                      <i class="ri-bank-line fs-5"></i>
+                      <span>Bank Account & Payout Details</span>
+                    </div>
+                    <span class="badge bg-label-info text-capitalize">Salary Payouts</span>
+                  </div>
+
+                  <div class="alert alert-primary d-flex align-items-center gap-2 py-2 px-3 mb-3 border-0">
+                    <i class="ri-information-line fs-5"></i>
+                    <small class="mb-0">Bank account information will be used for automated monthly payroll and expense disbursements.</small>
+                  </div>
+
+                  <div class="row g-3">
+                    <div class="col-md-6">
+                      <label for="agentAccountHolderName" class="form-label fw-medium">Account Holder Name</label>
+                      <div class="input-group input-group-merge">
+                        <span class="input-group-text"><i class="ri-user-smile-line text-muted"></i></span>
+                        <input type="text" class="form-control" id="agentAccountHolderName" name="account_holder_name" placeholder="As printed on passbook/cheque">
+                      </div>
+                      <div class="invalid-feedback d-block" id="accountHolderNameError"></div>
+                    </div>
+
+                    <div class="col-md-6">
+                      <label for="agentBankName" class="form-label fw-medium">Bank Name</label>
+                      <div class="input-group input-group-merge">
+                        <span class="input-group-text"><i class="ri-building-line text-muted"></i></span>
+                        <input type="text" class="form-control" id="agentBankName" name="bank_name" placeholder="e.g. State Bank of India">
+                      </div>
+                      <div class="invalid-feedback d-block" id="bankNameError"></div>
+                    </div>
+
+                    <div class="col-md-6">
+                      <label for="agentAccountNumber" class="form-label fw-medium">Account Number</label>
+                      <div class="input-group input-group-merge">
+                        <span class="input-group-text"><i class="ri-bank-card-2-line text-muted"></i></span>
+                        <input type="text" class="form-control" id="agentAccountNumber" name="account_number" placeholder="Enter bank account number">
+                      </div>
+                      <div class="invalid-feedback d-block" id="accountNumberError"></div>
+                    </div>
+
+                    <div class="col-md-6">
+                      <label for="agentIfscCode" class="form-label fw-medium">IFSC Code</label>
+                      <div class="input-group input-group-merge">
+                        <span class="input-group-text"><i class="ri-barcode-line text-muted"></i></span>
+                        <input type="text" class="form-control text-uppercase" id="agentIfscCode" name="ifsc_code" placeholder="e.g. SBIN0001234" maxlength="11">
+                      </div>
+                      <div class="invalid-feedback d-block" id="ifscCodeError"></div>
+                    </div>
+
+                    <div class="col-md-6">
+                      <label for="agentBranchName" class="form-label fw-medium">Branch Name</label>
+                      <div class="input-group input-group-merge">
+                        <span class="input-group-text"><i class="ri-building-4-line text-muted"></i></span>
+                        <input type="text" class="form-control" id="agentBranchName" name="branch_name" placeholder="Enter branch location">
+                      </div>
+                      <div class="invalid-feedback d-block" id="branchNameError"></div>
+                    </div>
+
+                    <div class="col-md-6">
+                      <label for="agentUpiId" class="form-label fw-medium">UPI ID / VPA (Optional)</label>
+                      <div class="input-group input-group-merge">
+                        <span class="input-group-text"><i class="ri-qr-code-line text-muted"></i></span>
+                        <input type="text" class="form-control" id="agentUpiId" name="upi_id" placeholder="e.g. agent@upi">
+                      </div>
+                      <div class="invalid-feedback d-block" id="upiIdError"></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Tab 4: Security -->
+            <div class="tab-pane fade" id="tab-security" role="tabpanel" aria-labelledby="tab-security-tab">
+              <div class="card border mb-0 shadow-none bg-body-tertiary">
+                <div class="card-body p-3">
+                  <div class="d-flex align-items-center gap-2 text-primary fw-semibold mb-3">
+                    <i class="ri-shield-keyhole-line fs-5"></i>
+                    <span>Account Password & Credentials</span>
+                  </div>
+
+                  <div class="row g-3">
+                    <div class="col-md-6">
+                      <label for="agentPassword" class="form-label fw-medium">Password <span class="text-danger">*</span></label>
+                      <div class="input-group input-group-merge">
+                        <span class="input-group-text"><i class="ri-lock-line text-muted"></i></span>
+                        <input type="password" class="form-control" id="agentPassword" name="password" placeholder="Min. 8 characters" required autocomplete="new-password">
+                        <button class="btn btn-outline-secondary px-3" type="button" data-action="toggle-password" data-target="#agentPassword">
+                          <i class="ri-eye-off-line"></i>
+                        </button>
+                      </div>
+                      <div class="invalid-feedback d-block" id="passwordError"></div>
+                    </div>
+
+                    <div class="col-md-6">
+                      <label for="agentConfirmPassword" class="form-label fw-medium">Confirm Password <span class="text-danger">*</span></label>
+                      <div class="input-group input-group-merge">
+                        <span class="input-group-text"><i class="ri-lock-check-line text-muted"></i></span>
+                        <input type="password" class="form-control" id="agentConfirmPassword" name="password_confirmation" placeholder="Re-enter password" required autocomplete="new-password">
+                        <button class="btn btn-outline-secondary px-3" type="button" data-action="toggle-password" data-target="#agentConfirmPassword">
+                          <i class="ri-eye-off-line"></i>
+                        </button>
+                      </div>
+                      <div class="invalid-feedback d-block" id="confirmPasswordError"></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        <div class="modal-footer bg-body-tertiary border-top px-4 py-3 d-flex align-items-center justify-content-between">
+          <button type="button" class="btn btn-outline-secondary px-4" data-bs-dismiss="modal">Cancel</button>
+          
+          <div class="d-flex align-items-center gap-2">
+            <button type="button" class="btn btn-label-secondary" id="prevAgentTabBtn" style="display: none;">
+              <i class="ri-arrow-left-line me-1"></i> Previous
+            </button>
+            <button type="button" class="btn btn-primary px-4" id="nextAgentTabBtn">
+              Next Step <i class="ri-arrow-right-line ms-1"></i>
+            </button>
+            <button type="submit" class="btn btn-success px-4 shadow-sm" id="submitBtn">
+              <i class="ri-check-line me-1"></i> Save Agent
+            </button>
+          </div>
+        </div>
+      </form>
     </div>
+  </div>
 </div>
 
 <!-- Modal: Add Agent Expense -->
@@ -1131,11 +1333,24 @@
               <select class="form-select select2-ajax" name="emi_id" id="emiSearchSelect" required data-dropdown-parent="#addCollectionModal">
                 <option value="">Start typing to search...</option>
               </select>
+            <div class="mb-3">
+              <label class="form-label">Payment Type <span class="text-danger">*</span></label>
+              <div class="d-flex gap-3 mt-1">
+                <div class="form-check">
+                  <input class="form-check-input payment-type-radio" type="radio" name="payment_type" id="mgmt_type_full" value="full" checked>
+                  <label class="form-check-label" for="mgmt_type_full">Full Payment</label>
+                </div>
+                <div class="form-check">
+                  <input class="form-check-input payment-type-radio" type="radio" name="payment_type" id="mgmt_type_partial" value="partial">
+                  <label class="form-check-label" for="mgmt_type_partial">Partial Payment</label>
+                </div>
+              </div>
             </div>
             <div class="row">
               <div class="col-md-6 mb-3">
                 <label class="form-label">Amount (₹) <span class="text-danger">*</span></label>
-                <input type="number" class="form-control" name="amount" id="collectionAmount" required min="0.01" step="0.01">
+                <input type="number" class="form-control" name="amount" id="collectionAmount" required min="0.01" step="0.01" readonly>
+                <small id="partialCollectionHelp" class="text-muted d-none"></small>
               </div>
               <div class="col-md-6 mb-3">
                 <label class="form-label">Collection Date <span class="text-danger">*</span></label>

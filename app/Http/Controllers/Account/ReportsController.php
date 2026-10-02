@@ -2,8 +2,9 @@
 
 namespace App\Http\Controllers\Account;
 
+use App\Services\Account\AccountExportService;
 use App\Services\Account\ReportService;
-use Barryvdh\DomPDF\Facade\Pdf;
+use App\Support\DateRangePreset;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
 use Illuminate\Support\Facades\Auth;
@@ -94,10 +95,11 @@ class ReportsController extends Controller
 
     public function taxSummary(Request $request)
     {
+        [$from, $to] = DateRangePreset::applyToRequest($request, 'from_date', 'to_date');
         $currentYear = date('Y');
         $filters = [
-            'from_date' => $request->from_date ?: "$currentYear-01-01",
-            'to_date' => $request->to_date ?: "$currentYear-12-31",
+            'from_date' => $from ?: "$currentYear-01-01",
+            'to_date' => $to ?: "$currentYear-12-31",
         ];
 
         $data = $this->reportService->getTaxSummary($filters);
@@ -164,10 +166,11 @@ class ReportsController extends Controller
             return back()->with('error', __('Permission denied'));
         }
 
+        [$from, $to] = DateRangePreset::applyToRequest($request, 'from_date', 'to_date');
         $currentYear = date('Y');
         $filters = [
-            'from_date' => $request->from_date ?: "$currentYear-01-01",
-            'to_date' => $request->to_date ?: "$currentYear-12-31",
+            'from_date' => $from ?: "$currentYear-01-01",
+            'to_date' => $to ?: "$currentYear-12-31",
         ];
         $data = $this->safeReport(fn () => $this->reportService->getTaxSummary($filters));
         if (isset($data['error'])) {
@@ -373,10 +376,11 @@ class ReportsController extends Controller
             'to_date' => 'nullable|date',
         ]);
 
+        [$from, $to] = DateRangePreset::applyToRequest($request, 'from_date', 'to_date');
         $currentYear = date('Y');
         $filters = [
-            'from_date' => $request->from_date ?: "$currentYear-01-01",
-            'to_date' => $request->to_date ?: "$currentYear-12-31",
+            'from_date' => $from ?: "$currentYear-01-01",
+            'to_date' => $to ?: "$currentYear-12-31",
         ];
         $data = $this->safeReport(fn () => $this->reportService->getTaxSummary($filters));
         if (isset($data['error'])) {
@@ -493,8 +497,7 @@ class ReportsController extends Controller
     public function profitLoss(Request $request)
     {
         $creatorId = creatorId();
-        $startDate = $request->get('start_date', date('Y-m-01'));
-        $endDate = $request->get('end_date', date('Y-m-t'));
+        [$startDate, $endDate] = DateRangePreset::applyToRequest($request, 'start_date', 'end_date');
 
         // Revenue grouped by category
         $revenueQuery = \App\Models\Account\Revenue::with('category')
@@ -549,8 +552,7 @@ class ReportsController extends Controller
     public function generalLedger(Request $request)
     {
         $creatorId = creatorId();
-        $startDate = $request->get('start_date', date('Y-m-01'));
-        $endDate = $request->get('end_date', date('Y-m-t'));
+        [$startDate, $endDate] = DateRangePreset::applyToRequest($request, 'start_date', 'end_date');
         $accountId = $request->get('account_id');
 
         // Fetch accounts for filter dropdown
@@ -580,17 +582,19 @@ class ReportsController extends Controller
                 }
             }
 
-            // Sum up transactions before start date
-            $priorTransactionsQuery = \App\Models\Account\JournalEntryItem::where('account_id', $account->id)
-                ->whereHas('journalEntry', function($q) use ($startDate) {
-                    $q->where('status', 'posted');
-                    if ($startDate) {
-                        $q->whereDate('journal_date', '<', $startDate);
-                    }
-                });
+            // Sum up transactions before start date (All Time has no prior period)
+            $priorDebit = 0;
+            $priorCredit = 0;
+            if ($startDate) {
+                $priorTransactionsQuery = \App\Models\Account\JournalEntryItem::where('account_id', $account->id)
+                    ->whereHas('journalEntry', function($q) use ($startDate) {
+                        $q->where('status', 'posted')
+                          ->whereDate('journal_date', '<', $startDate);
+                    });
 
-            $priorDebit = $priorTransactionsQuery->sum('debit_amount') ?? 0;
-            $priorCredit = $priorTransactionsQuery->sum('credit_amount') ?? 0;
+                $priorDebit = $priorTransactionsQuery->sum('debit_amount') ?? 0;
+                $priorCredit = $priorTransactionsQuery->sum('credit_amount') ?? 0;
+            }
 
             $openingBalance = ($openingDebit + $priorDebit) - ($openingCredit + $priorCredit);
 
@@ -680,8 +684,7 @@ class ReportsController extends Controller
     public function bankBook(Request $request)
     {
         $creatorId = creatorId();
-        $startDate = $request->get('start_date', date('Y-m-01'));
-        $endDate = $request->get('end_date', date('Y-m-t'));
+        [$startDate, $endDate] = DateRangePreset::applyToRequest($request, 'start_date', 'end_date');
         $bankAccountId = $request->get('bank_account_id');
 
         // Fetch bank accounts for the dropdown
@@ -715,8 +718,7 @@ class ReportsController extends Controller
     public function revenueReport(Request $request)
     {
         $creatorId = creatorId();
-        $startDate = $request->get('start_date', date('Y-m-01'));
-        $endDate = $request->get('end_date', date('Y-m-t'));
+        [$startDate, $endDate] = DateRangePreset::applyToRequest($request, 'start_date', 'end_date');
 
         $query = \App\Models\Account\Revenue::with(['category', 'bankAccount'])
             ->where('created_by', $creatorId);
@@ -741,8 +743,7 @@ class ReportsController extends Controller
     public function expenseReport(Request $request)
     {
         $creatorId = creatorId();
-        $startDate = $request->get('start_date', date('Y-m-01'));
-        $endDate = $request->get('end_date', date('Y-m-t'));
+        [$startDate, $endDate] = DateRangePreset::applyToRequest($request, 'start_date', 'end_date');
 
         $query = \App\Models\Account\Expense::with(['category', 'bankAccount'])
             ->where('created_by', $creatorId);
@@ -776,8 +777,7 @@ class ReportsController extends Controller
 
     public function outstandingLoans(Request $request)
     {
-        $startDate = $request->get('start_date');
-        $endDate = $request->get('end_date');
+        [$startDate, $endDate] = DateRangePreset::applyToRequest($request, 'start_date', 'end_date');
 
         $query = \App\Models\LoanAccount::with('client')
             ->where('status', 'active');
@@ -801,8 +801,7 @@ class ReportsController extends Controller
 
     public function loanDisbursement(Request $request)
     {
-        $startDate = $request->get('start_date', date('Y-m-01'));
-        $endDate = $request->get('end_date', date('Y-m-t'));
+        [$startDate, $endDate] = DateRangePreset::applyToRequest($request, 'start_date', 'end_date');
 
         $query = \App\Models\LoanAccount::with('client')
             ->whereNotNull('disbursed_at');
@@ -829,58 +828,7 @@ class ReportsController extends Controller
      */
     protected function exportByFormat(string $format, string $bladeView, array $viewData, string $filenameBase)
     {
-        $safeName = preg_replace('/[^a-zA-Z0-9._-]+/', '-', $filenameBase) ?? 'report';
-
-        if ($format === 'pdf') {
-            $pdf = Pdf::loadView($bladeView, $viewData)
-                ->setPaper('a4', 'portrait')
-                ->setOptions([
-                    'isHtml5ParserEnabled' => true,
-                    'isRemoteEnabled' => true,
-                    'defaultFont' => 'sans-serif',
-                ]);
-
-            return $pdf->download($safeName . '.pdf');
-        }
-
-        if ($format === 'csv') {
-            return response()->streamDownload(function () use ($bladeView, $viewData) {
-                $out = fopen('php://output', 'w');
-                fwrite($out, chr(0xEF) . chr(0xBB) . chr(0xBF));
-                $this->renderReportAsCsv($out, $bladeView, $viewData);
-                fclose($out);
-            }, $safeName . '.csv', [
-                'Content-Type' => 'text/csv; charset=UTF-8',
-            ]);
-        }
-
-        $html = view($bladeView, array_merge($viewData, ['exportMode' => 'excel']))->render();
-
-        return response($html, 200, [
-            'Content-Type' => 'application/vnd.ms-excel',
-            'Content-Disposition' => 'attachment; filename="' . $safeName . '.xls"',
-        ]);
-    }
-
-    /**
-     * @param  resource  $out
-     * @param  array<string, mixed>  $viewData
-     */
-    protected function renderReportAsCsv($out, string $bladeView, array $viewData): void
-    {
-        $html = view($bladeView, array_merge($viewData, ['exportMode' => 'csv']))->render();
-        if (preg_match_all('/<tr[^>]*>(.*?)<\/tr>/is', $html, $rows)) {
-            foreach ($rows[1] as $rowHtml) {
-                if (! preg_match_all('/<t[dh][^>]*>(.*?)<\/t[dh]>/is', $rowHtml, $cells)) {
-                    continue;
-                }
-                $line = [];
-                foreach ($cells[1] as $cell) {
-                    $line[] = trim(html_entity_decode(strip_tags(str_replace('<br>', ' ', $cell)), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
-                }
-                fputcsv($out, $line);
-            }
-        }
+        return app(AccountExportService::class)->exportByFormat($format, $bladeView, $viewData, $filenameBase);
     }
 }
 

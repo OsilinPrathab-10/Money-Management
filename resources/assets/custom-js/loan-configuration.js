@@ -35,8 +35,14 @@ document.addEventListener('DOMContentLoaded', function () {
     // Initialize penalty configuration
     initPenaltyConfig();
 
+    // Initialize penalty charge type dropdown
+    initPenaltyChargeTypeUI();
+
     // Initialize charge type dropdown
     initChargeTypeDropdown();
+
+    // Initialize account prefix configuration
+    initAccountPrefixConfig();
 });
 
 /**
@@ -619,6 +625,21 @@ function initPenaltyConfig() {
                 }
             }
 
+            const penaltyChargeTypeSelect = document.getElementById('penaltyChargeType');
+            const enteredValue = parseFloat(penaltyChargeValueInput?.value);
+
+            if (penaltyChargeValueInput && penaltyChargeValueInput.value !== '' && isNaN(enteredValue)) {
+                penaltyChargeValueInput.classList.add('is-invalid');
+                showToast('danger', 'Please enter a valid penalty value');
+                return;
+            }
+
+            if (penaltyChargeTypeSelect?.value === 'percentage' && enteredValue > 100) {
+                penaltyChargeValueInput.classList.add('is-invalid');
+                showToast('danger', 'Percentage penalty value cannot exceed 100%');
+                return;
+            }
+
             const formData = new FormData(this);
             const submitBtn = this.querySelector('button[type="submit"]');
             const originalText = submitBtn.innerHTML;
@@ -686,6 +707,10 @@ function initPenaltyConfig() {
             formData.append('_token', document.querySelector('meta[name="csrf-token"]').content);
             formData.append('is_active', isChecked ? '1' : '0');
 
+            const penaltyChargeTypeInput = document.getElementById('penaltyChargeType');
+            if (penaltyChargeTypeInput) {
+                formData.append('penalty_charge_type', penaltyChargeTypeInput.value);
+            }
             if (penaltyChargeValueInput && penaltyChargeValueInput.value !== '') {
                 formData.append('charge_value', penaltyChargeValueInput.value);
             }
@@ -737,6 +762,145 @@ function initPenaltyConfig() {
                     penaltySwitch.checked = !isChecked;
                     penaltyEnabled.value = !isChecked ? '1' : '0';
                     showToast('danger', error.message || 'Failed to update status');
+                });
+        });
+    }
+}
+
+/**
+ * Initialize Penalty Charge Type UI
+ * Swaps the value label, suffix and hint between fixed amount and percentage.
+ */
+function initPenaltyChargeTypeUI() {
+    const chargeType = document.getElementById('penaltyChargeType');
+    const valueLabel = document.getElementById('penaltyChargeValueLabel');
+    const valueSuffix = document.getElementById('penaltyChargeValueSuffix');
+    const valueHint = document.getElementById('penaltyChargeValueHint');
+    const valueInput = document.getElementById('penaltyChargeValue');
+
+    if (!chargeType) return;
+
+    function updatePenaltyChargeTypeUI(resetValue) {
+        const isPercentage = chargeType.value === 'percentage';
+
+        if (valueLabel) {
+            valueLabel.textContent = isPercentage
+                ? 'DEFAULT PENALTY PERCENTAGE (%)'
+                : 'DEFAULT PENALTY AMOUNT (₹)';
+        }
+        if (valueSuffix) {
+            valueSuffix.textContent = isPercentage ? '%' : '₹';
+        }
+        if (valueHint) {
+            valueHint.textContent = isPercentage
+                ? 'Percentage of the principal in the overdue EMI applied as penalty (max 100)'
+                : 'Fixed amount applied on overdue EMIs';
+        }
+
+        if (!valueInput) return;
+
+        valueInput.placeholder = isPercentage ? 'e.g. 2.5' : '0.00';
+
+        // A rupee amount carried over as a percentage is almost always wrong and can
+        // sit out of range, so start the field empty whenever the type actually changes.
+        if (resetValue) {
+            valueInput.value = '';
+            valueInput.classList.remove('is-invalid');
+            valueInput.focus();
+        }
+
+        clampPenaltyChargeValue();
+    }
+
+    function clampPenaltyChargeValue() {
+        if (!valueInput) return;
+
+        const isPercentage = chargeType.value === 'percentage';
+        const raw = parseFloat(valueInput.value);
+        const tooHigh = isPercentage && !isNaN(raw) && raw > 100;
+
+        valueInput.classList.toggle('is-invalid', tooHigh);
+
+        if (valueHint) {
+            valueHint.classList.toggle('text-danger', tooHigh);
+            valueHint.classList.toggle('text-muted', !tooHigh);
+            if (tooHigh) {
+                valueHint.textContent = 'Percentage cannot be more than 100.';
+            } else if (isPercentage) {
+                valueHint.textContent = 'Percentage of the principal in the overdue EMI applied as penalty (max 100)';
+            } else {
+                valueHint.textContent = 'Fixed amount applied on overdue EMIs';
+            }
+        }
+    }
+
+    chargeType.addEventListener('change', () => updatePenaltyChargeTypeUI(true));
+    valueInput?.addEventListener('input', clampPenaltyChargeValue);
+    updatePenaltyChargeTypeUI(false);
+}
+
+/**
+ * Initialize Account Prefix Configuration
+ */
+function initAccountPrefixConfig() {
+    const prefixForm = document.getElementById('accountPrefixConfigForm');
+
+    if (prefixForm) {
+        prefixForm.addEventListener('submit', function (e) {
+            e.preventDefault();
+
+            const prefixInput = document.getElementById('accountPrefix');
+            if (prefixInput) {
+                // Ensure only uppercase
+                prefixInput.value = prefixInput.value.toUpperCase();
+                
+                const val = prefixInput.value;
+                if (!val || val.length < 1 || val.length > 4 || !/^[A-Z]+$/.test(val)) {
+                    showToast('danger', 'The prefix must be 1 to 4 capital letters (e.g. SDC, MF).');
+                    return;
+                }
+            }
+
+            const formData = new FormData(this);
+            const submitBtn = this.querySelector('button[type="submit"]');
+            const originalText = submitBtn.innerHTML;
+
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Saving...';
+
+            const saveUrl = this.getAttribute('action');
+
+            fetch(saveUrl, {
+                method: 'POST',
+                headers: {
+                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content,
+                    'Accept': 'application/json'
+                },
+                body: formData
+            })
+                .then(response => {
+                    if (!response.ok) {
+                        return response.json().then(data => {
+                            throw new Error(data.message || 'Failed to save configuration');
+                        });
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    submitBtn.disabled = false;
+                    submitBtn.innerHTML = originalText;
+
+                    if (data.success) {
+                        showToast('success', data.message || 'Configuration saved successfully');
+                    } else {
+                        showToast('danger', data.message || 'Failed to save configuration');
+                    }
+                })
+                .catch(error => {
+                    submitBtn.disabled = false;
+                    submitBtn.innerHTML = originalText;
+                    console.error('Error:', error);
+                    showToast('danger', error.message || 'An error occurred while saving configuration');
                 });
         });
     }

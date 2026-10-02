@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Emi;
+use App\Models\Installment;
 use App\Models\LoanAccount;
 use App\Models\LoanConfiguration;
 use Carbon\Carbon;
@@ -71,6 +72,10 @@ class PartialPaymentConfigService
 
     public function getInProgressCollectionSum(Emi $emi): float
     {
+        if ($emi->relationLoaded('collections')) {
+            return (float) $emi->collections->where('status', 'in_progress')->sum('amount');
+        }
+        
         return (float) ($emi->collections()
             ->where('status', 'in_progress')
             ->sum('amount') ?? 0);
@@ -250,6 +255,144 @@ class PartialPaymentConfigService
             'timing_allowed' => $timingError === null,
             'timing_message' => $timingError,
             'allows_partial' => $this->isActive() && $timingError === null && $outstanding > 0,
+        ];
+    }
+
+    /**
+     * On a shared seat every limit is measured against the paying owner's slice,
+     * otherwise a 50% owner is offered (and validated against) the full installment.
+     */
+    public function getChitOutstandingDue(Installment $installment, ?int $clientId = null): float
+    {
+        if ($clientId && $installment->member) {
+            return max(0.0, $installment->clientBalanceShare($clientId));
+        }
+
+        return max(0.0, round((float) $installment->balance, 2));
+    }
+
+    public function getChitMinimumPartialBaseAmount(Installment $installment, ?int $clientId = null): float
+    {
+        if ($this->getPenaltyCalculationMethod() === 'emi_plus_partial_remaining') {
+            return $this->getChitOutstandingDue($installment, $clientId);
+        }
+
+        if ($clientId && $installment->member) {
+            return max(0.0, $installment->member->amountForClient((float) $installment->amount, $clientId));
+        }
+
+        return max(0.0, (float) $installment->amount);
+    }
+
+    public function calculateChitMinimumPartialAmount(Installment $installment, ?int $clientId = null): int
+    {
+        if (!$this->isActive()) {
+            return 0;
+        }
+
+        $percentage = $this->getMinimumPercentage();
+        $base = $this->getChitMinimumPartialBaseAmount($installment, $clientId);
+        $minimum = (int) ceil(($base * $percentage) / 100.0);
+        $outstanding = $this->getChitOutstandingDue($installment, $clientId);
+        $maxPartial = (int) round($outstanding);
+
+        if ($maxPartial <= 0) {
+            return 0;
+        }
+
+        return min($minimum, $maxPartial);
+    }
+
+    public function validateChitTiming(Installment $installment): ?string
+    {
+        if (!$this->isActive()) {
+            return 'Partial payments are disabled in loan configuration.';
+        }
+
+        if (!$installment->due_date) {
+            return null;
+        }
+
+        $dueDate = Carbon::parse($installment->due_date)->startOfDay();
+        $today = now()->startOfDay();
+
+        return match ($this->getTiming()) {
+            'before_due' => $today->gt($dueDate)
+                ? 'Partial payments are only allowed before the due date (' . $dueDate->format('d-m-Y') . ').'
+                : null,
+            'after_due' => $today->lte($dueDate)
+                ? 'Partial payments are only allowed after the due date (' . $dueDate->format('d-m-Y') . ').'
+                : null,
+            default => null,
+        };
+    }
+
+    public function validateChitPartialAmount(Installment $installment, float $amount, ?int $clientId = null): ?string
+    {
+        if (!$this->isActive()) {
+            return 'Partial payments are disabled in loan configuration.';
+        }
+
+        if ($timingError = $this->validateChitTiming($installment)) {
+            return $timingError;
+        }
+
+        if ($amount <= 0) {
+            return 'Partial payment amount must be greater than zero.';
+        }
+
+        if (floor($amount) != $amount) {
+            return 'Partial payment amount must be a whole number (no decimal values).';
+        }
+
+        $outstanding = $this->getChitOutstandingDue($installment, $clientId);
+
+        if ($amount > ($outstanding + 0.01)) {
+            return 'Collection amount cannot exceed the pending installment amount (₹' . number_format($outstanding, 0) . ').';
+        }
+
+        $minimum = $this->calculateChitMinimumPartialAmount($installment, $clientId);
+
+        if ($minimum > 0 && $amount < $minimum) {
+            $pct = $this->getMinimumPercentage();
+            $baseLabel = $this->getPenaltyCalculationMethod() === 'emi_plus_partial_remaining'
+                ? 'outstanding balance'
+                : 'installment amount';
+
+            return "Partial payment must be at least ₹{$minimum} ({$pct}% of {$baseLabel}).";
+        }
+
+        return null;
+    }
+
+    public function rulesForChitInstallment(Installment $installment, ?int $clientId = null): array
+    {
+        $outstanding = $this->getChitOutstandingDue($installment, $clientId);
+        $minimum = $this->calculateChitMinimumPartialAmount($installment, $clientId);
+        $timingError = $this->validateChitTiming($installment);
+        $maxPartial = (int) round($outstanding);
+        $base = $clientId && $installment->member
+            ? $installment->member->amountForClient((float) $installment->amount, $clientId)
+            : (float) $installment->amount;
+
+        $allowsPartial = $this->isActive()
+            && $timingError === null
+            && $maxPartial >= 1
+            && $minimum <= $maxPartial;
+
+        return [
+            'is_active' => $this->isActive(),
+            'minimum_partial_percentage' => $this->getConfiguredMinimumPercentage(),
+            'partial_payment_timing' => $this->getTiming(),
+            'penalty_calculation_method' => $this->getPenaltyCalculationMethod(),
+            'minimum_partial_amount' => $minimum,
+            'maximum_partial_amount' => $maxPartial,
+            'outstanding_due' => round($outstanding, 2),
+            'installment_base' => round($base, 2),
+            'timing_allowed' => $timingError === null,
+            'timing_message' => $timingError
+                ?? ($allowsPartial ? null : 'Remaining balance is too low for a partial payment. Please use full payment.'),
+            'allows_partial' => $allowsPartial,
         ];
     }
 }

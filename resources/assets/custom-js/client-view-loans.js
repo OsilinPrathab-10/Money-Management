@@ -17,34 +17,119 @@ document.addEventListener('DOMContentLoaded', function () {
   // EMI details are now handled by separate page navigation
   // Modal functionality removed as we use direct page links
 
-  // Initialize DataTable if available
-  const loanHistoryTable = document.getElementById('loanHistoryTable');
-  if (
-    loanHistoryTable &&
-    loanHistoryTable.dataset.hasRows === 'true' &&
-    typeof $.fn.DataTable !== 'undefined'
-  ) {
-    $(loanHistoryTable).DataTable({
-      order: [],
-      pageLength: 10,
-      responsive: true,
-      language: {
-        search: 'Search:',
-        lengthMenu: 'Show _MENU_ entries',
-        info: 'Showing _START_ to _END_ of _TOTAL_ entries',
-        infoEmpty: 'No entries available',
-        infoFiltered: '(filtered from _MAX_ total entries)',
-        paginate: {
-          first: 'First',
-          last: 'Last',
-          next: 'Next',
-          previous: 'Previous'
-        }
+  // Client Loans Filter Handler (Loan Mode and Loan Type)
+  const clientLoanModeFilter = document.getElementById('clientLoanModeFilter');
+  const clientLoanTypeFilter = document.getElementById('clientLoanTypeFilter');
+  const resetClientLoanFilters = document.getElementById('resetClientLoanFilters');
+
+  function applyClientLoanFilters() {
+    const selectedMode = clientLoanModeFilter ? clientLoanModeFilter.value : '';
+    const selectedType = clientLoanTypeFilter ? clientLoanTypeFilter.value : '';
+
+    // Filter Applications
+    let visibleApps = 0;
+    const appRows = document.querySelectorAll('.client-loan-app-row');
+    appRows.forEach(row => {
+      const mode = row.getAttribute('data-loan-mode') || 'emi';
+      const typeId = row.getAttribute('data-loan-type-id') || '';
+      const modeMatch = !selectedMode || mode === selectedMode;
+      const typeMatch = !selectedType || typeId === selectedType;
+
+      if (modeMatch && typeMatch) {
+        row.classList.remove('d-none');
+        visibleApps++;
+      } else {
+        row.classList.add('d-none');
       }
     });
+
+    const emptyAppRow = document.querySelector('.client-filter-empty-app');
+    if (emptyAppRow) {
+      if (appRows.length > 0 && visibleApps === 0) {
+        emptyAppRow.classList.remove('d-none');
+      } else {
+        emptyAppRow.classList.add('d-none');
+      }
+    }
+    const badgeApps = document.getElementById('badgeTotalApplications');
+    if (badgeApps) {
+      badgeApps.textContent = `${visibleApps} Total`;
+    }
+
+    // Filter Active Loan Accounts
+    let visibleActive = 0;
+    const accRows = document.querySelectorAll('.client-loan-acc-row');
+    accRows.forEach(row => {
+      const mode = row.getAttribute('data-loan-mode') || 'emi';
+      const typeId = row.getAttribute('data-loan-type-id') || '';
+      const modeMatch = !selectedMode || mode === selectedMode;
+      const typeMatch = !selectedType || typeId === selectedType;
+
+      if (modeMatch && typeMatch) {
+        row.classList.remove('d-none');
+        visibleActive++;
+      } else {
+        row.classList.add('d-none');
+      }
+    });
+
+    const emptyAccRow = document.querySelector('.client-filter-empty-acc');
+    if (emptyAccRow) {
+      if (accRows.length > 0 && visibleActive === 0) {
+        emptyAccRow.classList.remove('d-none');
+      } else {
+        emptyAccRow.classList.add('d-none');
+      }
+    }
+    const badgeActive = document.getElementById('badgeActiveLoans');
+    if (badgeActive) {
+      badgeActive.textContent = `${visibleActive} Active`;
+    }
+
+    // Filter Closed Loans
+    let visibleClosed = 0;
+    const closedRows = document.querySelectorAll('.client-closed-acc-row');
+    closedRows.forEach(row => {
+      const mode = row.getAttribute('data-loan-mode') || 'emi';
+      const typeId = row.getAttribute('data-loan-type-id') || '';
+      const modeMatch = !selectedMode || mode === selectedMode;
+      const typeMatch = !selectedType || typeId === selectedType;
+
+      if (modeMatch && typeMatch) {
+        row.classList.remove('d-none');
+        visibleClosed++;
+      } else {
+        row.classList.add('d-none');
+      }
+    });
+
+    const emptyClosedRow = document.querySelector('.client-filter-empty-closed');
+    if (emptyClosedRow) {
+      if (closedRows.length > 0 && visibleClosed === 0) {
+        emptyClosedRow.classList.remove('d-none');
+      } else {
+        emptyClosedRow.classList.add('d-none');
+      }
+    }
+    const badgeClosed = document.getElementById('badgeClosedLoans');
+    if (badgeClosed) {
+      badgeClosed.textContent = `${visibleClosed} Closed`;
+    }
   }
 
-  // Document View Button Handler
+  if (clientLoanModeFilter) {
+    clientLoanModeFilter.addEventListener('change', applyClientLoanFilters);
+  }
+  if (clientLoanTypeFilter) {
+    clientLoanTypeFilter.addEventListener('change', applyClientLoanFilters);
+  }
+  if (resetClientLoanFilters) {
+    resetClientLoanFilters.addEventListener('click', function () {
+      if (clientLoanModeFilter) clientLoanModeFilter.value = '';
+      if (clientLoanTypeFilter) clientLoanTypeFilter.value = '';
+      applyClientLoanFilters();
+    });
+  }
   document.querySelectorAll('.view-document-btn').forEach(button => {
     button.addEventListener('click', function () {
       const loanId = this.getAttribute('data-loan-id');
@@ -199,23 +284,25 @@ document.addEventListener('DOMContentLoaded', function () {
       let msgText = d.sms_message || '';
       let waMsgText = d.whatsapp_message || '';
 
+      const companySlogan = d.company_slogan || 'Codepluse Gen PVT Ltd';
+
       if (!msgText || !waMsgText) {
         let fallbackMsgText = '';
         if (isKandhuvatti) {
           if (paymentType === 'principal') {
-            fallbackMsgText = `Dear ${clientName},\nYour Principal payment of ₹${amountPaid} towards Shanmuga Finance Open Loan Account ${accountNo} has been received successfully.\nRemaining Principal Balance: ₹${remainingBalance}.\nThank you!`;
+            fallbackMsgText = `Dear ${clientName},\nYour Principal payment of ₹${amountPaid} towards ${companySlogan} Open Loan Account ${accountNo} has been received successfully.\nRemaining Principal Balance: ₹${remainingBalance}.\nThank you!`;
           } else {
             if (isPartial) {
-              fallbackMsgText = `Dear ${clientName},\nYour Partial Interest payment of ₹${amountPaid} towards Shanmuga Finance Open Loan Account ${accountNo} has been received successfully.\nBalance Interest to pay: ₹${emiBalance}.\nRemaining Principal Balance: ₹${remainingBalance}.\nThank you!`;
+              fallbackMsgText = `Dear ${clientName},\nYour Partial Interest payment of ₹${amountPaid} towards ${companySlogan} Open Loan Account ${accountNo} has been received successfully.\nBalance Interest to pay: ₹${emiBalance}.\nRemaining Principal Balance: ₹${remainingBalance}.\nThank you!`;
             } else {
-              fallbackMsgText = `Dear ${clientName},\nYour Interest payment of ₹${amountPaid} towards Shanmuga Finance Open Loan Account ${accountNo} has been received successfully.\nRemaining Principal Balance: ₹${remainingBalance}.\nThank you!`;
+              fallbackMsgText = `Dear ${clientName},\nYour Interest payment of ₹${amountPaid} towards ${companySlogan} Open Loan Account ${accountNo} has been received successfully.\nRemaining Principal Balance: ₹${remainingBalance}.\nThank you!`;
             }
           }
         } else {
           if (isPartial) {
-            fallbackMsgText = `Dear ${clientName},\nYour Partial EMI payment of ₹${amountPaid} towards Shanmuga Finance Loan Account ${accountNo} has been received successfully.\nBalance EMI to pay: ₹${emiBalance}.\nOutstanding Balance: ₹${remainingBalance}.\nThank you!`;
+            fallbackMsgText = `Dear ${clientName},\nYour Partial EMI payment of ₹${amountPaid} towards ${companySlogan} Loan Account ${accountNo} has been received successfully.\nBalance EMI to pay: ₹${emiBalance}.\nOutstanding Balance: ₹${remainingBalance}.\nThank you!`;
           } else {
-            fallbackMsgText = `Dear ${clientName},\nYour EMI payment of ₹${amountPaid} towards Shanmuga Finance Loan Account ${accountNo} has been received successfully.\nOutstanding Balance: ₹${remainingBalance}.\nThank you!`;
+            fallbackMsgText = `Dear ${clientName},\nYour EMI payment of ₹${amountPaid} towards ${companySlogan} Loan Account ${accountNo} has been received successfully.\nOutstanding Balance: ₹${remainingBalance}.\nThank you!`;
           }
         }
 
@@ -261,13 +348,13 @@ document.addEventListener('DOMContentLoaded', function () {
             <p class="text-muted small mb-4">Send payment confirmation receipt to client number: <strong>+${cleanMobile}</strong></p>
             
             <div class="d-grid gap-2 col-10 mx-auto">
-              <a href="${waUrl}" target="_blank" class="btn btn-success d-flex align-items-center justify-content-center gap-2 py-2" style="background-color: #25D366; border-color: #25D366; color: white; font-weight: 500;">
+              <button type="button" id="swal-payment-wa-btn" class="btn btn-success d-flex align-items-center justify-content-center gap-2 py-2" style="background-color: #25D366; border-color: #25D366; color: white; font-weight: 500;">
                 <i class="ri-whatsapp-line fs-5"></i> Send WhatsApp Confirmation
-              </a>
+              </button>
               
-              <a href="${smsUrl}" class="btn btn-info d-flex align-items-center justify-content-center gap-2 py-2" style="background-color: #0088cc; border-color: #0088cc; color: white; font-weight: 500;">
+              <button type="button" id="swal-payment-sms-btn" class="btn btn-info d-flex align-items-center justify-content-center gap-2 py-2" style="background-color: #0088cc; border-color: #0088cc; color: white; font-weight: 500;">
                 <i class="ri-message-3-line fs-5"></i> Send Native SMS
-              </a>
+              </button>
             </div>
           </div>
         `,
@@ -276,6 +363,16 @@ document.addEventListener('DOMContentLoaded', function () {
         confirmButtonText: 'Done & Close',
         customClass: {
           confirmButton: 'btn btn-primary px-5 mt-3'
+        },
+        didOpen: (popup) => {
+          popup.querySelector('#swal-payment-wa-btn')?.addEventListener('click', (e) => {
+            e.preventDefault();
+            window.open(waUrl, '_blank', 'noopener,noreferrer');
+          });
+          popup.querySelector('#swal-payment-sms-btn')?.addEventListener('click', (e) => {
+            e.preventDefault();
+            window.location.href = smsUrl;
+          });
         }
       }).then(() => {
         window.location.reload();
@@ -312,6 +409,85 @@ document.addEventListener('DOMContentLoaded', function () {
     if (infoMessage) {
       showAlert('info', 'Info', infoMessage);
     }
+  }
+
+  const paymentMethodSelect = document.getElementById('paymentMethod');
+  const internalBankAccountSelect = document.getElementById('internal_bank_account_id');
+  const partialPaymentMethodSelect = document.getElementById('partialPaymentMethod');
+  const partialInternalBankAccountSelect = document.getElementById('partial_internal_bank_account_id');
+
+  if (window.BankPaymentFields) {
+    window.BankPaymentFields.initGroups([
+      {
+        methodSelectId: 'paymentMethod',
+        bankSelectId: 'internal_bank_account_id',
+        bankContainerId: 'bankAccountContainer',
+        qrContainerId: 'qrCodeDisplayContainer',
+        qrBankNameId: 'qrBankName',
+        qrUpiIdId: 'qrUpiId',
+        qrImageWrapperId: 'qrCodeImageWrapper',
+        bankTransferContainerId: 'bankTransferDetailsContainer',
+        bankTransferContentId: 'bankTransferDetailsContent'
+      },
+      {
+        methodSelectId: 'partialPaymentMethod',
+        bankSelectId: 'partial_internal_bank_account_id',
+        bankContainerId: 'partialBankAccountContainer',
+        qrContainerId: 'partialQrCodeDisplayContainer',
+        qrBankNameId: 'partialQrBankName',
+        qrUpiIdId: 'partialQrUpiId',
+        qrImageWrapperId: 'partialQrCodeImageWrapper',
+        bankTransferContainerId: 'partialBankTransferDetailsContainer',
+        bankTransferContentId: 'partialBankTransferDetailsContent'
+      },
+      {
+        methodSelectId: 'selected_payment_method',
+        bankSelectId: 'selected_internal_bank_account_id',
+        bankContainerId: 'selectedBankAccountContainer',
+        qrContainerId: 'selectedQrCodeDisplayContainer',
+        qrBankNameId: 'selectedQrBankName',
+        qrUpiIdId: 'selectedQrUpiId',
+        qrImageWrapperId: 'selectedQrCodeImageWrapper',
+        bankTransferContainerId: 'selectedBankTransferDetailsContainer',
+        bankTransferContentId: 'selectedBankTransferDetailsContent'
+      }
+    ]);
+  } else {
+    window._bankPaymentGroupsQueue = [
+      {
+        methodSelectId: 'paymentMethod',
+        bankSelectId: 'internal_bank_account_id',
+        bankContainerId: 'bankAccountContainer',
+        qrContainerId: 'qrCodeDisplayContainer',
+        qrBankNameId: 'qrBankName',
+        qrUpiIdId: 'qrUpiId',
+        qrImageWrapperId: 'qrCodeImageWrapper',
+        bankTransferContainerId: 'bankTransferDetailsContainer',
+        bankTransferContentId: 'bankTransferDetailsContent'
+      },
+      {
+        methodSelectId: 'partialPaymentMethod',
+        bankSelectId: 'partial_internal_bank_account_id',
+        bankContainerId: 'partialBankAccountContainer',
+        qrContainerId: 'partialQrCodeDisplayContainer',
+        qrBankNameId: 'partialQrBankName',
+        qrUpiIdId: 'partialQrUpiId',
+        qrImageWrapperId: 'partialQrCodeImageWrapper',
+        bankTransferContainerId: 'partialBankTransferDetailsContainer',
+        bankTransferContentId: 'partialBankTransferDetailsContent'
+      },
+      {
+        methodSelectId: 'selected_payment_method',
+        bankSelectId: 'selected_internal_bank_account_id',
+        bankContainerId: 'selectedBankAccountContainer',
+        qrContainerId: 'selectedQrCodeDisplayContainer',
+        qrBankNameId: 'selectedQrBankName',
+        qrUpiIdId: 'selectedQrUpiId',
+        qrImageWrapperId: 'selectedQrCodeImageWrapper',
+        bankTransferContainerId: 'selectedBankTransferDetailsContainer',
+        bankTransferContentId: 'selectedBankTransferDetailsContent'
+      }
+    ];
   }
 
   // EMI Payment Modal Handler
@@ -380,6 +556,14 @@ document.addEventListener('DOMContentLoaded', function () {
       const today = new Date().toISOString().split('T')[0];
       document.getElementById('paidDate').value = today;
 
+      // Reset payment method and bank account
+      if (window.BankPaymentFields) {
+        window.BankPaymentFields.resetToInHand('paymentMethod');
+      } else if (paymentMethodSelect) {
+        paymentMethodSelect.value = 'in_hand';
+        paymentMethodSelect.dispatchEvent(new Event('change'));
+      }
+
       // Show modal
       const modalElement = document.getElementById('payEmiModal');
       let modal = bootstrap.Modal.getInstance(modalElement);
@@ -406,12 +590,19 @@ document.addEventListener('DOMContentLoaded', function () {
         return;
       }
 
+      let formData;
+      try {
+        const methodSelect = this.querySelector('select[name="payment_method"]');
+        const bankSelect = this.querySelector('select[name="internal_bank_account_id"]');
+        formData = window.BankPaymentFields.prepareFormData(this, methodSelect, bankSelect);
+      } catch (error) {
+        showAlert('danger', 'Validation Error', error.message);
+        return;
+      }
+
       // Show loading state
       submitBtn.disabled = true;
       submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>Processing...';
-
-      // Prepare form data
-      const formData = new FormData(this);
 
       // Get CSRF token
       const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
@@ -426,7 +617,16 @@ document.addEventListener('DOMContentLoaded', function () {
         },
         body: formData
       })
-        .then(response => response.json())
+        .then(async response => {
+          const data = await response.json();
+          if (!response.ok) {
+            const validationMsg = data.errors
+              ? Object.values(data.errors).flat().join(' ')
+              : '';
+            throw new Error(data.message || validationMsg || 'Payment failed.');
+          }
+          return data;
+        })
         .then(data => {
           if (data.success) {
             // Close modal
@@ -450,7 +650,7 @@ document.addEventListener('DOMContentLoaded', function () {
           console.error('Error:', error);
           Swal.fire({
             title: 'Error!',
-            text: 'Something went wrong. Please check your connection and try again.',
+            text: error.message || 'Something went wrong. Please check your connection and try again.',
             icon: 'error',
             customClass: { confirmButton: 'btn btn-primary' }
           });
@@ -551,15 +751,19 @@ document.addEventListener('DOMContentLoaded', function () {
             principalDisplay.textContent = '₹' + outstandingPrincipal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
           }
         }
+        if (partialPaymentAmountLabel) {
+          const container = partialPaymentAmountLabel.closest('.mb-3');
+          if(container) container.classList.add('d-none');
+          const input = document.getElementById('partialPaymentAmount');
+          if(input) { input.removeAttribute('required'); input.value = ''; }
+        }
         if (partialPrincipalGroup) {
           partialPrincipalGroup.classList.remove('d-none');
           const partialPrincipalAmountInput = document.getElementById('partialPrincipalAmount');
           if (partialPrincipalAmountInput) {
+            partialPrincipalAmountInput.setAttribute('required', 'required');
             partialPrincipalAmountInput.value = '';
           }
-        }
-        if (partialPaymentAmountLabel) {
-          partialPaymentAmountLabel.innerHTML = 'Partial Interest Payment Amount ';
         }
       } else {
         // Show standard cards
@@ -577,8 +781,17 @@ document.addEventListener('DOMContentLoaded', function () {
         }
         if (partialPrincipalGroup) {
           partialPrincipalGroup.classList.add('d-none');
+          const partialPrincipalAmountInput = document.getElementById('partialPrincipalAmount');
+          if (partialPrincipalAmountInput) {
+            partialPrincipalAmountInput.removeAttribute('required');
+            partialPrincipalAmountInput.value = '';
+          }
         }
         if (partialPaymentAmountLabel) {
+          const container = partialPaymentAmountLabel.closest('.mb-3');
+          if(container) container.classList.remove('d-none');
+          const input = document.getElementById('partialPaymentAmount');
+          if(input) input.setAttribute('required', 'required');
           partialPaymentAmountLabel.innerHTML = 'Partial Payment Amount <span class="text-danger">*</span>';
         }
       }
@@ -634,6 +847,14 @@ document.addEventListener('DOMContentLoaded', function () {
         : (isKandhuvatti ? 'cycle interest' : 'EMI amount');
       document.getElementById('partialMinAmountHelp').textContent =
         `Minimum: ₹${minimumAmount} (${pctLabel}% of ${baseLabel})`;
+
+      // Reset payment method and bank account
+      if (window.BankPaymentFields) {
+        window.BankPaymentFields.resetToInHand('partialPaymentMethod');
+      } else if (partialPaymentMethodSelect) {
+        partialPaymentMethodSelect.value = 'in_hand';
+        partialPaymentMethodSelect.dispatchEvent(new Event('change'));
+      }
 
       // Show modal
       const modalElement = document.getElementById('partialPaymentModal');
@@ -746,10 +967,21 @@ document.addEventListener('DOMContentLoaded', function () {
 
       const submitBtn = document.getElementById('submitPartialPaymentBtn');
       const originalBtnText = submitBtn.innerHTML;
-      const formData = new FormData(this);
+
+      let formData;
+      try {
+        const methodSelect = this.querySelector('select[name="payment_method"]');
+        const bankSelect = this.querySelector('select[name="internal_bank_account_id"]');
+        formData = window.BankPaymentFields.prepareFormData(this, methodSelect, bankSelect);
+      } catch (error) {
+        showAlert('danger', 'Validation Error', error.message);
+        return;
+      }
 
       // Validate amount based on active input
-      if (!partialPaymentAmount.disabled) {
+      const isKandhuvatti = !partialPaymentAmount.hasAttribute('required');
+
+      if (!isKandhuvatti && !partialPaymentAmount.disabled) {
         const amount = parseFloat(partialPaymentAmount.value);
         const min = parseFloat(partialPaymentAmount.getAttribute('min'));
         const max = parseFloat(partialPaymentAmount.getAttribute('max'));
@@ -799,7 +1031,16 @@ document.addEventListener('DOMContentLoaded', function () {
         },
         body: formData
       })
-        .then(response => response.json())
+        .then(async response => {
+          const data = await response.json();
+          if (!response.ok) {
+            const validationMsg = data.errors
+              ? Object.values(data.errors).flat().join(' ')
+              : '';
+            throw new Error(data.message || validationMsg || 'Failed to process partial payment.');
+          }
+          return data;
+        })
         .then(data => {
           if (data.success) {
             // Close modal
@@ -816,11 +1057,506 @@ document.addEventListener('DOMContentLoaded', function () {
         })
         .catch(error => {
           console.error('Error:', error);
-          showAlert('danger', 'Error', 'An error occurred while processing the partial payment. Please try again.');
+          showAlert('danger', 'Error', error.message || 'An error occurred while processing the partial payment. Please try again.');
           submitBtn.disabled = false;
           submitBtn.innerHTML = originalBtnText;
         });
     });
+  }
+
+  // EMI Schedule page-length (DataTables-style Show entries)
+  const emiPerPageSelect = document.getElementById('perPageSelect');
+  if (emiPerPageSelect) {
+    emiPerPageSelect.addEventListener('change', function () {
+      const url = new URL(window.location.href);
+      url.searchParams.set('per_page', this.value || '10');
+      url.searchParams.set('page', '1');
+      window.location.href = url.toString();
+    });
+  }
+
+  // Pay Selected EMIs
+  const emiScheduleToolbar = document.getElementById('emiScheduleToolbar');
+  if (emiScheduleToolbar) {
+    const loanOutstanding = parseFloat(emiScheduleToolbar.dataset.loanOutstanding) || 0;
+    const paySelectedBtn = document.getElementById('btnPaySelectedEmis');
+    const paySelectedModal = document.getElementById('paySelectedEmisModal');
+    const paySelectedForm = document.getElementById('paySelectedEmisForm');
+    const selectedEmiMap = new Map();
+    let isSyncingSelectAll = false;
+    const loanIdVal = emiScheduleToolbar ? (emiScheduleToolbar.dataset.loanId || '') : '';
+    const rawPathDigits = window.location.pathname.replace(/\D/g, '');
+    const storageKey = 'selectedEmis_' + (loanIdVal || rawPathDigits || 'default');
+
+    function saveSelectionToStorage() {
+      try {
+        const arr = Array.from(selectedEmiMap.entries());
+        const json = JSON.stringify(arr);
+        sessionStorage.setItem(storageKey, json);
+        localStorage.setItem(storageKey, json);
+      } catch (err) {}
+    }
+
+    function loadSelectionFromStorage() {
+      try {
+        let saved = sessionStorage.getItem(storageKey);
+        if (!saved) {
+          saved = localStorage.getItem(storageKey);
+        }
+        if (saved) {
+          const arr = JSON.parse(saved);
+          if (Array.isArray(arr)) {
+            arr.forEach(([id, val]) => {
+              if (id && val) {
+                selectedEmiMap.set(String(id), val);
+              }
+            });
+          }
+        }
+      } catch (err) {}
+    }
+
+    function clearSelectionStorage() {
+      try {
+        sessionStorage.removeItem(storageKey);
+        localStorage.removeItem(storageKey);
+      } catch (err) {}
+    }
+
+    function restoreCheckboxStatesFromStorage() {
+      isSyncingSelectAll = true;
+      getEmiPayCheckboxes().forEach(box => {
+        const id = String(box.dataset.emiId);
+        if (selectedEmiMap.has(id)) {
+          box.checked = true;
+        }
+      });
+      isSyncingSelectAll = false;
+    }
+
+    loadSelectionFromStorage();
+
+    function initStoredSelectionState() {
+      loadSelectionFromStorage();
+      restoreCheckboxStatesFromStorage();
+      updatePaySelectedState();
+    }
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', initStoredSelectionState);
+    } else {
+      initStoredSelectionState();
+    }
+    setTimeout(initStoredSelectionState, 100);
+    setTimeout(initStoredSelectionState, 400);
+
+    function getEmiPayCheckboxes() {
+      if (window.jQuery && $.fn.DataTable && $.fn.DataTable.isDataTable('#emi-schedule')) {
+        const dtNodes = $('#emi-schedule').DataTable().$('.emi-pay-checkbox');
+        return Array.from(dtNodes);
+      }
+      return Array.from(document.querySelectorAll('#emi-schedule .emi-pay-checkbox'));
+    }
+
+    function getPayableEmiCheckboxes() {
+      return getEmiPayCheckboxes().filter(box => box.dataset.payable === '1' || box.dataset.payable === 1);
+    }
+
+    function getSelectedEmiData(onlyPayable) {
+      const items = [];
+      selectedEmiMap.forEach(item => {
+        if (onlyPayable && item.status === 'paid') {
+          return;
+        }
+        items.push(item);
+      });
+      return items;
+    }
+
+    function syncSelectAllControls(checked) {
+      document.querySelectorAll('.js-select-all-emis').forEach(el => {
+        el.checked = checked;
+      });
+    }
+
+    function openPaySelectedModal() {
+      const selectedData = getSelectedEmiData(true);
+      if (!selectedData.length) {
+        showAlert('info', 'No Unpaid EMIs Selected', 'Select pending, overdue, or partial EMIs to pay.');
+        return;
+      }
+
+      const emiLabels = selectedData.map(item =>
+        `EMI #${item.no} (₹${item.remaining.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})`
+      );
+      const total = selectedData.reduce((sum, item) => sum + item.remaining, 0);
+
+      const summary = document.getElementById('selectedEmisSummary');
+      const amountInput = document.getElementById('selected_paid_amount');
+      const helpText = document.getElementById('selectedPaidAmountHelp');
+      if (summary) summary.innerHTML = emiLabels.join('<br>');
+      if (amountInput) {
+        amountInput.value = total.toFixed(2);
+        amountInput.setAttribute('data-full-total', total);
+        amountInput.readOnly = true;
+      }
+      const fullRadio = document.querySelector('input[name="selected_pay_type"][value="full"]');
+      if (fullRadio) fullRadio.checked = true;
+
+      if (helpText) {
+        helpText.textContent = `Full payment selected. Total due: ₹${total.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}.`;
+      }
+
+      if (paySelectedModal && typeof bootstrap !== 'undefined') {
+        bootstrap.Modal.getOrCreateInstance(paySelectedModal).show();
+      }
+      const bulkBar = document.getElementById('emiScheduleBulkPayBar');
+      if (bulkBar) bulkBar.classList.add('d-none');
+
+      if (window.BankPaymentFields) {
+        window.BankPaymentFields.resetToInHand('selected_payment_method');
+      }
+    }
+
+    document.addEventListener('change', function (e) {
+      if (e.target && e.target.name === 'selected_pay_type') {
+        const mode = e.target.value;
+        const amountInput = document.getElementById('selected_paid_amount');
+        const helpText = document.getElementById('selectedPaidAmountHelp');
+        const fullTotal = parseFloat(amountInput ? amountInput.getAttribute('data-full-total') : 0) || 0;
+        if (mode === 'full') {
+          if (amountInput) {
+            amountInput.value = fullTotal.toFixed(2);
+            amountInput.readOnly = true;
+          }
+          if (helpText) {
+            helpText.textContent = `Full payment selected. Total due: ₹${fullTotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}.`;
+          }
+        } else {
+          if (amountInput) {
+            amountInput.readOnly = false;
+            amountInput.focus();
+          }
+          if (helpText) {
+            helpText.textContent = 'Partial payment mode: enter custom amount to allocate across selected EMIs.';
+          }
+        }
+      }
+    });
+
+    function updatePaySelectedState() {
+      saveSelectionToStorage();
+      const allCheckboxes = getEmiPayCheckboxes();
+      const selectedData = getSelectedEmiData();
+      const total = selectedData.reduce((sum, item) => sum + item.remaining, 0);
+
+      if (paySelectedBtn) {
+        paySelectedBtn.disabled = selectedData.length === 0;
+        const hasUnpaid = selectedData.some(item => item.status !== 'paid');
+        paySelectedBtn.style.display = hasUnpaid ? '' : 'none';
+      }
+
+      if (!isSyncingSelectAll) {
+        const payableBoxes = Array.from(getPayableEmiCheckboxes()).filter(box => !box.disabled);
+        const allChecked = payableBoxes.length > 0 && payableBoxes.every(box => selectedEmiMap.has(String(box.dataset.emiId)));
+        syncSelectAllControls(allChecked);
+      }
+
+      // Sync Floating Bulk Pay Bar
+      const bar = document.getElementById('emiScheduleBulkPayBar');
+      if (bar) {
+        if (selectedData.length === 0) {
+          bar.classList.add('d-none');
+          allCheckboxes.forEach(box => box.disabled = false);
+        } else {
+          bar.classList.remove('d-none');
+          const countEl = document.getElementById('emiScheduleBulkSelectedCount');
+          const amountEl = document.getElementById('emiScheduleBulkTotalAmount');
+          const titleEl = document.getElementById('emiScheduleBulkBarTitle');
+          const labelEl = document.getElementById('emiScheduleBulkTotalLabel');
+
+          if (countEl) countEl.textContent = selectedData.length;
+          if (amountEl) {
+            amountEl.textContent = '₹' + total.toLocaleString('en-IN', {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2
+            });
+          }
+
+          let hasPaid = false;
+          let hasUnpaid = false;
+          selectedData.forEach(item => {
+            if (item.status === 'paid') {
+              hasPaid = true;
+            } else {
+              hasUnpaid = true;
+            }
+          });
+
+          if (hasPaid) {
+            if (titleEl) titleEl.textContent = 'EMIs Selected for Bulk Undo';
+            if (labelEl) labelEl.textContent = 'Total Paid:';
+            document.getElementById('emiScheduleBulkPayBtn')?.classList.add('d-none');
+            document.getElementById('emiScheduleBulkUndoBtn')?.classList.remove('d-none');
+            bar.style.borderTop = '4px solid #ea5455';
+          } else {
+            if (titleEl) titleEl.textContent = 'EMIs Selected for Bulk Payment';
+            if (labelEl) labelEl.textContent = 'Total Overdue:';
+            document.getElementById('emiScheduleBulkPayBtn')?.classList.remove('d-none');
+            document.getElementById('emiScheduleBulkUndoBtn')?.classList.add('d-none');
+            bar.style.borderTop = '4px solid #28c76f';
+          }
+
+          allCheckboxes.forEach(box => {
+            const id = String(box.dataset.emiId);
+            if (!selectedEmiMap.has(id)) {
+              const isPaid = box.dataset.status === 'paid';
+              if (hasPaid && !isPaid) {
+                box.disabled = true;
+              } else if (hasUnpaid && isPaid) {
+                box.disabled = true;
+              } else {
+                box.disabled = false;
+              }
+            }
+          });
+
+          // Render selected EMIs inside the container
+          const container = document.getElementById('emiScheduleBulkListContainer');
+          if (container) {
+            let emisHtml = '<div class="row g-2">';
+            selectedData.forEach(item => {
+              const priceClass = item.status === 'paid' ? 'text-danger' : 'text-success';
+              emisHtml += `
+                <div class="col-md-4">
+                  <div class="d-flex justify-content-between align-items-center bg-light p-2 rounded-3 border">
+                    <span class="fw-semibold text-body small">EMI #${item.no}</span>
+                    <strong class="${priceClass} small">₹${item.remaining.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+                  </div>
+                </div>
+              `;
+            });
+            emisHtml += '</div>';
+            container.innerHTML = emisHtml;
+          }
+        }
+      }
+    }
+
+    document.addEventListener('change', function (e) {
+      if (e.target.classList.contains('emi-pay-checkbox')) {
+        const id = String(e.target.dataset.emiId);
+        if (e.target.checked) {
+          selectedEmiMap.set(id, {
+            id: id,
+            no: e.target.dataset.emiNo,
+            status: String(e.target.dataset.status || ''),
+            remaining: parseFloat(e.target.dataset.remaining || 0)
+          });
+        } else {
+          selectedEmiMap.delete(id);
+        }
+        updatePaySelectedState();
+      }
+    });
+
+    document.addEventListener('change', function (e) {
+      if (!e.target.classList.contains('js-select-all-emis') || isSyncingSelectAll) {
+        return;
+      }
+
+      const checked = e.target.checked;
+      isSyncingSelectAll = true;
+      getPayableEmiCheckboxes().forEach(box => {
+        if (!box.disabled) {
+          box.checked = checked;
+          const id = String(box.dataset.emiId);
+          if (checked) {
+            selectedEmiMap.set(id, {
+              id: id,
+              no: box.dataset.emiNo,
+              status: String(box.dataset.status || ''),
+              remaining: parseFloat(box.dataset.remaining || 0)
+            });
+          } else {
+            selectedEmiMap.delete(id);
+          }
+        }
+      });
+      syncSelectAllControls(checked);
+      isSyncingSelectAll = false;
+      updatePaySelectedState();
+    });
+
+    document.addEventListener('click', function (e) {
+      if (e.target.classList.contains('js-select-all-emis')) {
+        e.stopPropagation();
+      }
+    });
+
+    // Handle floating bar buttons
+    document.addEventListener('click', function (e) {
+      if (e.target.id === 'emiScheduleBulkCancelBtn') {
+        selectedEmiMap.clear();
+        clearSelectionStorage();
+        document.querySelectorAll('.js-select-all-emis').forEach(el => { el.checked = false; });
+        getEmiPayCheckboxes().forEach(box => {
+          box.checked = false;
+          box.disabled = false;
+        });
+        updatePaySelectedState();
+      }
+    });
+
+    document.addEventListener('click', function (e) {
+      if (e.target.id === 'emiScheduleBulkPayBtn' || e.target.closest('#emiScheduleBulkPayBtn')) {
+        openPaySelectedModal();
+      }
+    });
+
+    document.addEventListener('click', function (e) {
+      if (e.target.id === 'emiScheduleBulkUndoBtn' || e.target.closest('#emiScheduleBulkUndoBtn')) {
+        if (selectedEmiMap.size === 0) return;
+
+        const emiIds = Array.from(selectedEmiMap.keys());
+        const selectedData = getSelectedEmiData();
+        let totalSum = selectedData.reduce((sum, item) => sum + item.remaining, 0);
+
+        Swal.fire({
+          title: 'Confirm Bulk Undo Payment',
+          text: `You are about to undo payments for all ${selectedEmiMap.size} selected EMIs. Total amount to be undone is ₹${totalSum.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}. This will mark these EMIs as pending/overdue!`,
+          icon: 'warning',
+          showCancelButton: true,
+          confirmButtonText: 'Yes, Undo All!',
+          cancelButtonText: 'Cancel',
+          confirmButtonColor: '#ea5455',
+          showLoaderOnConfirm: true,
+          preConfirm: () => {
+            return fetch(`${baseUrl}emi/repayments/bulk-undo`, {
+              method: 'POST',
+              headers: {
+                'X-CSRF-TOKEN': csrfToken,
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest'
+              },
+              body: JSON.stringify({ emi_ids: emiIds })
+            })
+            .then(response => {
+              if (!response.ok) {
+                return response.json().then(err => { throw new Error(err.message || 'Bulk undo failed.') });
+              }
+              return response.json();
+            })
+            .catch(error => {
+              Swal.showValidationMessage(`Error: ${error.message}`);
+            });
+          },
+          allowOutsideClick: () => !Swal.isLoading()
+        }).then((result) => {
+          if (result.isConfirmed && result.value && result.value.success) {
+            Swal.fire({
+              title: 'Bulk Undo Successful!',
+              text: result.value.message || 'Selected payments successfully undone.',
+              icon: 'success',
+              confirmButtonColor: '#28c76f'
+            }).then(() => {
+              selectedEmiIds.clear();
+              updatePaySelectedState();
+              window.location.reload();
+            });
+          }
+        });
+      }
+    });
+
+    if (paySelectedBtn) {
+      paySelectedBtn.addEventListener('click', function () {
+        openPaySelectedModal();
+      });
+    }
+
+    if (paySelectedForm) {
+      paySelectedForm.addEventListener('submit', function (e) {
+        e.preventDefault();
+        const selectedData = getSelectedEmiData(true);
+        if (!selectedData.length) {
+          showAlert('info', 'No Unpaid EMIs', 'Select pending, overdue, or partial EMIs to pay.');
+          return;
+        }
+
+        const amount = parseFloat(document.getElementById('selected_paid_amount')?.value || 0);
+        if (isNaN(amount) || amount <= 0) {
+          showAlert('danger', 'Invalid Amount', 'Please enter a valid payment amount.');
+          return;
+        }
+        if (amount > loanOutstanding + 0.01) {
+          showAlert('danger', 'Amount Too High', `Payment cannot exceed loan outstanding of ₹${loanOutstanding.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}.`);
+          return;
+        }
+
+        const methodSelectEl = document.getElementById('selected_payment_method');
+        const bankSelectEl = document.getElementById('selected_internal_bank_account_id');
+        const bankValidationError = window.BankPaymentFields
+          ? window.BankPaymentFields.validateBankPayment(methodSelectEl, bankSelectEl, paySelectedForm)
+          : null;
+        if (bankValidationError) {
+          showAlert('danger', 'Validation Error', bankValidationError);
+          return;
+        }
+
+        const paymentMethod = methodSelectEl?.value || 'in_hand';
+        const bankAccountId = bankSelectEl?.value || null;
+        const submitBtn = paySelectedForm.querySelector('button[type="submit"]');
+        if (submitBtn) {
+          submitBtn.disabled = true;
+          submitBtn.textContent = 'Processing...';
+        }
+
+        const emiIds = selectedData.map(item => item.id);
+
+        fetch(baseUrl + 'emi/receipts/pay-selected', {
+          method: 'POST',
+          headers: {
+            'X-CSRF-TOKEN': csrfToken,
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          },
+          body: JSON.stringify({
+            emi_ids: emiIds,
+            paid_amount: amount,
+            paid_date: document.getElementById('selected_paid_date')?.value,
+            payment_method: paymentMethod,
+            internal_bank_account_id: paymentMethod === 'in_hand' ? null : bankAccountId,
+            remarks: document.getElementById('selected_remarks')?.value || ''
+          })
+        })
+          .then(r => r.json())
+          .then(data => {
+            if (submitBtn) {
+              submitBtn.disabled = false;
+              submitBtn.textContent = 'Confirm Payment';
+            }
+            if (data.success) {
+              clearSelectionStorage();
+              selectedEmiMap.clear();
+              if (paySelectedModal && typeof bootstrap !== 'undefined') {
+                bootstrap.Modal.getInstance(paySelectedModal)?.hide();
+              }
+              handlePaymentSuccess(data, 'Selected EMIs paid successfully.');
+            } else {
+              showAlert('danger', 'Payment Failed', data.message || 'Payment failed.');
+            }
+          })
+          .catch(() => {
+            if (submitBtn) {
+              submitBtn.disabled = false;
+              submitBtn.textContent = 'Confirm Payment';
+            }
+            showAlert('danger', 'Error', 'An error occurred while processing the payment.');
+          });
+      });
+    }
   }
 
   // Handle Admin Undo Payment button clicks (in view-loan-account or client-loan-emi-details)
@@ -899,4 +1635,84 @@ document.addEventListener('DOMContentLoaded', function () {
       });
     }
   });
+
+  // Handle Open Loan Interest Cycles Generation Form Submit
+  const formGenerateCycles = document.getElementById('formGenerateOpenLoanCycles');
+  if (formGenerateCycles) {
+    formGenerateCycles.addEventListener('submit', function (e) {
+      e.preventDefault();
+
+      const countInput = document.getElementById('generate_cycle_count');
+      const count = parseInt(countInput ? countInput.value : 0, 10);
+      if (!count || count < 1) {
+        Swal.fire({
+          icon: 'warning',
+          title: 'Invalid Input',
+          text: 'Please enter a valid number of cycles greater than zero.'
+        });
+        return;
+      }
+
+      const submitBtn = document.getElementById('btnSubmitGenerateCycles');
+      const origText = submitBtn ? submitBtn.innerHTML : 'Generate Cycles';
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>Generating...';
+      }
+
+      const url = this.getAttribute('action');
+      const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
+
+      fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-TOKEN': csrfToken,
+          'Accept': 'application/json',
+          'X-Requested-With': 'XMLHttpRequest'
+        },
+        body: JSON.stringify({ cycle_count: count })
+      })
+      .then(async response => {
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data.message || 'Failed to generate cycles.');
+        }
+        return data;
+      })
+      .then(data => {
+        const modalEl = document.getElementById('generateCyclesModal');
+        if (modalEl) {
+          const bsModal = bootstrap.Modal.getInstance(modalEl);
+          if (bsModal) {
+            bsModal.hide();
+          }
+        }
+
+        Swal.fire({
+          icon: 'success',
+          title: 'Cycles Generated!',
+          text: data.message || 'Interest cycles have been generated successfully.',
+          timer: 1600,
+          showConfirmButton: false
+        }).then(() => {
+          window.location.reload();
+        });
+      })
+      .catch(error => {
+        console.error('Error generating cycles:', error);
+        Swal.fire({
+          icon: 'error',
+          title: 'Generation Failed',
+          text: error.message || 'An error occurred while generating cycles.'
+        });
+      })
+      .finally(() => {
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.innerHTML = origText;
+        }
+      });
+    });
+  }
 });

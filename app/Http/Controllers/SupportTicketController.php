@@ -126,6 +126,11 @@ class SupportTicketController extends Controller
         $ticket = SupportTicket::with(['client', 'assignedUser', 'replies.user', 'replies.client', 'replies.attachments', 'attachments'])
             ->findOrFail($id);
 
+        if ($ticket->status === 'pending') {
+            $ticket->update(['status' => 'open']);
+            $ticket->status = 'open';
+        }
+
         $clients = Client::select('id', 'client_name')->get();
         $users = User::select('id', 'name')->get();
 
@@ -157,7 +162,7 @@ class SupportTicketController extends Controller
             'subject' => $request->subject,
             'priority' => $request->priority,
             'message' => $request->message,
-            'status' => 'open',
+            'status' => 'pending',
         ]);
 
         // Handle attachments
@@ -176,6 +181,9 @@ class SupportTicketController extends Controller
             }
         }
 
+        // Dispatch notification
+        app(\App\Services\AppNotificationService::class)->newSupportTicket($ticket, 'admin');
+
         return response()->json([
             'success' => true,
             'message' => 'Support ticket created successfully',
@@ -193,7 +201,12 @@ class SupportTicketController extends Controller
         ]);
 
         $ticket = SupportTicket::findOrFail($id);
+        $oldStatus = $ticket->status;
         $ticket->update(['status' => $request->status]);
+
+        if ($oldStatus !== $request->status) {
+            app(\App\Services\AppNotificationService::class)->supportTicketStatusUpdated($ticket, $request->status);
+        }
 
         return response()->json([
             'success' => true,
@@ -254,10 +267,16 @@ class SupportTicketController extends Controller
             }
         }
 
-        // Update ticket status to pending if it was closed
-        if ($ticket->status === 'closed') {
-            $ticket->update(['status' => 'pending']);
+        // Ensure ticket remains/becomes open when staff replies
+        if ($ticket->status !== 'closed') {
+            $ticket->update(['status' => 'open']);
         }
+
+        // Send push & in-app notification to customer
+        app(\App\Services\AppNotificationService::class)->supportTicketReply($ticket, $reply, 'admin');
+
+        $reply->load(['user', 'attachments']);
+        $userName = $reply->user->name ?? 'Support Team';
 
         return response()->json([
             'success' => true,
@@ -265,9 +284,14 @@ class SupportTicketController extends Controller
             'reply' => [
                 'id' => $reply->id,
                 'message' => $reply->message,
-                'user_name' => $reply->user->name ?? 'N/A',
+                'user_name' => $userName,
+                'user_avatar' => strtoupper(substr($userName, 0, 1)),
                 'created_at' => $reply->created_at->format('d-m-Y h:i A'),
-                'attachments' => $reply->attachments,
+                'attachments' => $reply->attachments->map(fn($att) => [
+                    'id' => $att->id,
+                    'file_name' => $att->file_name,
+                    'url' => \Illuminate\Support\Facades\Storage::url($att->file_path),
+                ]),
             ],
         ]);
     }

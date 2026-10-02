@@ -3,7 +3,7 @@
 @section('title', $expense->expense_number)
 
 @section('content')
-<div class="container-xxl flex-grow-1 container-p-y">
+<div class="account-module">
   <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-4">
     <div>
       <h4 class="mb-1">{{ $expense->expense_number }}</h4>
@@ -27,7 +27,6 @@
       <div class="col-md-3"><span class="text-muted">{{ __('Reference') }}</span><br>{{ $expense->reference_number ?? '—' }}</div>
       <div class="col-md-6"><span class="text-muted">{{ __('Category') }}</span><br>{{ $expense->category?->category_name ?? '—' }}</div>
       <div class="col-md-6"><span class="text-muted">{{ __('Bank') }}</span><br>{{ $expense->bankAccount?->account_name ?? '—' }}</div>
-      <div class="col-md-6"><span class="text-muted">{{ __('Expense GL') }}</span><br>{{ $expense->chartOfAccount?->account_code }} — {{ $expense->chartOfAccount?->account_name }}</div>
       <div class="col-12"><span class="text-muted">{{ __('Description') }}</span><br>{{ $expense->description ?? '—' }}</div>
     </div>
   </div>
@@ -59,14 +58,6 @@
               @endforeach
             </select>
           </div>
-          <div class="col-md-3">
-            <label class="form-label">{{ __('GL') }}</label>
-            <select name="chart_of_account_id" class="form-select" required>
-              @foreach ($chartOfAccounts as $g)
-                <option value="{{ $g->id }}" @selected($expense->chart_of_account_id == $g->id)>{{ $g->account_code }} — {{ $g->account_name }}</option>
-              @endforeach
-            </select>
-          </div>
           <div class="col-md-2">
             <label class="form-label">{{ __('Amount') }}</label>
             <input type="number" step="0.01" name="amount" value="{{ old('amount', $expense->amount) }}" class="form-control" required>
@@ -92,7 +83,7 @@
       <form action="{{ route('account.expenses.approve', $expense) }}" method="post">@csrf<button type="submit" class="btn btn-primary">{{ __('Approve') }}</button></form>
       <form action="{{ route('account.expenses.destroy', $expense) }}" method="post" onsubmit="return confirm(@json(__('Delete?')));">@csrf @method('DELETE')<button type="submit" class="btn btn-outline-danger">{{ __('Delete') }}</button></form>
     @elseif ($expense->status === 'approved')
-      <form action="{{ route('account.expenses.post', $expense) }}" method="post">@csrf<button type="submit" class="btn btn-success">{{ __('Post to GL') }}</button></form>
+      <form action="{{ route('account.expenses.post', $expense) }}" method="post">@csrf<button type="submit" class="btn btn-success">{{ __('Post') }}</button></form>
     @endif
   </div>
 </div>

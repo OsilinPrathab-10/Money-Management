@@ -13,8 +13,13 @@ use Illuminate\View\View;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Auth;
 use App\Support\HashId;
+use App\Support\BulkPaymentGroup;
+use App\Services\PaymentReceiptService;
 use Carbon\Carbon;
+use Illuminate\Http\RedirectResponse;
 
 class EmiController extends Controller
 {
@@ -37,47 +42,38 @@ class EmiController extends Controller
             })->whereHas('activeAssignment');
         }
 
-        $activeEmiQuery = (clone $baseEmiQuery)->where(function ($q) use ($today) {
-            // Overdue payments (status != paid and due date is in the past)
-            $q->where(function ($sq) use ($today) {
-                $sq->where('due_date', '<', $today)
-                   ->where('status', '!=', 'paid');
-            })
-            // OR the upcoming 1 payment of the client (earliest unpaid/partial EMI due today or in the future)
-            ->orWhereIn('emis.id', function ($subQuery) use ($today) {
-                $subQuery->select(DB::raw('MIN(e2.id)'))
-                    ->from('emis as e2')
-                    ->where('e2.status', '!=', 'paid')
-                    ->where('e2.due_date', '>=', $today)
-                    ->groupBy('e2.loan_account_id');
-            });
-        });
-        
-        // Calculate statistics for the restricted repayments window
+        // Calculate statistics using due-date buckets
         $paidCount = (clone $baseEmiQuery)->where('status', 'paid')->count();
-        $overdueCount = (clone $activeEmiQuery)->overdue()->count();
-        $pendingCount = (clone $activeEmiQuery)->where('status', 'pending')->where('due_date', '>=', $today)->count();
-        $partialCount = (clone $activeEmiQuery)->where('status', 'partial')->where('due_date', '>=', $today)->count();
+        $overdueCount = (clone $baseEmiQuery)->overdue()->count();
+        $pendingCount = (clone $baseEmiQuery)->pendingCurrentMonth()->count();
+        $upcomingCount = (clone $baseEmiQuery)->upcoming()->count();
+        $partialCount = (clone $baseEmiQuery)->where('status', 'partial')
+            ->whereDate('due_date', '>=', $today)
+            ->count();
 
         $stats = [
-            'total_emis' => $overdueCount + $pendingCount + $partialCount + $paidCount,
+            'total_emis' => $overdueCount + $pendingCount + $upcomingCount + $partialCount + $paidCount,
             'paid_emis' => $paidCount,
             'pending_emis' => $pendingCount,
+            'upcoming_emis' => $upcomingCount,
             'partial_emis' => $partialCount,
             'overdue_emis' => $overdueCount,
             'total_collected' => (clone $baseEmiQuery)->where('status', 'paid')->sum('paid_amount'),
-            'total_pending' => (clone $activeEmiQuery)->sum('pending_amount'),
-            'reminders_2days' => (clone $activeEmiQuery)
+            'total_pending' => (clone $baseEmiQuery)->whereIn('status', ['pending', 'overdue', 'partial'])
+                ->where('pending_amount', '>', 0)
+                ->sum('pending_amount'),
+            'reminders_2days' => (clone $baseEmiQuery)
+                ->whereIn('status', ['pending', 'partial'])
                 ->whereDate('due_date', Carbon::now()->addDays(2)->toDateString())
                 ->count(),
         ];
 
         $locations = Location::orderBy('name')->get();
         $agents = \App\Models\Agent::where('status', 'active')->orderBy('agent_name')->get();
-        $products = \App\Models\LoanProduct::with('loanType')->orderBy('loan_name')->get();
-        $loanTypes = \App\Models\LoanType::where('status', 1)->orWhereHas('products')->orderBy('name')->get();
+        $bankAccounts = \App\Models\Account\BankAccount::where('is_active', true)->orderBy('account_name')->get();
+        $loanTypes = \App\Models\LoanType::orderBy('name')->get();
 
-        return view('admin.emi-repayments.repayments', compact('stats', 'locations', 'agents', 'products', 'loanTypes'));
+        return view('admin.emi-repayments.repayments', compact('stats', 'locations', 'agents', 'bankAccounts', 'loanTypes'));
     }
 
     /**
@@ -99,8 +95,11 @@ class EmiController extends Controller
         $agent = \App\Models\Agent::findOrFail($request->agent_id);
         $emiIds = $request->emi_ids;
         $count = 0;
+        $notifiedClients = [];
 
         DB::beginTransaction();
+        $dedupeKey = null;
+
         try {
             foreach ($emiIds as $hashedId) {
                 $emiId = HashId::decode($hashedId);
@@ -121,7 +120,13 @@ class EmiController extends Controller
 
                 // Also update Client assigned_to if needed (optional but helpful)
                 if ($emi->loanAccount && $emi->loanAccount->client) {
-                    $emi->loanAccount->client->update(['assigned_to' => $agent->id]);
+                    $client = $emi->loanAccount->client;
+                    $previousAgentId = $client->assigned_to;
+                    $client->update(['assigned_to' => $agent->id]);
+                    if ((int) $previousAgentId !== (int) $agent->id && ! isset($notifiedClients[$client->id])) {
+                        $notifiedClients[$client->id] = true;
+                        event(new \App\Events\ClientAssignedToAgentEvent($client->fresh(), $agent));
+                    }
                 }
 
                 $count++;
@@ -145,6 +150,166 @@ class EmiController extends Controller
     /**
      * Get EMI data for DataTable
      */
+    /**
+     * Repayments query with every filter except status and search applied.
+     */
+    private function buildRepaymentsBaseQuery(Request $request)
+    {
+        $query = Emi::with(['loanAccount.loanApplication.client.location', 'activeAssignment.agent' => function($q) {
+            $q->withTrashed();
+        }])
+            ->whereIn('loan_account_id', $this->primaryLoanAccountIdsSubquery())
+            ->select('emis.*');
+
+        // Apply agent filter if current user is an agent
+        $currentUser = auth()->user();
+        if ($currentUser->hasRole('Agent')) {
+            $agentId = optional($currentUser->agent)->id;
+            if ($agentId) {
+                $query->where(function ($q) use ($agentId) {
+                    $q->whereHas('loanAccount.client', function ($cq) use ($agentId) {
+                        $cq->where('assigned_to', $agentId)
+                          ->orWhere('added_by', $agentId);
+                    })
+                    ->orWhereHas('loanAccount.loanApplication.client', function ($cq) use ($agentId) {
+                        $cq->where('assigned_to', $agentId)
+                          ->orWhere('added_by', $agentId);
+                    })
+                    ->orWhereHas('activeAssignment', function ($aq) use ($agentId) {
+                        $aq->where('agent_id', $agentId);
+                    });
+                });
+            } else {
+                $query->whereRaw('1 = 0');
+            }
+        }
+
+        // Apply location filter
+        if ($request->has('location_id') && $request->location_id != '') {
+            $query->whereHas('loanAccount.loanApplication.client', function($q) use ($request) {
+                $q->where('location_id', $request->location_id);
+            });
+        }
+
+        // Apply account number filter
+        if ($request->filled('account_number')) {
+            $query->whereHas('loanAccount', function($q) use ($request) {
+                $q->where('account_number', 'LIKE', "%{$request->account_number}%")
+                  ->orWhere('customer_loan_account_number', 'LIKE', "%{$request->account_number}%");
+            });
+        }
+
+        // Optional date filtering
+        if ($request->filled('from_date') || $request->filled('to_date')) {
+            if ($request->filled('from_date')) {
+                $from = Carbon::parse($request->input('from_date'))->startOfDay();
+                $query->where('due_date', '>=', $from);
+            }
+
+            if ($request->filled('to_date')) {
+                $to = Carbon::parse($request->input('to_date'))->endOfDay();
+                $query->where('due_date', '<=', $to);
+            }
+        }
+
+        // Filtering by loan_mode or term_unit
+        if ($request->input('loan_mode') === 'emi') {
+            $query->whereHas('loanAccount', function ($q) {
+                $q->where(function ($mq) {
+                    $mq->whereNull('loan_mode')->orWhere('loan_mode', '!=', 'interest_only');
+                });
+            });
+        } elseif ($request->input('loan_mode') === 'interest_only') {
+            $query->whereHas('loanAccount', function ($q) {
+                $q->where('loan_mode', 'interest_only');
+            });
+        } elseif ($request->input('term_unit') === 'monthly') {
+            $query->whereHas('loanAccount.loanApplication', function ($q) {
+                $q->where(function ($tq) {
+                    $tq->whereNull('term_unit')
+                        ->orWhereRaw("LOWER(TRIM(term_unit)) IN ('month', 'months', 'monthly')");
+                });
+            });
+        }
+
+        // Filtering by loan_type_id
+        if ($request->filled('loan_type_id')) {
+            $query->whereHas('loanAccount.product', function ($q) use ($request) {
+                $q->where('loan_type_id', $request->loan_type_id);
+            });
+        }
+
+        return $query;
+    }
+
+    private function applyRepaymentSearch($query, $search): void
+    {
+        if (empty($search)) {
+            return;
+        }
+
+        $query->where(function ($q) use ($search) {
+            $q->whereHas('loanAccount', function($q) use ($search) {
+                  $q->where('account_number', 'LIKE', "%{$search}%")
+                    ->orWhere('customer_loan_account_number', 'LIKE', "%{$search}%")
+                    ->orWhere('application_number', 'LIKE', "%{$search}%");
+              })
+              ->orWhereHas('loanAccount.client', function($q) use ($search) {
+                  $q->where('client_name', 'LIKE', "%{$search}%")
+                    ->orWhere('client_phone', 'LIKE', "%{$search}%");
+              });
+        });
+    }
+
+    /**
+     * Every EMI matching the current filters, so Bulk Pay can select beyond the visible page.
+     */
+    public function allIds(Request $request): JsonResponse
+    {
+        if (!auth()->user()->hasRole('Admin') && !auth()->user()->hasRole('Staff')) {
+            return response()->json(['success' => false, 'message' => 'Unauthorized action.'], 403);
+        }
+
+        $status = $request->input('status', 'overdue');
+        $today = Carbon::now()->startOfDay();
+
+        $query = $this->buildRepaymentsBaseQuery($request);
+        $this->applyRepaymentSearch($query, $request->input('search.value') ?: $request->input('search'));
+        $this->applyRepaymentStatusFilter($query, $status, $today);
+
+        // Only rows Bulk Pay can act on: unpaid for payment, paid for undo.
+        if ($status === 'paid') {
+            $query->where('status', 'paid');
+        } else {
+            $query->whereIn('status', ['pending', 'overdue', 'partial']);
+        }
+
+        $emis = $query->orderBy('loan_account_id')
+            ->orderBy('instalment_number')
+            ->get();
+
+        $data = $emis->map(function (Emi $emi) use ($status) {
+            $client = $emi->loanAccount?->loanApplication?->client ?? $emi->loanAccount?->client;
+
+            $amount = $status === 'paid'
+                ? (float) ($emi->paid_amount ?: $emi->total_amount)
+                : (float) ($emi->pending_amount ?: max(0, (float) $emi->total_amount - (float) $emi->paid_amount));
+
+            return [
+                'id' => $emi->getRouteKey(),
+                'amount' => round($amount, 2),
+                'client' => $client->client_name ?? 'N/A',
+                'account' => $emi->loanAccount->account_number ?? 'N/A',
+            ];
+        })->filter(fn ($row) => $row['amount'] > 0.01)->values();
+
+        return response()->json([
+            'success' => true,
+            'count' => $data->count(),
+            'data' => $data,
+        ]);
+    }
+
     public function getData(Request $request): JsonResponse
     {
         $columns = [
@@ -163,438 +328,230 @@ class EmiController extends Controller
         $status = $request->input('status', 'overdue'); // Default to overdue if not specified
 
         // Build base query
-        $query = Emi::with(['loanAccount.loanApplication.client.location', 'activeAssignment.agent' => function($q) {
-            $q->withTrashed();
-        }])
-            ->whereIn('loan_account_id', $this->primaryLoanAccountIdsSubquery())
-            ->select('emis.*');
+        $query = $this->buildRepaymentsBaseQuery($request);
 
-        // Apply agent filter if current user is an agent
-        $currentUser = auth()->user();
-        if ($currentUser->hasRole('Agent')) {
-            $agentId = optional($currentUser->agent)->id;
-            if ($agentId) {
-                $query->whereHas('loanAccount.loanApplication.client', function($q) use ($agentId) {
-                    $q->where('assigned_to', $agentId);
-                })->whereHas('activeAssignment');
-            }
-        }
-
-        // Apply location filter
-        if ($request->has('location_id') && $request->location_id != '') {
-            $query->whereHas('loanAccount.loanApplication.client', function($q) use ($request) {
-                $q->where('location_id', $request->location_id);
-            });
-        }
-
-        // Apply loan type filter
-        if ($request->filled('loan_type_id')) {
-            $loanTypeId = $request->loan_type_id;
-            $query->whereHas('loanAccount', function ($q) use ($loanTypeId) {
-                $q->where(function ($sq) use ($loanTypeId) {
-                    $sq->whereIn('loan_code', function ($ssq) use ($loanTypeId) {
-                        $ssq->select('loan_code')->from('loan_products')->where('loan_type_id', $loanTypeId);
-                    })->orWhereHas('loanApplication', function ($ssq) use ($loanTypeId) {
-                        $ssq->whereIn('loan_code', function ($sssq) use ($loanTypeId) {
-                            $sssq->select('loan_code')->from('loan_products')->where('loan_type_id', $loanTypeId);
-                        });
-                    });
-                });
-            });
-        }
-
-        // Apply product filter
-        if ($request->has('product_id') && $request->product_id != '') {
-            $productId = $request->product_id;
-            $product = \App\Models\LoanProduct::find($productId);
-            if ($product) {
-                $query->whereHas('loanAccount', function ($q) use ($product) {
-                    $q->where(function ($sq) use ($product) {
-                        $sq->where('loan_code', $product->loan_code)
-                          ->orWhereHas('loanApplication', function ($ssq) use ($product) {
-                              $ssq->where('loan_code', $product->loan_code);
-                          });
-                    });
-                });
-            }
-        }
-
-        // Apply loan mode / type filter (EMI vs Open Loan)
-        if ($request->has('loan_mode') && $request->loan_mode != '' && $request->loan_mode != 'all') {
-            $loanMode = $request->loan_mode;
-            $query->whereHas('loanAccount', function($q) use ($loanMode) {
-                if ($loanMode === 'emi') {
-                    $q->where(function($sq) {
-                        $sq->where('loan_mode', 'emi')
-                          ->orWhereNull('loan_mode');
-                    });
-                } else {
-                    $q->where('loan_mode', $loanMode);
-                }
-            });
-        }
-
-        // Optional date filtering
-        if ($request->filled('from_date') || $request->filled('to_date')) {
-            if ($request->filled('from_date')) {
-                $from = $this->parseFilterDate($request->input('from_date'))?->startOfDay();
-                if ($from) {
-                    $query->where('due_date', '>=', $from);
-                }
-            }
-
-            if ($request->filled('to_date')) {
-                $to = $this->parseFilterDate($request->input('to_date'))?->endOfDay();
-                if ($to) {
-                    $query->where('due_date', '<=', $to);
-                }
-            }
-        }
+        $queryBeforeSearch = clone $query;
 
         // Search handling
-        if (!empty($request->input('search.value'))) {
-            $search = $request->input('search.value');
-
-            $query->where(function ($q) use ($search) {
-                $q->whereHas('loanAccount', function($q) use ($search) {
-                      $q->where('account_number', 'LIKE', "%{$search}%")
-                        ->orWhere('application_number', 'LIKE', "%{$search}%");
-                  })
-                  ->orWhereHas('loanAccount.client', function($q) use ($search) {
-                      $q->where('client_name', 'LIKE', "%{$search}%")
-                        ->orWhere('client_phone', 'LIKE', "%{$search}%");
-                  });
-            });
-        }
+        $this->applyRepaymentSearch($query, $request->input('search.value'));
 
         // Calculate dynamic stats
         $baseCountQuery = clone $query;
 
         $paidCount = (clone $baseCountQuery)->where('status', 'paid')->count();
+        $overdueCount = (clone $baseCountQuery)->overdue()->count();
+        $pendingCount = (clone $baseCountQuery)->pendingCurrentMonth()->count();
+        $upcomingCount = (clone $baseCountQuery)->upcoming()->count();
+        $partialCount = (clone $baseCountQuery)->where('status', 'partial')
+            ->whereDate('due_date', '>=', $today)
+            ->count();
 
-        $activeEmiQuery = (clone $baseCountQuery)->where(function ($q) use ($today) {
-            // Overdue payments (status != paid and due date is in the past)
-            $q->where(function ($sq) use ($today) {
-                $sq->where('due_date', '<', $today)
-                   ->where('status', '!=', 'paid');
-            })
-            // OR the upcoming 1 payment of the client (earliest unpaid/partial EMI due today or in the future)
-            ->orWhereIn('emis.id', function ($subQuery) use ($today) {
-                $subQuery->select(DB::raw('MIN(e2.id)'))
-                    ->from('emis as e2')
-                    ->where('e2.status', '!=', 'paid')
-                    ->where('e2.due_date', '>=', $today)
-                    ->groupBy('e2.loan_account_id');
-            });
-        });
+        // Now apply status filter to $query
+        $this->applyRepaymentStatusFilter($query, $status, $today);
 
-        $overdueCount = (clone $activeEmiQuery)->overdue()->count();
-        $pendingCount = (clone $activeEmiQuery)->where('status', 'pending')->where('due_date', '>=', $today)->count();
-        $partialCount = (clone $activeEmiQuery)->where('status', 'partial')->where('due_date', '>=', $today)->count();
+        $totalDataQuery = clone $queryBeforeSearch;
+        $this->applyRepaymentStatusFilter($totalDataQuery, $status, $today);
+        $totalData = DB::query()
+            ->fromSub(
+                $totalDataQuery->select('loan_account_id')->groupBy('loan_account_id'),
+                'client_totals'
+            )
+            ->count();
 
         // Calculate dynamic stats array
         $dynamicStats = [
-            'total_emis' => $overdueCount + $pendingCount + $partialCount + $paidCount,
+            'total_emis' => $overdueCount + $pendingCount + $upcomingCount + $partialCount + $paidCount,
             'paid_emis' => $paidCount,
             'pending_emis' => $pendingCount,
+            'upcoming_emis' => $upcomingCount,
             'partial_emis' => $partialCount,
             'overdue_emis' => $overdueCount,
             'total_collected' => (clone $baseCountQuery)->where('status', 'paid')->sum('paid_amount'),
-            'total_pending' => (clone $activeEmiQuery)->sum('pending_amount'),
+            'total_pending' => (clone $baseCountQuery)->whereIn('status', ['pending', 'overdue', 'partial'])
+                ->where('pending_amount', '>', 0)
+                ->sum('pending_amount'),
         ];
 
-        // DataTables parameters
-        $limit = $request->input('length');
-        $start = $request->input('start', 0);
+        // Client-level pagination: one row per loan account
+        $clientGroupsQuery = (clone $query)
+            ->select(
+                'loan_account_id',
+                DB::raw('MIN(due_date) as earliest_due'),
+                DB::raw('SUM(pending_amount) as total_pending_amount')
+            )
+            ->groupBy('loan_account_id');
 
-        // Handle 'all' tab: Client-wise summary view displaying counts for overdue, pending, partial, paid, and total
-        if ($status === 'all') {
-            $loanQuery = LoanAccount::with(['client.location', 'client.agent', 'loanApplication', 'emis'])
-                ->whereHas('emis');
+        $totalFiltered = DB::query()
+            ->fromSub($clientGroupsQuery, 'client_groups')
+            ->count();
 
-            if ($currentUser->hasRole('Agent')) {
-                $agentId = optional($currentUser->agent)->id;
-                if ($agentId) {
-                    $loanQuery->whereHas('client', function($q) use ($agentId) {
-                        $q->where('assigned_to', $agentId);
-                    });
-                }
-            }
+        $limit = (int) $request->input('length', 20);
+        $start = (int) $request->input('start', 0);
 
-            if ($request->has('location_id') && $request->location_id != '') {
-                $loanQuery->whereHas('client', function($q) use ($request) {
-                    $q->where('location_id', $request->location_id);
-                });
-            }
-
-            if ($request->filled('loan_type_id')) {
-                $loanTypeId = $request->loan_type_id;
-                $loanQuery->where(function ($q) use ($loanTypeId) {
-                    $q->whereIn('loan_code', function ($sq) use ($loanTypeId) {
-                        $sq->select('loan_code')->from('loan_products')->where('loan_type_id', $loanTypeId);
-                    })->orWhereHas('loanApplication', function ($sq) use ($loanTypeId) {
-                        $sq->whereIn('loan_code', function ($ssq) use ($loanTypeId) {
-                            $ssq->select('loan_code')->from('loan_products')->where('loan_type_id', $loanTypeId);
-                        });
-                    });
-                });
-            }
-
-            if ($request->has('product_id') && $request->product_id != '') {
-                $productId = $request->product_id;
-                $product = \App\Models\LoanProduct::find($productId);
-                if ($product) {
-                    $loanQuery->where(function ($q) use ($product) {
-                        $q->where('loan_code', $product->loan_code)
-                          ->orWhereHas('loanApplication', function ($sq) use ($product) {
-                              $sq->where('loan_code', $product->loan_code);
-                          });
-                    });
-                }
-            }
-
-            if ($request->has('loan_mode') && $request->loan_mode != '' && $request->loan_mode != 'all') {
-                $loanMode = $request->loan_mode;
-                if ($loanMode === 'emi') {
-                    $loanQuery->where(function($sq) {
-                        $sq->where('loan_mode', 'emi')
-                          ->orWhereNull('loan_mode');
-                    });
-                } else {
-                    $loanQuery->where('loan_mode', $loanMode);
-                }
-            }
-
-            if ($request->filled('from_date') || $request->filled('to_date')) {
-                $from = $request->filled('from_date') ? $this->parseFilterDate($request->input('from_date'))?->startOfDay() : null;
-                $to = $request->filled('to_date') ? $this->parseFilterDate($request->input('to_date'))?->endOfDay() : null;
-                
-                $loanQuery->whereHas('emis', function($eq) use ($from, $to) {
-                    if ($from) $eq->where('due_date', '>=', $from);
-                    if ($to) $eq->where('due_date', '<=', $to);
-                });
-            }
-
-            if (!empty($request->input('search.value'))) {
-                $search = $request->input('search.value');
-                $loanQuery->where(function ($q) use ($search) {
-                    $q->where('account_number', 'LIKE', "%{$search}%")
-                      ->orWhere('application_number', 'LIKE', "%{$search}%")
-                      ->orWhereHas('client', function($cq) use ($search) {
-                          $cq->where('client_name', 'LIKE', "%{$search}%")
-                            ->orWhere('client_phone', 'LIKE', "%{$search}%");
-                      });
-                });
-            }
-
-            $totalFiltered = $loanQuery->count();
-            $totalData = LoanAccount::whereHas('emis')->count();
-
-            $loanQuery->orderBy('id', 'desc');
-            if ($limit !== null && $limit !== '' && $limit != -1) {
-                $loanQuery->offset((int)$start)->limit((int)$limit);
-            }
-
-            $loanAccounts = $loanQuery->get();
-
-            $data = $loanAccounts->map(function ($account, $index) use ($start, $companyMobile, $today) {
-                $client = $account->client;
-                $emis = $account->emis;
-
-                $cOverdue = $emis->filter(fn($e) => $e->status !== 'paid' && $e->due_date && $e->due_date->lt($today))->count();
-                $cPending = $emis->filter(fn($e) => $e->status === 'pending' && $e->due_date && $e->due_date->gte($today))->count();
-                $cPartial = $emis->filter(fn($e) => $e->status === 'partial' && $e->due_date && $e->due_date->gte($today))->count();
-                $cPaid = $emis->filter(fn($e) => $e->status === 'paid')->count();
-                $cTotal = $emis->count();
-
-                $statusBadgeCombined = sprintf(
-                    '<div class="d-flex flex-wrap gap-1">' .
-                    '<span class="badge bg-label-danger py-1 px-2" title="Overdue EMIs">%d Overdue</span>' .
-                    '<span class="badge bg-label-warning text-dark py-1 px-2" title="Pending EMIs">%d Pending</span>' .
-                    '<span class="badge bg-label-info py-1 px-2" title="Partial Paid EMIs">%d Partial</span>' .
-                    '<span class="badge bg-label-success py-1 px-2" title="Paid EMIs">%d Paid</span>' .
-                    '<span class="badge bg-label-primary py-1 px-2" title="Total EMIs">%d Total</span>' .
-                    '</div>',
-                    $cOverdue,
-                    $cPending,
-                    $cPartial,
-                    $cPaid,
-                    $cTotal
-                );
-
-                $firstEmi = $emis->first();
-                $earliestDue = $emis->where('status', '!=', 'paid')->sortBy('due_date')->first();
-                $loanAmount = $account->loan_amount ?? optional($account->loanApplication)->loan_amount ?? 0;
-
-                return [
-                    'id' => $firstEmi ? $firstEmi->getRouteKey() : $account->getRouteKey(),
-                    'sno' => $start + $index + 1,
-                    'loan_account_id' => $account->getRouteKey(),
-                    'account_number' => $account->account_number ?? $account->application_number ?? 'N/A',
-                    'application_number' => $account->application_number ?? null,
-                    'client_name' => $client->client_name ?? 'N/A',
-                    'client_phone' => $client->client_phone ?? 'N/A',
-                    'zone' => optional($client)->location ? $client->location->name : 'N/A',
-                    'agent_name' => optional($client)->agent ? $client->agent->agent_name : 'Unassigned',
-                    'loan_amount' => $loanAmount,
-                    'loan_amount_formatted' => '₹' . number_format($loanAmount, 0),
-                    'instalment_number' => $cTotal,
-                    'principal_amount' => $emis->sum('principal_amount'),
-                    'principal_amount_formatted' => '₹' . number_format($emis->sum('principal_amount'), 2),
-                    'interest_amount' => $emis->sum('interest_amount'),
-                    'interest_amount_formatted' => '₹' . number_format($emis->sum('interest_amount'), 2),
-                    'total_amount' => $emis->sum('total_amount'),
-                    'total_amount_formatted' => '₹' . number_format($emis->sum('total_amount'), 2),
-                    'due_date' => $earliestDue && $earliestDue->due_date ? $earliestDue->due_date->format('d-m-Y') : ($firstEmi && $firstEmi->due_date ? $firstEmi->due_date->format('d-m-Y') : 'N/A'),
-                    'paid_amount' => '<span class="fw-bold">₹' . number_format($emis->sum('paid_amount'), 2) . '</span>',
-                    'paid_amount_raw' => $emis->sum('paid_amount'),
-                    'paid_date_formatted' => null,
-                    'company_phone' => $companyMobile,
-                    'status' => 'all',
-                    'status_badge' => $statusBadgeCombined,
-                    'status_meta' => ['label' => 'All', 'color' => 'primary'],
-                ];
-            });
-
-            return response()->json([
-                'draw' => intval($request->input('draw')),
-                'recordsTotal' => intval($totalData),
-                'recordsFiltered' => intval($totalFiltered),
-                'data' => $data,
-                'stats' => $dynamicStats,
-            ]);
-        }
-
-        // Now apply status filter for specific status tabs
-        if ($status === 'paid') {
-            $query->where('status', 'paid');
-        } else {
-            // Apply the active EMI restriction
-            $query->where(function ($q) use ($today) {
-                $q->where(function ($sq) use ($today) {
-                    $sq->where('due_date', '<', $today)
-                       ->where('status', '!=', 'paid');
-                })
-                ->orWhereIn('emis.id', function ($subQuery) use ($today) {
-                    $subQuery->select(DB::raw('MIN(e2.id)'))
-                        ->from('emis as e2')
-                        ->where('e2.status', '!=', 'paid')
-                        ->where('e2.due_date', '>=', $today)
-                        ->groupBy('e2.loan_account_id');
-                });
-            });
-
-            if ($status === 'overdue') {
-                $query->overdue();
-            } else if ($status === 'pending') {
-                $query->where('status', 'pending')->where('due_date', '>=', $today);
-            } else if ($status === 'partial') {
-                $query->where('status', 'partial')->where('due_date', '>=', $today);
-            }
-        }
-
-        // Get total counts for Datatable
-        $totalFiltered = $query->count();
-        $totalData = ($status === 'paid') ? $paidCount : ($overdueCount + $pendingCount + $partialCount);
-
-        // DataTables parameters
-        $limit = $request->input('length');
-        $start = $request->input('start');
-        
-        // Dynamic map of Datatable column index to valid database columns on 'emis' table to prevent crashes
         $columnsMap = [
-            0 => 'id',
-            1 => 'id',
-            2 => 'loan_account_id',
-            3 => 'due_date',
-            4 => 'id',
-            5 => 'id',
-            6 => 'id',
-            7 => 'due_date',
-            8 => 'total_amount',
-            9 => 'status',
-            10 => 'id',
+            0 => 'earliest_due',
+            1 => 'earliest_due',
+            2 => 'earliest_due',
+            3 => 'earliest_due',
+            4 => 'earliest_due',
+            5 => 'earliest_due',
+            6 => 'earliest_due',
+            7 => 'earliest_due',
+            8 => 'total_pending_amount',
+            9 => 'earliest_due',
         ];
-        $orderColIndex = $request->input('order.0.column', 2);
-        $order = $columnsMap[$orderColIndex] ?? 'due_date';
+        $orderColIndex = (int) $request->input('order.0.column', 7);
+        $order = $columnsMap[$orderColIndex] ?? 'earliest_due';
         $dir = $request->input('order.0.dir') ?? 'asc';
 
-        // Apply pagination and ordering
-        $emis = $query->with(['loanAccount.emis'])
+        $pagedClientGroups = (clone $clientGroupsQuery)
+            ->orderBy($order, $dir)
             ->offset($start)
             ->limit($limit)
-            ->orderBy($order, $dir)
             ->get();
 
-        // Format data for DataTable
-        $data = $emis->map(function ($emi, $index) use ($start, $totalFiltered, $companyMobile, $today) {
-            $loanAccount = $emi->loanAccount;
+        $loanAccountIds = $pagedClientGroups->pluck('loan_account_id')->filter()->values();
+
+        $loanAccounts = LoanAccount::with([
+            'loanApplication.client.location',
+            'loanApplication.client.agent',
+            'loanApplication.client.creator',
+            'loanApplication.product',
+            'client.location',
+            'client.agent',
+            'client.creator',
+            'emis.activeAssignment.agent' => fn ($q) => $q->withTrashed(),
+            'emis.assignments.agent' => fn ($q) => $q->withTrashed(),
+        ])
+            ->whereIn('id', $loanAccountIds)
+            ->get()
+            ->keyBy('id');
+
+        $viewEmisQuery = Emi::with([
+            'loanAccount',
+            'collections',
+            'assignments.agent' => fn ($q) => $q->withTrashed(),
+            'activeAssignment.agent' => fn ($q) => $q->withTrashed(),
+        ])->whereIn('loan_account_id', $loanAccountIds);
+
+        $this->applyRepaymentStatusFilter($viewEmisQuery, $status, $today);
+
+        $emisByAccount = $viewEmisQuery
+            ->orderBy('instalment_number')
+            ->get()
+            ->groupBy('loan_account_id');
+
+        $companySlogan = \App\Models\CompanyDetail::first()->company_slogan
+            ?? \App\Models\CompanyDetail::first()->company_name
+            ?? 'Codepluse Gen PVT Ltd';
+
+        $data = $pagedClientGroups->values()->map(function ($group, $index) use (
+            $start,
+            $loanAccounts,
+            $emisByAccount,
+            $companyMobile,
+            $companySlogan,
+            $today
+        ) {
+            $loanAccount = $loanAccounts->get($group->loan_account_id);
             $loanApplication = optional($loanAccount)->loanApplication;
             $client = optional($loanAccount)->client ?? optional($loanApplication)->client;
             $loanAmount = $loanApplication->loan_amount
                 ?? optional($loanAccount)->loan_amount
                 ?? 0;
-            $applicationNumber = $emi->application_number
-                ?? optional($loanAccount)->application_number
-                ?? optional($loanApplication)->application_number
-                ?? null;
+            $applicationNumber = optional($loanAccount)->application_number
+                ?? optional($loanApplication)->application_number;
 
-            $displayStatus = $emi->status;
-            if ($emi->status !== 'paid' && $emi->due_date && $emi->due_date->lt($today)) {
-                $displayStatus = 'overdue';
-            }
-
-            // Client-wise EMI status count breakdown for this loan account
-            $loanEmis = optional($loanAccount)->emis ?? collect();
-            $cOverdue = $loanEmis->filter(fn($e) => $e->status !== 'paid' && $e->due_date && $e->due_date->lt($today))->count();
-            $cPending = $loanEmis->filter(fn($e) => $e->status === 'pending' && $e->due_date && $e->due_date->gte($today))->count();
-            $cPartial = $loanEmis->filter(fn($e) => $e->status === 'partial' && $e->due_date && $e->due_date->gte($today))->count();
-            $cPaid = $loanEmis->filter(fn($e) => $e->status === 'paid')->count();
-
-            $singleBadge = $this->getStatusBadge($displayStatus);
-
-            $breakdownBadges = sprintf(
-                '<div class="d-flex flex-wrap gap-1 mt-1" style="font-size: 10px;">' .
-                '<span class="badge bg-label-danger py-0 px-1" title="Overdue EMIs">%d Overdue</span>' .
-                '<span class="badge bg-label-warning text-dark py-0 px-1" title="Pending EMIs">%d Pending</span>' .
-                '<span class="badge bg-label-info py-0 px-1" title="Partial Paid EMIs">%d Partial</span>' .
-                '<span class="badge bg-label-success py-0 px-1" title="Paid EMIs">%d Paid</span>' .
-                '</div>',
-                $cOverdue,
-                $cPending,
-                $cPartial,
-                $cPaid
+            $accountEmis = $emisByAccount->get($group->loan_account_id, collect());
+            $formattedEmis = $accountEmis->map(
+                fn ($emi) => $this->formatEmiForRepaymentsTable($emi, $companyMobile, $companySlogan, $today)
             );
 
-            $statusBadgeCombined = '<div class="d-flex flex-column gap-1">' . $singleBadge . $breakdownBadges . '</div>';
+            $groupedEmis = [
+                'overdue' => $formattedEmis->where('status', 'overdue')->values()->all(),
+                'pending' => $formattedEmis->where('status', 'pending')->values()->all(),
+                'upcoming' => $formattedEmis->where('status', 'upcoming')->values()->all(),
+                'partial' => $formattedEmis->where('status', 'partial')->values()->all(),
+                'paid' => $formattedEmis->where('status', 'paid')->values()->all(),
+            ];
+
+            $overdueCount = count($groupedEmis['overdue']);
+            $pendingCount = count($groupedEmis['pending']);
+            $upcomingCount = count($groupedEmis['upcoming']);
+            $partialCount = count($groupedEmis['partial']);
+            $paidEmiCount = count($groupedEmis['paid']);
+
+            $agentName = 'Unassigned';
+
+            // 1. Check active assignment on filtered EMIs for this tab
+            $firstEmiWithAgent = $accountEmis->first(fn ($emi) => $emi->activeAssignment?->agent);
+            if ($firstEmiWithAgent && $firstEmiWithAgent->activeAssignment?->agent) {
+                $agentName = $firstEmiWithAgent->activeAssignment->agent->agent_name;
+            }
+
+            // 2. Check any assignment on filtered EMIs (including collected/completed)
+            if ($agentName === 'Unassigned') {
+                $anyEmiWithAgent = $accountEmis->first(fn ($emi) => $emi->assignments?->agent);
+                if ($anyEmiWithAgent && $anyEmiWithAgent->assignments?->agent) {
+                    $agentName = $anyEmiWithAgent->assignments->agent->agent_name;
+                }
+            }
+
+            // 3. Check all EMIs belonging to the LoanAccount for any agent assignment
+            if ($agentName === 'Unassigned' && $loanAccount && $loanAccount->emis) {
+                $allAccountEmis = $loanAccount->emis;
+                $allEmiWithAgent = $allAccountEmis->first(fn ($emi) => $emi->activeAssignment?->agent ?? $emi->assignments?->agent);
+                if ($allEmiWithAgent) {
+                    $agent = $allEmiWithAgent->activeAssignment?->agent ?? $allEmiWithAgent->assignments?->agent;
+                    if ($agent && $agent->agent_name) {
+                        $agentName = $agent->agent_name;
+                    }
+                }
+            }
+
+            // 4. Fallback to client's assigned agent ($client->agent / assigned_to)
+            if ($agentName === 'Unassigned') {
+                $assignedAgent = $client?->agent ?? $loanAccount?->client?->agent ?? $loanApplication?->client?->agent;
+                if ($assignedAgent && $assignedAgent->agent_name) {
+                    $agentName = $assignedAgent->agent_name;
+                }
+            }
+
+            // 5. Fallback to client's creator agent ($client->creator / added_by)
+            if ($agentName === 'Unassigned') {
+                $creatorAgent = $client?->creator ?? $loanAccount?->client?->creator ?? $loanApplication?->client?->creator;
+                if ($creatorAgent && $creatorAgent->agent_name) {
+                    $agentName = $creatorAgent->agent_name;
+                }
+            }
+
+            $totalDue = $accountEmis->sum('pending_amount');
 
             return [
-                'id' => $emi->getRouteKey(),
+                'id' => $loanAccount ? $loanAccount->getRouteKey() : null,
                 'sno' => $start + $index + 1,
                 'loan_account_id' => $loanAccount ? $loanAccount->getRouteKey() : null,
                 'account_number' => $loanAccount->account_number ?? 'N/A',
+                'customer_loan_account_number' => $loanAccount->customer_loan_account_number ?? null,
                 'application_number' => $applicationNumber,
                 'client_name' => $client->client_name ?? 'N/A',
                 'client_phone' => $client->client_phone ?? 'N/A',
                 'zone' => optional($client)->location ? $client->location->name : 'N/A',
-                'agent_name' => $emi->activeAssignment && $emi->activeAssignment->agent ? $emi->activeAssignment->agent->agent_name : 'Unassigned',
+                'agent_name' => $agentName,
                 'loan_amount' => $loanAmount,
                 'loan_amount_formatted' => '₹' . number_format($loanAmount, 0),
-                'instalment_number' => $emi->instalment_number,
-                'principal_amount' => $emi->principal_amount,
-                'principal_amount_formatted' => '₹' . number_format($emi->principal_amount, 2),
-                'interest_amount' => $emi->interest_amount,
-                'interest_amount_formatted' => '₹' . number_format($emi->interest_amount, 2),
-                'total_amount' => $emi->total_amount,
-                'total_amount_formatted' => '₹' . number_format($emi->total_amount, 2),
-                'due_date' => $emi->due_date->format('d-m-Y'),
-                'paid_amount' => '<span class="fw-bold">' . ($emi->paid_amount > 0 ? '₹' . number_format($emi->paid_amount, 2) : '-') . '</span>' . ($emi->collections && $emi->collections->count() > 0 ? ' <i class="fa fa-info-circle"></i>' : ''),
-                'paid_amount_raw' => $emi->paid_amount,
-                'paid_date_formatted' => $emi->paid_date ? $emi->paid_date->format('d-m-Y') : null,
+                'overdue_count' => $overdueCount,
+                'pending_count' => $pendingCount,
+                'upcoming_count' => $upcomingCount,
+                'partial_count' => $partialCount,
+                'paid_count' => $paidEmiCount,
+                'total_due' => $totalDue,
+                'total_due_formatted' => '₹' . number_format($totalDue, 2),
+                'status_summary' => $this->buildClientStatusSummary($overdueCount, $pendingCount, $upcomingCount, $partialCount, $paidEmiCount),
                 'company_phone' => $companyMobile,
-                'status' => $displayStatus,
-                'status_badge' => $statusBadgeCombined,
-                'status_meta' => $this->getStatusMeta($displayStatus),
+                'company_slogan' => $companySlogan,
+                'emis' => $formattedEmis->values()->all(),
+                'emis_grouped' => $groupedEmis,
             ];
         });
 
@@ -620,12 +577,17 @@ class EmiController extends Controller
         $currentUser = auth()->user();
         if ($currentUser->hasRole('Agent')) {
             $agentId = optional($currentUser->agent)->id;
-            if (!$agentId || optional($loanAccount->loanApplication->client)->assigned_to != $agentId) {
+            $client = $loanAccount->client ?? $loanAccount->loanApplication?->client;
+            if (!$agentId || !$client || ((int)$client->assigned_to !== (int)$agentId && (int)$client->added_by !== (int)$agentId)) {
                 abort(403, 'Unauthorized access to this loan account.');
             }
         }
 
         $loanApplication = $loanAccount->loanApplication;
+
+        // Open loans gain a cycle only once its due date arrives, so top up here
+        // rather than waiting for the nightly loans:sync-open-cycles run.
+        app(\App\Services\OpenLoanCycleService::class)->syncDueCycles($loanAccount);
 
         // Ensure EMI balances are synchronized with the new non-cumulative logic
         $paymentService = app(\App\Services\LoanPaymentService::class);
@@ -634,6 +596,7 @@ class EmiController extends Controller
         $loanAccount->refresh();
 
         $emis = $loanAccount->emis()
+            ->with('collections')
             ->orderBy('instalment_number')
             ->get();
 
@@ -641,7 +604,7 @@ class EmiController extends Controller
         $isKandhuvatti = ($loanAccount->loan_mode ?? 'emi') === 'interest_only';
         if ($isKandhuvatti) {
             $firstUnpaid = $emis->filter(function($emi) {
-                if ($emi->status === 'paid') return false;
+                if (in_array($emi->status, ['paid', 'closed'], true)) return false;
                 $inProgressSum = $emi->collections ? $emi->collections->where('status', 'in_progress')->sum('amount') : 0;
                 $netPending = max(0, $emi->pending_amount - $inProgressSum);
                 return $netPending > 0;
@@ -660,10 +623,12 @@ class EmiController extends Controller
         if ($isKandhuvatti) {
             $principalPaid = $emis->sum('principal_amount');
             $interestPaid = max(0, $loanAccount->paid_amount - $principalPaid);
-            $outstanding = max(0, (float)$loanAccount->loan_amount - $principalPaid);
+            $outstanding = $loanAccount->isSettled()
+                ? 0
+                : max(0, (float)$loanAccount->loan_amount - $principalPaid);
             
             $summary = [
-                'account_number' => $loanAccount->account_number ?? $loanAccount->application_number,
+                'account_number' => $loanAccount->customer_loan_account_number ?? $loanAccount->account_number ?? $loanAccount->application_number,
                 'loan_amount' => $loanApplication->loan_amount,
                 'interest_rate' => $loanApplication->interest_rate,
                 'tenure' => 0,
@@ -707,7 +672,7 @@ class EmiController extends Controller
             }
 
             $summary = [
-                'account_number' => $loanAccount->account_number ?? $loanAccount->application_number,
+                'account_number' => $loanAccount->customer_loan_account_number ?? $loanAccount->account_number ?? $loanAccount->application_number,
                 'loan_amount' => $loanApplication->loan_amount,
                 'interest_rate' => $loanApplication->interest_rate,
                 'tenure' => $loanApplication->tenure_months,
@@ -725,12 +690,38 @@ class EmiController extends Controller
                 'principal_paid' => $principalPaid,
                 'interest_paid' => $interestPaid,
                 'principal_outstanding' => max(0, (float)$loanApplication->loan_amount - $principalPaid),
-                'next_emi_due_date' => $loanAccount->status === 'closed' ? 'Closed' : ($firstUnpaid ? $firstUnpaid->due_date->format('d-m-Y') : 'N/A'),
+                'next_emi_due_date' => ($loanAccount->status === 'closed') ? 'Closed' : ($firstUnpaid ? $firstUnpaid->due_date->format('d-m-Y') : 'N/A'),
                 'is_reducing' => $isReducing,
             ];
         }
 
-        return view('admin.emi-repayments.emi-details', compact('loanAccount', 'loanApplication', 'emis', 'summary', 'firstUnpaidInstalment'));
+        $bankAccounts = \App\Models\Account\BankAccount::where('is_active', true)
+            ->orderBy('account_name')
+            ->get();
+
+        $partialPaymentConfig = \App\Models\LoanConfiguration::getPartialPaymentConfig();
+
+        $walletBalance = 0.0;
+        if ($loanAccount?->client_id) {
+            $walletBalance = app(\App\Services\FixedDeposit\WalletService::class)
+                ->balanceForClient((int) $loanAccount->client_id);
+        }
+
+        $latestPaidInstalment = $emis
+            ->filter(fn ($e) => (float) $e->paid_amount > 0.001 || in_array($e->status, ['paid', 'partial']))
+            ->max('instalment_number');
+
+        return view('admin.emi-repayments.emi-details', compact(
+            'loanAccount',
+            'loanApplication',
+            'emis',
+            'summary',
+            'firstUnpaidInstalment',
+            'bankAccounts',
+            'partialPaymentConfig',
+            'latestPaidInstalment',
+            'walletBalance'
+        ));
     }
 
     /**
@@ -782,6 +773,7 @@ class EmiController extends Controller
                 'penalty_date' => $penaltyDate,
             ],
             'loan' => [
+                'account_number' => $loanAccount->customer_loan_account_number ?? $loanAccount->account_number ?? null,
                 'product' => $product->loan_name ?? null,
                 'client_name' => $client->client_name ?? null,
                 'loan_amount' => $loanAmount ? number_format($loanAmount, 0) : null,
@@ -793,50 +785,9 @@ class EmiController extends Controller
     /**
      * Display payment receipts index
      */
-    public function receiptsIndex(): View
+    public function receiptsIndex(Request $request): RedirectResponse
     {
-        $currentUser = auth()->user();
-        $isAgent = $currentUser->hasRole('Agent');
-        $agentId = $isAgent ? optional($currentUser->agent)->id : null;
-
-        // Base queries matching getReceiptsData exactly!
-        $totalQuery = Emi::whereIn('loan_account_id', $this->primaryLoanAccountIdsSubquery())
-            ->whereIn('status', ['paid', 'partial'])
-            ->where('paid_amount', '>', 0);
-
-        $monthQuery = Emi::whereIn('loan_account_id', $this->primaryLoanAccountIdsSubquery())
-            ->whereIn('status', ['paid', 'partial'])
-            ->where('paid_amount', '>', 0)
-            ->whereMonth('paid_date', now()->month)
-            ->whereYear('paid_date', now()->year);
-
-        $todayQuery = Emi::whereIn('loan_account_id', $this->primaryLoanAccountIdsSubquery())
-            ->whereIn('status', ['paid', 'partial'])
-            ->where('paid_amount', '>', 0)
-            ->whereDate('paid_date', now()->toDateString());
-
-        // Filter by agent if applicable
-        if ($isAgent && $agentId) {
-            $totalQuery->whereHas('loanAccount.loanApplication.client', function($q) use ($agentId) {
-                $q->where('assigned_to', $agentId);
-            });
-            $monthQuery->whereHas('loanAccount.loanApplication.client', function($q) use ($agentId) {
-                $q->where('assigned_to', $agentId);
-            });
-            $todayQuery->whereHas('loanAccount.loanApplication.client', function($q) use ($agentId) {
-                $q->where('assigned_to', $agentId);
-            });
-        }
-
-        // Calculate statistics
-        $stats = [
-            'total_receipts' => $totalQuery->count(),
-            'total_collected' => $totalQuery->sum('paid_amount'),
-            'month_collected' => $monthQuery->sum('paid_amount'),
-            'today_collected' => $todayQuery->sum('paid_amount'),
-        ];
-
-        return view('admin.emi-repayments.repayment-receipts', compact('stats'));
+        return redirect()->route('loan-payment-receipts', $request->query());
     }
 
     /**
@@ -844,62 +795,9 @@ class EmiController extends Controller
      */
     public function getReceiptsData(Request $request): JsonResponse
     {
-        $query = Emi::with(['loanAccount.loanApplication.client.location'])
-            ->whereIn('loan_account_id', $this->primaryLoanAccountIdsSubquery())
-            ->whereIn('status', ['paid', 'partial'])
-            ->where('paid_amount', '>', 0);
-
-        // Filter by agent if current user is an agent
-        $currentUser = auth()->user();
-        if ($currentUser->hasRole('Agent')) {
-            $agentId = optional($currentUser->agent)->id;
-            if ($agentId) {
-                $query->whereHas('loanAccount.loanApplication.client', function($q) use ($agentId) {
-                    $q->where('assigned_to', $agentId);
-                });
-            }
-        }
-
-        // Filter by payment method if provided
-        if ($request->has('payment_method') && $request->payment_method != '') {
-            $query->where('payment_method', $request->payment_method);
-        }
-
-        // Filter by application number if provided
-        if ($request->has('application_number') && !empty($request->application_number)) {
-            $query->whereHas('loanAccount', function($q) use ($request) {
-                $q->where('application_number', $request->application_number);
-            });
-        }
-
-        $totalFiltered = $query->count();
-        $receipts = $query->orderByDesc('paid_date')->get();
-
-        // Format data for DataTable
-        $data = $receipts->map(function ($emi, $index) use ($totalFiltered) {
-            $loanAccount = $emi->loanAccount;
-            $loanApplication = optional($loanAccount)->loanApplication;
-            $client = optional($loanApplication)->client ?? optional($loanAccount)->client;
-            $applicationNumber = $emi->application_number
-                ?? optional($loanAccount)->application_number
-                ?? optional($loanApplication)->application_number;
-
-            return [
-                'id' => $emi->getRouteKey(),
-                'sno' => $totalFiltered - $index,
-                'receipt_number' => 'RCP-' . str_pad($emi->id, 6, '0', STR_PAD_LEFT),
-                'client_name' => $client->client_name ?? 'N/A',
-                'zone' => optional($client)->location ? $client->location->name : 'N/A',
-                'application_number' => $applicationNumber,
-                'paid_amount' => $emi->paid_amount,
-                'paid_amount_formatted' => '₹' . number_format($emi->paid_amount, 2),
-                'payment_method' => ucfirst(str_replace('_', ' ', $emi->payment_method ?? 'N/A')),
-                'paid_date' => $emi->paid_date ? $emi->paid_date->format('d-m-Y') : 'N/A',
-                'payment_reference' => $emi->payment_reference ?: 'N/A',
-            ];
-        });
-
-        return response()->json(['data' => $data]);
+        return response()->json([
+            'data' => app(PaymentReceiptService::class)->listRows('loan', $request),
+        ]);
     }
 
     /**
@@ -959,26 +857,13 @@ class EmiController extends Controller
             'payment_method' => 'required',
             'payment_reference' => 'nullable|string|max:255',
             'remarks' => 'nullable|string|max:500',
+            'internal_bank_account_id' => 'required_if:payment_method,upi,bank_transfer|nullable|exists:bank_accounts,id',
         ]);
 
         $emiId = $request->emi_id;
         $decodedEmiId = HashId::decode($emiId);
         $decodedEmiId = is_array($decodedEmiId) ? ($decodedEmiId[0] ?? $emiId) : ($decodedEmiId ?? $emiId);
-
         $emi = \App\Models\Emi::findOrFail($decodedEmiId);
-        $pendingAmount = $emi->total_amount - $emi->paid_amount;
-        if ($request->paid_amount < $pendingAmount && floor($request->paid_amount) != $request->paid_amount) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Partial payment amount must be a whole number.'
-            ], 422);
-        }
-        if ($request->filled('principal_amount') && floor($request->principal_amount) != $request->principal_amount) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Principal repayment amount must be a whole number.'
-            ], 422);
-        }
 
         DB::beginTransaction();
         try {
@@ -992,7 +877,9 @@ class EmiController extends Controller
                 $request->payment_reference,
                 $request->remarks ?: 'Created via Receipt',
                 false, // skipHistory
-                $request->principal_amount ?? 0
+                $request->principal_amount ?? 0,
+                false, // bypassPriorCheck
+                $request->internal_bank_account_id
             );
 
             if (!$result['success']) {
@@ -1002,8 +889,11 @@ class EmiController extends Controller
             DB::commit();
 
             $emi = Emi::find($decodedEmiId);
+            $appliedEmis = $result['data']['applied_emis'] ?? [];
             $isFullyPaid = ($emi->status === 'paid');
-            $successMessage = $isFullyPaid ? 'EMI fully paid successfully.' : 'Partial payment recorded successfully.';
+            $successMessage = count($appliedEmis) > 1
+                ? 'Payment recorded and applied across multiple EMIs successfully.'
+                : ($isFullyPaid ? 'EMI fully paid successfully.' : 'Partial payment recorded successfully.');
 
         } catch (\Exception $e) {
             DB::rollBack();
@@ -1049,6 +939,375 @@ class EmiController extends Controller
     }
 
     /**
+     * Pay multiple selected EMIs with an editable total amount.
+     * Extra amount cascades to upcoming EMIs automatically.
+     */
+    public function paySelectedEmis(Request $request): JsonResponse
+    {
+        $request->validate([
+            'emi_ids' => 'required|array|min:1',
+            'emi_ids.*' => 'required',
+            'paid_amount' => 'required|numeric|min:0.01',
+            'principal_amount' => 'nullable|numeric|min:0',
+            'paid_date' => 'required|date',
+            'payment_method' => 'required',
+            'payment_reference' => 'nullable|string|max:255',
+            'remarks' => 'nullable|string|max:500',
+            'internal_bank_account_id' => 'required_if:payment_method,upi,bank_transfer|nullable|exists:bank_accounts,id',
+        ]);
+
+        $decodedIds = collect($request->emi_ids)->map(function ($id) {
+            $decoded = HashId::decode($id);
+            return is_array($decoded) ? ($decoded[0] ?? $id) : ($decoded ?? $id);
+        })->unique()->values();
+
+        $emis = Emi::whereIn('id', $decodedIds)->get();
+        if ($emis->isEmpty() || $emis->count() !== $decodedIds->count()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'One or more selected EMIs could not be found.',
+            ], 422);
+        }
+
+        $loanAccountIds = $emis->pluck('loan_account_id')->unique();
+        if ($loanAccountIds->count() !== 1) {
+            return response()->json([
+                'success' => false,
+                'message' => 'All selected EMIs must belong to the same loan account.',
+            ], 422);
+        }
+
+        $invalidEmi = $emis->first(function ($emi) {
+            return !in_array($emi->status, ['pending', 'overdue', 'partial'], true)
+                || (float) ($emi->pending_amount ?? 0) <= 0.01;
+        });
+        if ($invalidEmi) {
+            return response()->json([
+                'success' => false,
+                'message' => 'EMI #' . $invalidEmi->instalment_number . ' is not eligible for payment.',
+            ], 422);
+        }
+
+        $sortedEmis = $emis->sortBy('instalment_number');
+        $anchorEmi = $sortedEmis->first();
+        $loanAccount = $anchorEmi->loanAccount;
+        $isOpenLoan = ($loanAccount && $loanAccount->loan_mode === 'interest_only');
+
+        DB::beginTransaction();
+        try {
+            $paymentService = app(\App\Services\LoanPaymentService::class);
+            $batchKey = BulkPaymentGroup::generateKey();
+            $customRemarks = $request->remarks ?: 'Pay selected EMIs';
+            $remarksText = BulkPaymentGroup::appendRemarks(
+                $customRemarks,
+                $batchKey,
+                'Bulk payment for selected EMIs'
+            );
+
+            if ($isOpenLoan) {
+                $remainingPool = (float) $request->paid_amount;
+                $explicitPrincipal = (float) ($request->principal_amount ?? 0);
+                $appliedEmis = [];
+
+                foreach ($sortedEmis as $selectedEmi) {
+                    if ($remainingPool <= 0.009) {
+                        break;
+                    }
+
+                    $selectedEmi = $selectedEmi->fresh();
+                    if (!$selectedEmi || !in_array($selectedEmi->status, ['pending', 'overdue', 'partial'], true)) {
+                        continue;
+                    }
+
+                    $pendingAmount = (float) ($selectedEmi->pending_amount ?? 0);
+                    if ($pendingAmount <= 0.01) {
+                        $pendingAmount = max(0, (float) $selectedEmi->interest_amount - (float) $selectedEmi->paid_amount);
+                    }
+                    if ($pendingAmount <= 0.01) {
+                        continue;
+                    }
+
+                    $payThisEmi = min($remainingPool, $pendingAmount);
+                    if ($payThisEmi <= 0.009) {
+                        continue;
+                    }
+
+                    $result = $paymentService->processPayment(
+                        $selectedEmi->id,
+                        $payThisEmi,
+                        $request->paid_date,
+                        $request->payment_method,
+                        $request->payment_reference ?: $batchKey,
+                        $remarksText,
+                        false,
+                        0, // Interest collections never reduce principal!
+                        true,
+                        $request->internal_bank_account_id
+                    );
+
+                    if (!$result['success']) {
+                        throw new \Exception($result['message']);
+                    }
+
+                    $remainingPool -= $payThisEmi;
+                    $appliedEmis[] = $selectedEmi->id;
+                }
+
+                if ($explicitPrincipal > 0.01) {
+                    $targetCycle = $sortedEmis->last() ?? $anchorEmi;
+                    $result = $paymentService->processPayment(
+                        $targetCycle->id,
+                        0,
+                        $request->paid_date,
+                        $request->payment_method,
+                        $request->payment_reference ?: $batchKey,
+                        $remarksText,
+                        false,
+                        $explicitPrincipal,
+                        true,
+                        $request->internal_bank_account_id
+                    );
+                    if (!$result['success']) {
+                        throw new \Exception($result['message']);
+                    }
+                }
+            } else {
+                $result = $paymentService->processPayment(
+                    $anchorEmi->id,
+                    $request->paid_amount,
+                    $request->paid_date,
+                    $request->payment_method,
+                    $request->payment_reference ?: $batchKey,
+                    $remarksText,
+                    false,
+                    $request->principal_amount ?? 0,
+                    true,
+                    $request->internal_bank_account_id
+                );
+
+                if (!$result['success']) {
+                    throw new \Exception($result['message']);
+                }
+
+                $appliedEmis = $result['data']['applied_emis'] ?? [$anchorEmi->id];
+            }
+
+            DB::commit();
+
+            $anchorEmi->refresh();
+            $isFullyPaid = ($anchorEmi->status === 'paid');
+            $successMessage = count($appliedEmis) > 1
+                ? 'Payment recorded and applied across multiple EMIs successfully.'
+                : ($isFullyPaid ? 'EMI fully paid successfully.' : 'Partial payment recorded successfully.');
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('PaySelectedEmis error', ['error' => $e->getMessage()]);
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to process payment: ' . $e->getMessage(),
+            ], 500);
+        }
+
+        event(new \App\Events\PaymentReceivedEvent($anchorEmi, $request->paid_amount));
+
+        $loanAccount = $anchorEmi->loanAccount->fresh();
+        $client = $loanAccount->loanApplication->client ?? $loanAccount->client;
+        $mobileNo = $client->mobile_no ?? $client->client_phone ?? '';
+        $cleanMobile = preg_replace('/[^0-9]/', '', $mobileNo);
+        if (strlen($cleanMobile) === 10) {
+            $cleanMobile = '91' . $cleanMobile;
+        }
+
+        $smsData = [
+            'client_name' => ($client->first_name ?? '') . ' ' . ($client->last_name ?? ''),
+            'mobile_no' => $cleanMobile,
+            'account_no' => $loanAccount->account_number,
+            'amount_paid' => ($loanAccount->loan_mode === 'interest_only' && $request->principal_amount > 0.001 && $request->paid_amount <= 0.001)
+                ? $request->principal_amount
+                : $request->paid_amount,
+            'remaining_balance' => $loanAccount->outstanding_amount,
+            'loan_mode' => $loanAccount->loan_mode,
+            'payment_type' => ($loanAccount->loan_mode === 'interest_only' && $request->principal_amount > 0.001) ? 'principal' : (($loanAccount->loan_mode === 'interest_only') ? 'interest' : 'emi'),
+            'application_number' => $loanAccount->application_number,
+            'is_partial' => !$isFullyPaid,
+            'emi_balance' => $anchorEmi->pending_amount,
+        ];
+        $smsData = array_merge($smsData, \App\Helpers\NotificationTemplateHelper::getRepaymentMessages($smsData));
+
+        return response()->json([
+            'success' => true,
+            'message' => $successMessage,
+            'receipt_id' => $anchorEmi->getRouteKey(),
+            'sms_data' => $smsData,
+        ]);
+    }
+
+    /**
+     * Build receipt payload for a single EMI or its bulk payment group.
+     */
+    public function buildReceiptPayload(Emi $emi, ?string $bulkKey = null): array
+    {
+        $emi->loadMissing([
+            'loanAccount.loanApplication.client',
+            'loanAccount.loanApplication.product',
+            'loanAccount.client',
+            'collections.emi',
+        ]);
+
+        $loanAccount = $emi->loanAccount;
+        $loanApplication = optional($loanAccount)->loanApplication;
+        $client = optional($loanApplication)->client ?? optional($loanAccount)->client;
+        $product = optional($loanApplication)->product;
+
+        $bulkCollection = BulkPaymentGroup::latestPostedBulkLoanCollection($emi, $bulkKey);
+        $siblings = $bulkCollection ? BulkPaymentGroup::findSiblings($bulkCollection) : collect();
+        $siblings = $siblings->filter(
+            fn (EmiCollection $row) => in_array($row->status, BulkPaymentGroup::postedStatuses(), true)
+        );
+        $forceSingle = request()->query('single') || request()->query('bulk') === '0';
+        $isBulk = $forceSingle ? false : ($siblings->count() > 1);
+
+        $latestCollection = $emi->collections
+            ? $emi->collections->filter(fn ($c) => in_array($c->status, BulkPaymentGroup::postedStatuses(), true))->sortByDesc('id')->first()
+            : null;
+        if (!$latestCollection && $emi->relationLoaded('collections')) {
+            $latestCollection = $emi->collections->sortByDesc('id')->first();
+        }
+
+        $collTime = null;
+        $activeCollection = $isBulk ? ($bulkCollection ?: $latestCollection) : $latestCollection;
+        if ($activeCollection) {
+            $collAt = $activeCollection->collected_at ? Carbon::parse($activeCollection->collected_at)->timezone('Asia/Kolkata') : null;
+            if ($collAt && ($collAt->hour !== 0 || $collAt->minute !== 0 || $collAt->second !== 0)) {
+                $collTime = $collAt;
+            } elseif ($activeCollection->created_at) {
+                $created = Carbon::parse($activeCollection->created_at)->timezone('Asia/Kolkata');
+                $dateBase = $collAt ? $collAt->toDateString() : ($emi->paid_date ? $emi->paid_date->toDateString() : $created->toDateString());
+                $collTime = Carbon::parse($dateBase . ' ' . $created->format('H:i:s'), 'Asia/Kolkata');
+            } elseif ($collAt) {
+                $collTime = $collAt;
+            }
+        }
+
+        if (!$collTime && $emi->paid_date) {
+            $timeSource = ($emi->updated_at && $emi->paid_date->isSameDay($emi->updated_at)) ? $emi->updated_at : ($emi->created_at ?? now());
+            $collTime = Carbon::parse($emi->paid_date->toDateString() . ' ' . $timeSource->timezone('Asia/Kolkata')->format('H:i:s'), 'Asia/Kolkata');
+        }
+
+        $resolvedPaidAt = $collTime ?: now()->timezone('Asia/Kolkata');
+
+        $paymentDate = $resolvedPaidAt ? $resolvedPaidAt->timezone('Asia/Kolkata')->format('d-m-Y h:i A') : 'N/A';
+        $paymentDateOnly = $resolvedPaidAt ? $resolvedPaidAt->timezone('Asia/Kolkata')->format('d-m-Y') : 'N/A';
+        $paymentTimeOnly = $resolvedPaidAt ? $resolvedPaidAt->timezone('Asia/Kolkata')->format('h:i:s A') : '';
+
+        $disbursedDate = $loanAccount && $loanAccount->disbursed_at
+            ? $loanAccount->disbursed_at->timezone('Asia/Kolkata')->format('d-m-Y h:i A')
+            : ($loanApplication && $loanApplication->disbursed_at
+                ? $loanApplication->disbursed_at->timezone('Asia/Kolkata')->format('d-m-Y h:i A')
+                : 'N/A');
+
+        $items = [];
+        if ($isBulk) {
+            $paidAmount = round((float) $siblings->sum('amount'), 2);
+            $principalAmount = round((float) $siblings->sum(fn (EmiCollection $row) => (float) ($row->emi?->principal_amount ?? 0)), 2);
+            $interestAmount = round((float) $siblings->sum(fn (EmiCollection $row) => (float) ($row->emi?->interest_amount ?? 0)), 2);
+            $penaltyAmount = round((float) $siblings->sum(fn (EmiCollection $row) => (float) ($row->emi?->penalty_amount ?? 0)), 2);
+            $emiAmount = round($principalAmount + $interestAmount, 2);
+            $overdueAmount = $penaltyAmount > 0 ? $penaltyAmount : 0;
+            $instalmentLabel = BulkPaymentGroup::emiSplitLabel($siblings);
+            $lead = $siblings->sortBy(fn (EmiCollection $row) => (int) ($row->emi?->instalment_number ?? 0))->first()?->emi ?? $emi;
+            $receiptNumber = 'RCP-B-' . str_pad((string) $lead->id, 6, '0', STR_PAD_LEFT);
+            $paymentReference = $bulkCollection->payment_reference ?: ($lead->payment_reference ?: 'N/A');
+            $paymentMethod = $bulkCollection->payment_method ?: $emi->payment_method;
+            $status = BulkPaymentGroup::combinedPaymentType($siblings) === 'partial' ? 'partial' : 'paid';
+
+            $sortedSiblings = $siblings->sortBy(fn (EmiCollection $row) => (int) ($row->emi?->instalment_number ?? $row->emi_id ?? 0))->values();
+            foreach ($sortedSiblings as $row) {
+                $itemEmi = $row->emi;
+                $itemLoan = $itemEmi?->loanAccount;
+                $itemApp = $itemLoan?->loanApplication;
+                $itemClient = $itemLoan?->client ?? $itemApp?->client ?? $client;
+                $appNo = $itemEmi?->application_number
+                    ?? $itemLoan?->application_number
+                    ?? $itemLoan?->account_number
+                    ?? $itemApp?->application_number
+                    ?? 'N/A';
+                $due = (float) ($itemEmi?->total_amount ?? (($itemEmi?->principal_amount ?? 0) + ($itemEmi?->interest_amount ?? 0)) ?: $row->amount);
+
+                $items[] = [
+                    'type' => 'loan',
+                    'account_number' => $appNo,
+                    'client_name' => $itemClient?->client_name ?? ($client->client_name ?? 'N/A'),
+                    'instalment_no' => 'EMI #' . ($itemEmi?->instalment_number ?? 1),
+                    'due_amount' => round($due, 2),
+                    'paid_amount' => round((float) $row->amount, 2),
+                ];
+            }
+        } else {
+            $principalAmount = $emi->principal_amount ?? 0;
+            $interestAmount = $emi->interest_amount ?? 0;
+            $emiAmount = $emi->total_amount ?? ($principalAmount + $interestAmount);
+            $paidAmount = $emi->paid_amount ?? 0;
+            $penaltyAmount = $emi->penalty_amount ?? 0;
+            $overdueAmount = ($emi->status === 'overdue' || ($penaltyAmount > 0 && $emi->paid_date && $emi->paid_date->gt($emi->due_date)))
+                ? $penaltyAmount
+                : 0;
+            $instalmentLabel = $emi->instalment_number ? ('EMI #' . $emi->instalment_number) : 'N/A';
+            $receiptNumber = 'RCP-' . str_pad($emi->id, 6, '0', STR_PAD_LEFT);
+            $paymentReference = $emi->payment_reference ?: 'N/A';
+            $paymentMethod = $emi->payment_method;
+            $status = $emi->status;
+        }
+
+        $outstandingAmount = $isBulk ? 0 : max($emiAmount - $paidAmount, 0);
+        $isOverduePayment = $overdueAmount > 0;
+        $refUpper = strtoupper(trim((string) $paymentReference));
+        if ($refUpper === '' || $refUpper === 'BULK PAYMENT' || str_starts_with($refUpper, 'BULK-') || str_starts_with($refUpper, 'FAM-')) {
+            $paymentReference = 'N/A';
+        }
+
+        return [
+            'id' => $emi->getRouteKey(),
+            'receipt_number' => $receiptNumber,
+            'client_name' => $client->client_name ?? 'N/A',
+            'application_number' => $emi->application_number
+                ?? optional($loanAccount)->application_number
+                ?? optional($loanApplication)->application_number,
+            'account_number' => optional($loanAccount)->account_number
+                ?? optional($loanAccount)->customer_loan_account_number,
+            'loan_product' => $product->loan_name ?? 'N/A',
+            'instalment_number' => $emi->instalment_number,
+            'instalment_label' => $instalmentLabel,
+            'principal_amount' => $principalAmount,
+            'interest_amount' => $interestAmount,
+            'emi_amount' => $isBulk ? $paidAmount : $emiAmount,
+            'overdue_amount' => $overdueAmount,
+            'show_overdue' => $isOverduePayment,
+            'total_amount_display' => $isBulk ? $paidAmount : ($emiAmount + $overdueAmount),
+            'paid_amount' => $paidAmount,
+            'outstanding_amount' => $outstandingAmount,
+            'payment_method' => ucfirst(str_replace('_', ' ', $paymentMethod ?? 'N/A')),
+            'payment_reference' => $paymentReference,
+            'paid_date' => $paymentDate,
+            'paid_date_only' => $paymentDateOnly,
+            'paid_time' => $paymentTimeOnly,
+            'paid_time_only' => $paymentTimeOnly,
+            'disbursed_date' => $disbursedDate,
+            'status' => $status,
+            'status_label' => $this->getStatusMeta($status)['label'] ?? ucfirst((string) $status),
+            'status_color' => $this->getStatusMeta($status)['color'] ?? 'secondary',
+            'remarks' => $emi->remarks ?? '-',
+            'is_bulk' => $isBulk,
+            'items' => $items,
+            'emi_splits' => $isBulk ? BulkPaymentGroup::emiSplits($siblings) : [],
+            'split_item_label' => 'EMI',
+            'account_label' => 'Loan ID',
+            'start_date_label' => 'Disbursement Date',
+            'receipt_title' => $isBulk ? 'LOAN BULK PAYMENT RECEIPT' : 'LOAN PAYMENT RECEIPT',
+        ];
+    }
+
+    /**
      * Get receipt details for viewing
      */
     public function getReceiptDetails($id): JsonResponse
@@ -1058,60 +1317,11 @@ class EmiController extends Controller
             'loanAccount.loanApplication.client',
             'loanAccount.loanApplication.product',
             'loanAccount.client',
+            'collections.emi',
         ])
             ->findOrFail($decodedId);
 
-        $loanAccount = $emi->loanAccount;
-        $loanApplication = optional($loanAccount)->loanApplication;
-        $client = optional($loanApplication)->client ?? optional($loanAccount)->client;
-        $product = optional($loanApplication)->product;
-
-        $paymentDate = $emi->paid_date ? $emi->paid_date->format('d-m-Y h:i A') : 'N/A';
-        $disbursedDate = $loanAccount && $loanAccount->disbursed_at
-            ? $loanAccount->disbursed_at->format('d-m-Y h:i A')
-            : ($loanApplication && $loanApplication->disbursed_at
-                ? $loanApplication->disbursed_at->format('d-m-Y h:i A')
-                : 'N/A');
-
-        $principalAmount = $emi->principal_amount ?? 0;
-        $interestAmount = $emi->interest_amount ?? 0;
-        $totalAmount = $emi->total_amount ?? ($principalAmount + $interestAmount);
-        $paidAmount = $emi->paid_amount ?? 0;
-        $outstandingAmount = max($totalAmount - $paidAmount, 0);
-
-        $penaltyAmount = $emi->penalty_amount ?? 0;
-        $totalAmount = $emi->total_amount ?? ($principalAmount + $interestAmount);
-        $isOverduePayment = $emi->status === 'overdue' || ($penaltyAmount > 0 && $emi->paid_date && $emi->paid_date->gt($emi->due_date));
-        $overdueAmount = $isOverduePayment ? $penaltyAmount : 0;
-
-        $receiptData = [
-            'id' => $emi->getRouteKey(),
-            'receipt_number' => 'RCP-' . str_pad($emi->id, 6, '0', STR_PAD_LEFT),
-            'client_name' => $client->client_name ?? 'N/A',
-            'application_number' => $emi->application_number
-                ?? optional($loanAccount)->application_number
-                ?? optional($loanApplication)->application_number,
-            'loan_product' => $product->loan_name ?? 'N/A',
-            'instalment_number' => $emi->instalment_number,
-            'principal_amount' => $principalAmount,
-            'interest_amount' => $interestAmount,
-            'emi_amount' => $totalAmount,
-            'overdue_amount' => $overdueAmount,
-            'show_overdue' => $isOverduePayment,
-            'total_amount_display' => $totalAmount + $overdueAmount,
-            'paid_amount' => $paidAmount,
-            'outstanding_amount' => $outstandingAmount,
-            'payment_method' => ucfirst(str_replace('_', ' ', $emi->payment_method ?? 'N/A')),
-            'payment_reference' => $emi->payment_reference ?: 'N/A',
-            'paid_date' => $paymentDate,
-            'disbursed_date' => $disbursedDate,
-            'status' => $emi->status,
-            'status_label' => $this->getStatusMeta($emi->status)['label'],
-            'status_color' => $this->getStatusMeta($emi->status)['color'],
-            'remarks' => $emi->remarks ?? '-',
-        ];
-
-        return response()->json($receiptData);
+        return response()->json($this->buildReceiptPayload($emi));
     }
 
     /**
@@ -1134,57 +1344,11 @@ class EmiController extends Controller
             'loanAccount.loanApplication.client',
             'loanAccount.loanApplication.product',
             'loanAccount.client',
+            'collections.emi',
         ])
             ->findOrFail($decodedId);
 
-        $loanAccount = $emi->loanAccount;
-        $loanApplication = optional($loanAccount)->loanApplication;
-        $client = optional($loanApplication)->client ?? optional($loanAccount)->client;
-        $product = optional($loanApplication)->product;
-
-        $paymentDate = $emi->paid_date ? $emi->paid_date->format('d-m-Y h:i A') : 'N/A';
-        $disbursedDate = $loanAccount && $loanAccount->disbursed_at
-            ? $loanAccount->disbursed_at->format('d-m-Y h:i A')
-            : ($loanApplication && $loanApplication->disbursed_at
-                ? $loanApplication->disbursed_at->format('d-m-Y h:i A')
-                : 'N/A');
-
-        $principalAmount = $emi->principal_amount ?? 0;
-        $interestAmount = $emi->interest_amount ?? 0;
-        $totalAmount = $emi->total_amount ?? ($principalAmount + $interestAmount);
-        $paidAmount = $emi->paid_amount ?? 0;
-        $outstandingAmount = max($totalAmount - $paidAmount, 0);
-
-        $penaltyAmount = $emi->penalty_amount ?? 0;
-        $totalAmount = $emi->total_amount ?? ($principalAmount + $interestAmount);
-        $isOverduePayment = $emi->status === 'overdue' || ($penaltyAmount > 0 && $emi->paid_date && $emi->paid_date->gt($emi->due_date));
-        $overdueAmount = $isOverduePayment ? $penaltyAmount : 0;
-
-        $receiptData = [
-            'receipt_number' => 'RCP-' . str_pad($emi->id, 6, '0', STR_PAD_LEFT),
-            'client_name' => $client->client_name ?? 'N/A',
-            'application_number' => $emi->application_number
-                ?? optional($loanAccount)->application_number
-                ?? optional($loanApplication)->application_number,
-            'loan_product' => $product->loan_name ?? 'N/A',
-            'instalment_number' => $emi->instalment_number,
-            'principal_amount' => $principalAmount,
-            'interest_amount' => $interestAmount,
-            'emi_amount' => $totalAmount,
-            'overdue_amount' => $overdueAmount,
-            'show_overdue' => $isOverduePayment,
-            'total_amount_display' => $totalAmount + $overdueAmount,
-            'paid_amount' => $paidAmount,
-            'outstanding_amount' => $outstandingAmount,
-            'payment_method' => ucfirst(str_replace('_', ' ', $emi->payment_method ?? 'N/A')),
-            'payment_reference' => $emi->payment_reference ?: 'N/A',
-            'paid_date' => $paymentDate,
-            'disbursed_date' => $disbursedDate,
-            'status' => $emi->status,
-            'status_label' => $this->getStatusMeta($emi->status)['label'],
-            'status_color' => $this->getStatusMeta($emi->status)['color'],
-            'remarks' => $emi->remarks ?? '-',
-        ];
+        $receiptData = $this->buildReceiptPayload($emi);
 
         return view('pdf.payment_receipt', compact('receiptData'));
     }
@@ -1197,12 +1361,11 @@ class EmiController extends Controller
             if (is_numeric($id)) {
                 $decodedId = $id;
             } else {
-                Log::error("Failed to decode EMI ID for statement print: " . $id);
-                abort(404, 'Invalid EMI ID');
+                Log::error("Failed to decode ID for statement print: " . $id);
+                abort(404, 'Invalid Statement ID');
             }
         }
 
-        $emi = Emi::findOrFail($decodedId);
         $loanAccount = LoanAccount::with([
             'loanApplication.client',
             'loanApplication.product',
@@ -1210,7 +1373,23 @@ class EmiController extends Controller
             'emis' => function($q) {
                 $q->orderBy('instalment_number', 'asc');
             }
-        ])->findOrFail($emi->loan_account_id);
+        ])->find($decodedId);
+
+        if (!$loanAccount) {
+            $emi = Emi::find($decodedId);
+            if ($emi) {
+                $loanAccount = LoanAccount::with([
+                    'loanApplication.client',
+                    'loanApplication.product',
+                    'client',
+                    'emis' => function($q) {
+                        $q->orderBy('instalment_number', 'asc');
+                    }
+                ])->findOrFail($emi->loan_account_id);
+            } else {
+                abort(404, 'Loan Account not found');
+            }
+        }
 
         $loanApplication = optional($loanAccount)->loanApplication;
         $client = optional($loanApplication)->client ?? optional($loanAccount)->client;
@@ -1258,6 +1437,166 @@ class EmiController extends Controller
     }
 
     /**
+     * Filter EMIs by repayment tab status.
+     * Overdue = past due | Pending = current month (not past) | Upcoming = after this month.
+     */
+    private function applyRepaymentStatusFilter($query, string $status, Carbon $today): void
+    {
+        $monthEnd = $today->copy()->endOfMonth();
+
+        if ($status === 'paid') {
+            $query->where('status', 'paid');
+            return;
+        }
+
+        if ($status === 'overdue') {
+            $query->overdue();
+            return;
+        }
+
+        if ($status === 'pending') {
+            $query->pendingCurrentMonth();
+            return;
+        }
+
+        if ($status === 'upcoming') {
+            $query->upcoming();
+            return;
+        }
+
+        if ($status === 'partial') {
+            $query->where('status', 'partial')
+                ->whereDate('due_date', '>=', $today);
+            return;
+        }
+
+        // Fallback: overdue + current-month pending window
+        $query->where(function ($q) use ($today, $monthEnd) {
+            $q->where(function ($sq) use ($today) {
+                $sq->whereDate('due_date', '<', $today)
+                    ->whereIn('status', ['pending', 'overdue', 'partial'])
+                    ->where('pending_amount', '>', 0);
+            })->orWhere(function ($sq) use ($today, $monthEnd) {
+                $sq->whereDate('due_date', '>=', $today)
+                    ->whereDate('due_date', '<=', $monthEnd)
+                    ->whereIn('status', ['pending', 'overdue', 'partial'])
+                    ->where('pending_amount', '>', 0);
+            });
+        });
+    }
+
+    /**
+     * Restrict query to overdue EMIs plus the earliest upcoming unpaid EMI per account.
+     * @deprecated Prefer applyRepaymentStatusFilter()
+     */
+    private function applyActiveEmiWindow($query, Carbon $today): void
+    {
+        $query->where(function ($q) use ($today) {
+            $q->where(function ($sq) use ($today) {
+                $sq->where('due_date', '<', $today)
+                    ->where('status', '!=', 'paid');
+            })
+            ->orWhereIn('emis.id', function ($subQuery) use ($today) {
+                $subQuery->select(DB::raw('MIN(e2.id)'))
+                    ->from('emis as e2')
+                    ->whereColumn('e2.loan_account_id', 'emis.loan_account_id')
+                    ->where('e2.status', '!=', 'paid')
+                    ->where('e2.due_date', '>=', $today);
+            });
+        });
+    }
+
+    private function formatEmiForRepaymentsTable(Emi $emi, string $companyMobile, string $companySlogan, Carbon $today): array
+    {
+        $loanAccount = $emi->loanAccount;
+        $loanApplication = optional($loanAccount)->loanApplication;
+        $applicationNumber = $emi->application_number
+            ?? optional($loanAccount)->application_number
+            ?? optional($loanApplication)->application_number;
+
+        $displayStatus = $this->resolveDisplayStatus($emi, $today);
+
+        return [
+            'id' => $emi->getRouteKey(),
+            'loan_account_id' => $loanAccount ? $loanAccount->getRouteKey() : null,
+            'account_number' => $loanAccount->account_number ?? 'N/A',
+            'customer_loan_account_number' => $loanAccount->customer_loan_account_number ?? null,
+            'application_number' => $applicationNumber,
+            'instalment_number' => $emi->instalment_number,
+            'principal_amount' => $emi->principal_amount,
+            'principal_amount_formatted' => '₹' . number_format($emi->principal_amount, 2),
+            'interest_amount' => $emi->interest_amount,
+            'interest_amount_formatted' => '₹' . number_format($emi->interest_amount, 2),
+            'total_amount' => $emi->total_amount,
+            'total_amount_formatted' => '₹' . number_format($emi->total_amount, 2),
+            'pending_amount' => $emi->pending_amount,
+            'pending_amount_formatted' => '₹' . number_format($emi->pending_amount, 2),
+            'due_date' => $emi->due_date ? $emi->due_date->format('d-m-Y') : '-',
+            'paid_amount' => '<span class="fw-bold">' . ($emi->paid_amount > 0 ? '₹' . number_format($emi->paid_amount, 2) : '-') . '</span>' . ($emi->collections && $emi->collections->count() > 0 ? ' <i class="fa fa-info-circle emi-history-trigger" style="cursor:pointer;"></i>' : ''),
+            'paid_amount_raw' => $emi->paid_amount,
+            'paid_date_formatted' => $emi->paid_date ? $emi->paid_date->format('d-m-Y') : null,
+            'company_phone' => $companyMobile,
+            'company_slogan' => $companySlogan,
+            'status' => $displayStatus,
+            'status_badge' => $this->getStatusBadge($displayStatus),
+            'status_meta' => $this->getStatusMeta($displayStatus),
+        ];
+    }
+
+    /**
+     * Map EMI to UI bucket: overdue (past) | pending (current month) | upcoming (later months).
+     */
+    private function resolveDisplayStatus(Emi $emi, Carbon $today): string
+    {
+        if ($emi->status === 'paid') {
+            return 'paid';
+        }
+
+        $dueDate = $emi->due_date ? $emi->due_date->copy()->startOfDay() : null;
+        if (!$dueDate) {
+            return $emi->status ?: 'pending';
+        }
+
+        if ($dueDate->lt($today)) {
+            return 'overdue';
+        }
+
+        // Partial stays partial when not past due
+        if ($emi->status === 'partial') {
+            return 'partial';
+        }
+
+        $monthEnd = $today->copy()->endOfMonth()->startOfDay();
+        if ($dueDate->lte($monthEnd)) {
+            return 'pending';
+        }
+
+        return 'upcoming';
+    }
+
+    private function buildClientStatusSummary(int $overdue, int $pending, int $upcoming, int $partial, int $paid): string
+    {
+        $parts = [];
+        if ($overdue > 0) {
+            $parts[] = '<span class="badge bg-label-danger me-1">' . $overdue . ' Overdue</span>';
+        }
+        if ($pending > 0) {
+            $parts[] = '<span class="badge bg-label-warning me-1">' . $pending . ' Pending</span>';
+        }
+        if ($upcoming > 0) {
+            $parts[] = '<span class="badge bg-label-secondary me-1">' . $upcoming . ' Upcoming</span>';
+        }
+        if ($partial > 0) {
+            $parts[] = '<span class="badge bg-label-info me-1">' . $partial . ' Partial</span>';
+        }
+        if ($paid > 0) {
+            $parts[] = '<span class="badge bg-label-success me-1">' . $paid . ' Paid</span>';
+        }
+
+        return $parts ? implode('', $parts) : '<span class="text-muted">No EMIs</span>';
+    }
+
+    /**
      * Get status badge HTML
      */
     private function getStatusBadge($status): string
@@ -1273,10 +1612,29 @@ class EmiController extends Controller
             'paid' => ['label' => 'Paid', 'color' => 'success'],
             'partial' => ['label' => 'Partial', 'color' => 'info'],
             'pending' => ['label' => 'Pending', 'color' => 'warning'],
+            'upcoming' => ['label' => 'Upcoming', 'color' => 'secondary'],
             'overdue' => ['label' => 'Overdue', 'color' => 'danger'],
         ];
 
         return $map[$status] ?? ['label' => 'Unknown', 'color' => 'secondary'];
+    }
+
+    private function resolveRouteId(mixed $value): mixed
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        $decoded = HashId::decode((string) $value);
+        if ($decoded !== null) {
+            return $decoded;
+        }
+
+        if (ctype_digit((string) $value)) {
+            return (int) $value;
+        }
+
+        return $value;
     }
 
     private function primaryLoanAccountIdsSubquery()
@@ -1290,19 +1648,13 @@ class EmiController extends Controller
      */
     public function processPartialPayment(Request $request): JsonResponse
     {
-        // Decode hashed IDs if present
-        if ($request->has('loan_account_id')) {
-            $decoded = \App\Support\HashId::decode($request->loan_account_id);
-            $request->merge([
-                'loan_account_id' => is_array($decoded) ? ($decoded[0] ?? $request->loan_account_id) : ($decoded ?? $request->loan_account_id)
-            ]);
-        }
-        if ($request->has('emi_id') && !empty($request->emi_id)) {
-            $decoded = \App\Support\HashId::decode($request->emi_id);
-            $request->merge([
-                'emi_id' => is_array($decoded) ? ($decoded[0] ?? $request->emi_id) : ($decoded ?? $request->emi_id)
-            ]);
-        }
+        $request->merge([
+            'loan_account_id' => $this->resolveRouteId($request->input('loan_account_id')),
+            'emi_id' => $this->resolveRouteId($request->input('emi_id')),
+            'partial_amount' => $request->filled('partial_amount') ? $request->input('partial_amount') : null,
+            'principal_amount' => $request->filled('principal_amount') ? $request->input('principal_amount') : null,
+            'internal_bank_account_id' => $request->filled('internal_bank_account_id') ? $request->input('internal_bank_account_id') : null,
+        ]);
 
         $validated = $request->validate([
             'loan_account_id' => 'required|exists:loan_accounts,id',
@@ -1311,21 +1663,9 @@ class EmiController extends Controller
             'principal_amount'=> 'nullable|numeric|min:0',
             'payment_date'    => 'required|date',
             'payment_method'  => 'required|string',
-            'payment_reference'=> 'nullable|string'
+            'payment_reference'=> 'nullable|string',
+            'internal_bank_account_id' => 'required_if:payment_method,upi,bank_transfer|nullable|exists:bank_accounts,id',
         ]);
-
-        if ($request->filled('partial_amount') && floor($request->partial_amount) != $request->partial_amount) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Interest payment amount must be a whole number.'
-            ], 422);
-        }
-        if ($request->filled('principal_amount') && floor($request->principal_amount) != $request->principal_amount) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Principal repayment amount must be a whole number.'
-            ], 422);
-        }
 
         $interestAmount = (float)($validated['partial_amount'] ?? 0);
         $principalAmount = (float)($validated['principal_amount'] ?? 0);
@@ -1370,6 +1710,13 @@ class EmiController extends Controller
                 $payAmount = $interestAmount > 0.001 ? $interestAmount : $principalAmount;
 
                 if ($isKandhuvatti) {
+                    if ($interestAmount > 0.001) {
+                        return response()->json([
+                            'success' => false,
+                            'message' => 'For Open Loans (Kandhuvatti), use the standard "Pay" button for interest. The "Partial Pay" modal is only for paying down the Principal.'
+                        ], 422);
+                    }
+                    
                     $pendingAmount = $partialService->getOutstandingDueAmount($emi, $loanAccount);
                     if ($principalAmount > 0.001) {
                         // Principal payment for Kandhuvatti
@@ -1378,24 +1725,6 @@ class EmiController extends Controller
                                 'success' => false,
                                 'message' => 'Principal repayment amount cannot exceed the remaining outstanding loan principal (₹' . number_format($loanAccount->outstanding_amount, 2) . ').'
                             ], 422);
-                        }
-                    } else {
-                        // Interest payment for Kandhuvatti
-                        $isPartialPayment = $interestAmount < ($pendingAmount - 0.01);
-                        if ($isPartialPayment) {
-                            if ($validationError = $partialService->validatePartialAmount($emi, $interestAmount, $loanAccount)) {
-                                return response()->json([
-                                    'success' => false,
-                                    'message' => $validationError,
-                                ], 422);
-                            }
-                        } else {
-                            if ($interestAmount > ($pendingAmount + 0.01)) {
-                                return response()->json([
-                                    'success' => false,
-                                    'message' => 'Interest payment cannot exceed the pending interest due (₹' . number_format($pendingAmount, 2) . ').'
-                                ], 422);
-                            }
                         }
                     }
                 } else {
@@ -1441,26 +1770,45 @@ class EmiController extends Controller
                     ], 400);
                 }
 
-                // 3-Day Lock Logic (only applies to 'pending' EMIs; 'partial' or 'overdue' are always unlocked; never applies to open loans/Kandhuvatti)
-                if ($emi->status === 'pending' && !$isKandhuvatti) {
-                    $threeDaysBefore = now()->addDays(3);
-                    $isWithinWindow = $emi->due_date && $emi->due_date <= $threeDaysBefore;
-                    $isPreviousPaid = ($emi->instalment_number > 1) && !$unpaidPrior;
+     // 3-Day Lock Logic (only applies to 'pending' EMIs; 'partial' or 'overdue' are always unlocked; never applies to open loans/Kandhuvatti)
+                // if ($emi->status === 'pending' && !$isKandhuvatti) {
+                //     $threeDaysBefore = now()->addDays(3);
+                //     $isWithinWindow = $emi->due_date && $emi->due_date <= $threeDaysBefore;
+                //     $isPreviousPaid = ($emi->instalment_number > 1) && !$unpaidPrior;
 
-                    if (!$isWithinWindow && !$isPreviousPaid) {
-                        return response()->json([
-                            'success' => false,
-                            'message' => 'This EMI is currently locked. It will be available 3 days before the due date (' . $emi->due_date->format('d-m-Y') . ').'
-                        ], 400);
-                    }
-                }
+                //     if (!$isWithinWindow && !$isPreviousPaid) {
+                //         return response()->json([
+                //             'success' => false,
+                //             'message' => 'This EMI is currently locked. It will be available 3 days before the due date (' . $emi->due_date->format('d-m-Y') . ').'
+                //         ], 400);
+                //     }
+                // }
+                // 3-Day Lock Logic removed: all pending EMIs are now always payable.
+            }
+
+            $dedupeFingerprint = implode('|', [
+                auth()->id(),
+                $validated['loan_account_id'],
+                $validated['emi_id'] ?? 'cascade',
+                number_format($interestAmount, 2, '.', ''),
+                number_format($principalAmount, 2, '.', ''),
+                $validated['payment_date'],
+                $validated['payment_method'],
+            ]);
+            $dedupeKey = 'loan-partial-payment:' . hash('sha256', $dedupeFingerprint);
+
+            if (!Cache::add($dedupeKey, true, now()->addSeconds(30))) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'This payment is already being processed. Please refresh before trying again.',
+                ], 409);
             }
 
             $paymentService = new \App\Services\LoanPaymentService();
             $currentUser    = auth()->user();
             $isAgent        = $currentUser->hasRole('Agent');
 
-            // ── AGENT PATH: create pending collection for admin approval ───────────────
+            // ── AGENT PATH: auto-verify and process payment immediately ───────────────
             if ($isAgent) {
                 $agentId   = optional($currentUser->agent)->id;
                 $targetEmi = !empty($validated['emi_id']) ? Emi::findOrFail($validated['emi_id']) : null;
@@ -1492,19 +1840,27 @@ class EmiController extends Controller
                             'payment_type'   => $isNowFull ? 'full' : 'partial',
                             'payment_method' => $validated['payment_method'],
                             'collected_at'   => $validated['payment_date'],
+                            'status'         => 'verified',
+                            'verified_by'    => auth()->id(),
+                            'verified_at'    => now(),
                             'remarks'        => trim(($existing->remarks ?? '') . "\n[Agent Updated via Partial Modal]"),
+                            'bank_account_id'=> $validated['internal_bank_account_id'] ?? $existing->bank_account_id,
                         ]);
+                        $collection = $existing;
                     } else {
-                        \App\Models\EmiCollection::create([
+                        $collection = \App\Models\EmiCollection::create([
                             'agent_id'          => $agentId,
                             'emi_id'            => $emiForCollection->id,
                             'amount'            => $payAmount,
                             'payment_method'    => $validated['payment_method'],
                             'payment_type'      => $paymentType,
                             'payment_reference' => $validated['payment_reference'] ?? null,
-                            'status'            => 'in_progress',
+                            'status'            => 'verified',
                             'collected_at'      => $validated['payment_date'],
-                            'remarks'           => '[Agent Created via Partial Modal]',
+                            'verified_by'       => auth()->id(),
+                            'verified_at'       => now(),
+                            'remarks'           => '[Agent Collected via Partial Modal]',
+                            'bank_account_id'   => $validated['internal_bank_account_id'] ?? null,
                         ]);
                     }
 
@@ -1525,14 +1881,31 @@ class EmiController extends Controller
                         ->whereIn('status', ['assigned', 'visited'])
                         ->update(['status' => 'resolved', 'resolved_at' => now()]);
 
+                    $result = $paymentService->processPayment(
+                        $emiForCollection->id,
+                        $interestAmount,
+                        $validated['payment_date'],
+                        $validated['payment_method'],
+                        $validated['payment_reference'] ?? null,
+                        $collection->remarks,
+                        true,
+                        $principalAmount,
+                        false,
+                        $validated['internal_bank_account_id'] ?? null
+                    );
+
+                    if (!$result['success']) {
+                        throw new \Exception($result['message']);
+                    }
+
                     DB::commit();
                 } catch (\Exception $ex) {
                     DB::rollBack();
                     throw $ex;
                 }
 
-                // Let's generate the SMS/WhatsApp payload identical to Admin flow
                 $loanAccount->refresh();
+                $emiForCollection->refresh();
                 $client = $loanAccount->loanApplication->client ?? $loanAccount->client;
                 $mobileNo = $client->mobile_no ?? $client->client_phone ?? '';
                 $cleanMobile = preg_replace('/[^0-9]/', '', $mobileNo);
@@ -1540,38 +1913,16 @@ class EmiController extends Controller
                     $cleanMobile = '91' . $cleanMobile;
                 }
 
-                // For agent (pending) submissions, processPayment has NOT run yet, so
-                // outstanding_amount is still the pre-payment value. Estimate expected
-                // post-payment balance so the SMS shows the correct anticipated balance.
                 $isKandhuvatti = ($loanAccount->loan_mode === 'interest_only');
-                $remainingBalance = $loanAccount->outstanding_amount;
-                if ($isKandhuvatti) {
-                    if (($validated['payment_type'] ?? '') === 'principal') {
-                        $remainingBalance = max(0, $remainingBalance - $payAmount);
-                    }
-                } else {
-                    $isReducing = $loanAccount->loanApplication && $loanAccount->loanApplication->product
-                        && in_array($loanAccount->loanApplication->product->interest_type, ['reducing', 'declining_balance']);
-                    if ($isReducing) {
-                        $interestPart = (float)($emiForCollection->interest_amount ?? 0);
-                        $alreadyPaid  = (float)($emiForCollection->paid_amount ?? 0);
-                        $unpaidInterest = max(0, $interestPart - min($alreadyPaid, $interestPart));
-                        $principalPaidHere = max(0, $payAmount - $unpaidInterest);
-                        $remainingBalance = max(0, $remainingBalance - $principalPaidHere);
-                    } else {
-                        $remainingBalance = max(0, $remainingBalance - $payAmount);
-                    }
-                }
-
-                $isFullyPaid = ($payAmount >= ($pendingAmt - 0.01));
-                $emiBalance = max(0, $pendingAmt - $payAmount);
+                $isFullyPaid = ($emiForCollection->status === 'paid');
+                $emiBalance = max(0, $emiForCollection->pending_amount);
 
                 $smsData = [
                     'client_name' => trim(($client->first_name ?? '') . ' ' . ($client->last_name ?? '')) ?: ($client->client_name ?? 'Client'),
                     'mobile_no' => $cleanMobile,
                     'account_no' => $loanAccount->account_number,
                     'amount_paid' => $payAmount,
-                    'remaining_balance' => $remainingBalance,
+                    'remaining_balance' => $loanAccount->outstanding_amount,
                     'loan_mode' => $loanAccount->loan_mode,
                     'payment_type' => ($isKandhuvatti && $request->payment_type === 'principal') ? 'principal' : (($isKandhuvatti) ? 'interest' : 'emi'),
                     'application_number' => $loanAccount->application_number,
@@ -1580,11 +1931,15 @@ class EmiController extends Controller
                 ];
                 $smsData = array_merge($smsData, \App\Helpers\NotificationTemplateHelper::getRepaymentMessages($smsData));
 
+                $msg = 'Payment processed successfully';
+                if ($isKandhuvatti) {
+                    $msg = $principalAmount > 0.001 ? 'Principal payment processed successfully' : 'Interest payment processed successfully';
+                }
+
                 return response()->json([
-                    'success'          => true,
-                    'message'          => 'Payment submitted successfully and is awaiting Admin approval.',
-                    'pending_approval' => true,
-                    'sms_data'         => $smsData
+                    'success'  => true,
+                    'message'  => $msg,
+                    'sms_data' => $smsData
                 ]);
             }
 
@@ -1598,7 +1953,9 @@ class EmiController extends Controller
                     $validated['payment_reference'] ?? null,
                     'Partial payment processed via targeted modal',
                     false,
-                    $principalAmount
+                    $principalAmount,
+                    false, // bypassPriorCheck
+                    $validated['internal_bank_account_id'] ?? null
                 );
             } else {
                 $result = $paymentService->processPartialPayment(
@@ -1607,7 +1964,9 @@ class EmiController extends Controller
                     $validated['payment_date'],
                     $validated['payment_method'],
                     $validated['payment_reference'] ?? null,
-                    'Partial payment processed via cascading logic'
+                    'Partial payment processed via cascading logic',
+                    false,
+                    $validated['internal_bank_account_id'] ?? null
                 );
             }
             
@@ -1652,18 +2011,27 @@ class EmiController extends Controller
                     'emi_balance' => $emiBalance,
                 ];
                 $smsData = array_merge($smsData, \App\Helpers\NotificationTemplateHelper::getRepaymentMessages($smsData));
+                if (!empty($cleanMobile)) {
+                    $smsData['whatsapp_url'] = 'https://wa.me/' . $cleanMobile . '?text=' . rawurlencode($smsData['whatsapp_message'] ?? '');
+                    $smsData['sms_url'] = 'sms:+' . $cleanMobile . '?body=' . rawurlencode($smsData['sms_message'] ?? '');
+                }
 
                 return response()->json([
                     'success'  => true,
                     'message'  => $msg,
-                    'data'     => $result['data'],
+                    'data'     => $result['data'] ?? null,
                     'sms_data' => $smsData
                 ]);
             }
             
+            Cache::forget($dedupeKey);
+
             return response()->json(['success' => false, 'message' => $result['message']], 400);
             
         } catch (\Throwable $e) {
+            if ($dedupeKey) {
+                Cache::forget($dedupeKey);
+            }
             Log::error('Partial payment error: ' . $e->getMessage());
             return response()->json(['success' => false, 'message' => 'Failed to process payment: ' . $e->getMessage()], 500);
         }
@@ -1762,20 +2130,15 @@ class EmiController extends Controller
         $interestRemaining = $interestLimit;
         
         $collections = $rawCollections->map(function ($collection) use (&$interestRemaining) {
-            $amount = (float)$collection->amount;
+            $amount = round((float) $collection->amount, 2);
             
             // Interest portion is cleared first up to the interest limit of this EMI
-            $interestPaid = min($amount, $interestRemaining);
-            $interestRemaining = max(0.00, $interestRemaining - $interestPaid);
+            $interestPaid = round(min($amount, $interestRemaining), 2);
+            $interestRemaining = max(0.00, round($interestRemaining - $interestPaid, 2));
             
-            $principalPaid = max(0.00, $amount - $interestPaid);
+            $principalPaid = max(0.00, round($amount - $interestPaid, 2));
             
-            $approverName = 'System';
-            if ($collection->agent) {
-                $approverName = $collection->agent->agent_name;
-            } elseif ($collection->verifiedBy) {
-                $approverName = $collection->verifiedBy->name;
-            }
+            $approverName = $collection->getCollectedByLabel();
 
             return [
                 'id' => $collection->id,
@@ -1794,11 +2157,23 @@ class EmiController extends Controller
             ];
         })->reverse()->values();
 
+        $originalPaid = round((float) $rawCollections->where('status', 'verified')->sum('amount'), 2);
+        if ($originalPaid <= 0) {
+            $originalPaid = round((float) ($emi->paid_amount ?? 0), 2);
+        }
+
+        $isKandhu = ($emi->loanAccount?->loanApplication?->loan_mode ?? 'emi') === 'interest_only';
+        $fullInterest = (float)$emi->interest_amount;
+        $totalDisplay = $isKandhu ? $fullInterest : (float)$emi->total_amount;
+        $interestPaidTotal = $isKandhu ? max(0, (float)$emi->paid_amount - (float)($emi->principal_amount ?? 0)) : (float)$emi->paid_amount;
+        $originalPaidDisplay = $isKandhu ? $interestPaidTotal : $originalPaid;
+
         return response()->json([
             'success' => true,
             'emi_number' => $emi->instalment_number,
-            'total_amount' => '₹' . number_format($emi->total_amount, 2),
-            'paid_amount' => '₹' . number_format($emi->paid_amount, 2),
+            'total_amount' => '₹' . number_format($totalDisplay, 2),
+            'paid_amount' => '₹' . number_format($interestPaidTotal, 2),
+            'original_paid_amount' => '₹' . number_format($originalPaidDisplay, 2),
             'collections' => $collections,
             'is_admin' => auth()->user()->hasRole('Admin'),
         ]);
@@ -1909,18 +2284,47 @@ class EmiController extends Controller
      */
     public function bulkPay(Request $request): JsonResponse
     {
-        if (!auth()->user()->hasRole('Admin')) {
+        if (!auth()->user()->hasRole('Admin') && !auth()->user()->hasRole('Staff')) {
             return response()->json(['success' => false, 'message' => 'Unauthorized action.'], 403);
         }
 
         $request->validate([
             'emi_ids' => 'required|array',
-            'emi_ids.*' => 'required'
+            'emi_ids.*' => 'required',
+            'payment_method' => 'nullable|string',
+            'internal_bank_account_id' => 'nullable',
+            'paid_amount' => 'nullable|numeric|min:0.01',
+            'paid_date' => 'nullable|date',
+            'remarks' => 'nullable|string',
         ]);
+
+        $paymentMethod = $request->input('payment_method', 'in_hand');
+        $bankAccountId = $request->input('internal_bank_account_id');
+
+        if (in_array($paymentMethod, ['upi', 'bank_transfer'], true) && !$bankAccountId) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Please select a collection bank account for UPI / Bank Transfer payments.'
+            ], 422);
+        }
+
+        $paidDate = $request->input('paid_date') ?: Carbon::now()->toDateString();
+        $customRemarks = $request->input('remarks');
+        $userRole = auth()->user()->hasRole('Admin') ? 'Admin' : 'Staff';
+        $batchKey = BulkPaymentGroup::generateKey();
+        $remarksText = BulkPaymentGroup::appendRemarks(
+            $customRemarks,
+            $batchKey,
+            'Bulk payment processed by ' . $userRole
+        );
+
+        $hasCustomAmount = $request->filled('paid_amount');
+        $remainingPool = $hasCustomAmount ? (float) $request->input('paid_amount') : null;
 
         $emiIds = $request->emi_ids;
         $count = 0;
         $totalPaid = 0;
+        $cashbookLines = [];
 
         DB::beginTransaction();
         try {
@@ -1930,34 +2334,57 @@ class EmiController extends Controller
             foreach ($emiIds as $hashedId) {
                 $emiId = HashId::decode($hashedId);
                 $emiId = is_array($emiId) ? ($emiId[0] ?? $hashedId) : ($emiId ?? $hashedId);
-                $decodedIds[] = $emiId;
+                if ($emiId) {
+                    $decodedIds[] = $emiId;
+                }
             }
 
             // Fetch selected EMIs ordered by loan_account_id and instalment_number
-            $emis = Emi::whereIn('id', $decodedIds)
+            $emis = Emi::with(['loanAccount.client'])->whereIn('id', $decodedIds)
                 ->orderBy('loan_account_id')
                 ->orderBy('instalment_number')
                 ->get();
 
             foreach ($emis as $emi) {
-                // Skip if already fully paid
-                if ($emi->status === 'paid' || ($emi->total_amount - $emi->paid_amount) <= 0.001) {
+                if ($hasCustomAmount && $remainingPool <= 0.009) {
+                    break;
+                }
+
+                $emi = $emi->fresh(['loanAccount.client']);
+                if (!$emi || !in_array($emi->status, ['pending', 'overdue', 'partial'], true)) {
                     continue;
                 }
 
-                $pendingAmount = $emi->total_amount - $emi->paid_amount;
+                $pendingAmount = (float) ($emi->pending_amount ?? 0);
+                if ($pendingAmount <= 0.01) {
+                    $pendingAmount = max(0, (float) $emi->total_amount - (float) $emi->paid_amount);
+                }
+                if ($pendingAmount <= 0.01) {
+                    continue;
+                }
 
-                // Process full payment for this EMI and bypass prior check
+                $payForThisEmi = $pendingAmount;
+                if ($hasCustomAmount) {
+                    $payForThisEmi = min($remainingPool, $pendingAmount);
+                }
+
+                if ($payForThisEmi <= 0.009) {
+                    continue;
+                }
+
                 $result = $paymentService->processPayment(
                     $emi->id,
-                    $pendingAmount,
-                    Carbon::now()->toDateString(),
-                    'cash',
-                    'Bulk Payment',
-                    'Bulk payment processed by Admin',
-                    false, // skipHistory
-                    0, // principal_amount
-                    true // bypassPriorCheck
+                    $payForThisEmi,
+                    $paidDate,
+                    $paymentMethod,
+                    $batchKey,
+                    $remarksText,
+                    false,
+                    0,
+                    true,
+                    $bankAccountId,
+                    null,
+                    true // skipCashbook — one bank tx for the whole bulk pay
                 );
 
                 if (!$result['success']) {
@@ -1965,17 +2392,50 @@ class EmiController extends Controller
                 }
 
                 // Fire notification event
-                event(new \App\Events\PaymentReceivedEvent($emi, $pendingAmount));
+                event(new \App\Events\PaymentReceivedEvent($emi, $payForThisEmi));
+
+                $accountNumber = $emi->loanAccount->customer_loan_account_number
+                    ?? $emi->loanAccount->account_number
+                    ?? 'N/A';
+                $clientName = $emi->loanAccount->client->client_name ?? 'Client';
+                $loanKey = (string) $emi->loan_account_id;
+                if (! isset($cashbookLines[$loanKey])) {
+                    $cashbookLines[$loanKey] = [
+                        'account_number' => (string) $accountNumber,
+                        'client_name' => (string) $clientName,
+                        'emis' => [],
+                        'amount' => 0.0,
+                    ];
+                }
+                $cashbookLines[$loanKey]['emis'][] = (int) $emi->instalment_number;
+                $cashbookLines[$loanKey]['amount'] = round($cashbookLines[$loanKey]['amount'] + $payForThisEmi, 2);
 
                 $count++;
-                $totalPaid += $pendingAmount;
+                $totalPaid += $payForThisEmi;
+                if ($hasCustomAmount) {
+                    $remainingPool -= $payForThisEmi;
+                }
+            }
+
+            if ($totalPaid > 0.009 && ! in_array($paymentMethod, ['wallet'], true)) {
+                $paymentService->recordLoanCollectionInCashbook(
+                    $bankAccountId,
+                    (string) $paymentMethod,
+                    (float) $totalPaid,
+                    $batchKey,
+                    \App\Services\Account\AccountingTags::loanIcBulkDescription(
+                        array_values($cashbookLines),
+                        Auth::id()
+                    ),
+                    $paidDate
+                );
             }
 
             DB::commit();
             
             return response()->json([
                 'success' => true,
-                'message' => "Successfully processed full payments for {$count} EMIs. Total paid: ₹" . number_format($totalPaid, 2)
+                'message' => "Successfully processed payments for {$count} EMI(s). Total paid: ₹" . number_format($totalPaid, 2)
             ]);
 
         } catch (\Exception $e) {
@@ -1993,7 +2453,7 @@ class EmiController extends Controller
      */
     public function bulkUndo(Request $request): JsonResponse
     {
-        if (!auth()->user()->hasRole('Admin')) {
+        if (!auth()->user()->hasRole('Admin') && !auth()->user()->hasRole('Staff')) {
             return response()->json(['success' => false, 'message' => 'Unauthorized action.'], 403);
         }
 
@@ -2013,35 +2473,51 @@ class EmiController extends Controller
             foreach ($emiIds as $hashedId) {
                 $emiId = HashId::decode($hashedId);
                 $emiId = is_array($emiId) ? ($emiId[0] ?? $hashedId) : ($emiId ?? $hashedId);
-                $decodedIds[] = $emiId;
+                if ($emiId) {
+                    $decodedIds[] = $emiId;
+                }
             }
 
-            // Fetch selected EMIs ordered by loan_account_id and instalment_number descending (to undo the latest ones first safely!)
-            $emis = Emi::whereIn('id', $decodedIds)
-                ->orderBy('loan_account_id')
-                ->orderByDesc('instalment_number')
-                ->get();
+            $selectedEmis = Emi::with('loanAccount')->whereIn('id', $decodedIds)->get();
 
-            foreach ($emis as $emi) {
-                // Skip if not fully paid (only undo paid ones)
-                if ($emi->status !== 'paid') {
-                    continue;
+            if ($selectedEmis->isEmpty()) {
+                DB::rollBack();
+                return response()->json(['success' => false, 'message' => 'No valid EMIs selected for undo.'], 422);
+            }
+
+            // Group selected EMIs by loan account to process each loan's paid/partial EMIs in descending order
+            $loanGrouped = $selectedEmis->groupBy('loan_account_id');
+
+            foreach ($loanGrouped as $loanAccountId => $groupEmis) {
+                $minInstalment = $groupEmis->min('instalment_number');
+
+                // Get all paid/partially-paid EMIs for this loan account >= minInstalment in descending order
+                $emisToUndo = Emi::where('loan_account_id', $loanAccountId)
+                    ->where(function ($q) {
+                        $q->where('paid_amount', '>', 0.001)
+                          ->orWhereIn('status', ['paid', 'partial', 'partially_paid']);
+                    })
+                    ->where('instalment_number', '>=', $minInstalment)
+                    ->orderByDesc('instalment_number')
+                    ->get();
+
+                foreach ($emisToUndo as $emi) {
+                    $result = $paymentService->undoEmiPayment($emi->id, 'Bulk undo processed by ' . (auth()->user()->hasRole('Admin') ? 'Admin' : 'Staff'));
+
+                    if (! $result['success']) {
+                        $accountNo = $emi->loanAccount->customer_loan_account_number ?? $emi->loanAccount->account_number ?? 'N/A';
+                        throw new \Exception("Failed to undo EMI #{$emi->instalment_number} for Loan Account: {$accountNo}. Reason: " . $result['message']);
+                    }
+
+                    $count++;
                 }
-
-                $result = $paymentService->undoEmiPayment($emi->id, 'Bulk undo processed by Admin');
-
-                if (!$result['success']) {
-                    throw new \Exception("Failed to undo EMI #{$emi->instalment_number} for Loan Account: " . ($emi->loanAccount->account_number ?? 'N/A') . ". Reason: " . $result['message']);
-                }
-
-                $count++;
             }
 
             DB::commit();
-            
+
             return response()->json([
                 'success' => true,
-                'message' => "Successfully undid payments for {$count} EMIs."
+                'message' => "Successfully undid payments for {$count} EMI(s)."
             ]);
 
         } catch (\Exception $e) {
@@ -2102,28 +2578,44 @@ class EmiController extends Controller
         return response()->json(['success' => false, 'message' => $result['message']], 500);
     }
 
-    private function parseFilterDate($dateStr)
+    /**
+     * Get loan closing calculation details (total collected vs loan amount + interest)
+     */
+    public function getLoanClosingDetails($loanAccountId): JsonResponse
     {
-        if (empty($dateStr)) return null;
+        $decodedId = \App\Support\HashId::decode($loanAccountId);
+        $decodedId = is_array($decodedId) ? ($decodedId[0] ?? $loanAccountId) : ($decodedId ?? $loanAccountId);
 
-        $dateStr = trim($dateStr);
+        $loanAccount = LoanAccount::with('emis')->findOrFail($decodedId);
 
-        if (preg_match('/^\d{1,2}\/\d{1,2}\/\d{4}$/', $dateStr)) {
-            try {
-                return Carbon::createFromFormat('d/m/Y', $dateStr);
-            } catch (\Exception $e) {}
+        $paymentService = app(\App\Services\LoanPaymentService::class);
+        $summary = $paymentService->calculateLoanClosingSummary($loanAccount);
+
+        return response()->json([
+            'success' => true,
+            'summary' => $summary,
+        ]);
+    }
+
+    /**
+     * Settle and close loan account after interest & collected checks
+     */
+    public function settleAndCloseLoan(Request $request, $loanAccountId): JsonResponse
+    {
+        if (!auth()->user()->hasRole('Admin') && !auth()->user()->hasRole('Staff')) {
+            return response()->json(['success' => false, 'message' => 'Unauthorized action.'], 403);
         }
 
-        if (preg_match('/^\d{1,2}-\d{1,2}-\d{4}$/', $dateStr)) {
-            try {
-                return Carbon::createFromFormat('d-m-Y', $dateStr);
-            } catch (\Exception $e) {}
-        }
+        $decodedId = \App\Support\HashId::decode($loanAccountId);
+        $decodedId = is_array($decodedId) ? ($decodedId[0] ?? $loanAccountId) : ($decodedId ?? $loanAccountId);
 
-        try {
-            return Carbon::parse($dateStr);
-        } catch (\Exception $e) {
-            return null;
-        }
+        $loanAccount = LoanAccount::with('emis')->findOrFail($decodedId);
+
+        $paymentService = app(\App\Services\LoanPaymentService::class);
+        $result = $paymentService->closeLoanAccount($loanAccount, [
+            'remarks' => $request->input('remarks', 'Manual final settlement & loan closing')
+        ]);
+
+        return response()->json($result);
     }
 }

@@ -1,26 +1,27 @@
-{{-- Shared Accounting page header (title + subtitle + icon) --}}
+{{-- Shared Accounting page header — matches Client Ledgers Management style --}}
+@include('admin.account.shared.styles')
 @php
   $title = $title ?? '';
   $subtitle = $subtitle ?? null;
-  $icon = $icon ?? 'ri-book-2-line';
+  $breadcrumb = $breadcrumb ?? $title;
+  $icon = $icon ?? null; // kept for BC; unused in flat header
 @endphp
-<div class="account-page-hero card border-0 shadow-sm mb-4 overflow-hidden">
-  <div class="card-body py-4 px-4 px-md-5">
-    <div class="d-flex flex-wrap align-items-start justify-content-between gap-3">
-      <div class="d-flex gap-3 align-items-start">
-        <div class="account-page-hero-icon flex-shrink-0 rounded-3 d-flex align-items-center justify-content-center">
-          <i class="icon-base ri {{ $icon }} ri-24px text-primary"></i>
-        </div>
-        <div>
-          <h4 class="mb-1 fw-semibold">{{ $title }}</h4>
-          @if ($subtitle)
-            <p class="text-muted mb-0 small">{{ $subtitle }}</p>
-          @endif
-        </div>
-      </div>
-      @isset($toolbar)
-        <div class="d-flex flex-wrap align-items-center gap-2">{!! $toolbar !!}</div>
-      @endisset
-    </div>
+<div class="d-flex align-items-center justify-content-between mb-4 flex-wrap gap-2">
+  <div>
+    <h4 class="mb-0 fw-bold text-primary">{{ $title }}</h4>
+    @if ($subtitle)
+      <p class="text-muted mb-0 small mt-1">{{ $subtitle }}</p>
+    @endif
+  </div>
+  <div class="d-flex align-items-center gap-2 flex-wrap">
+    @isset($toolbar)
+      {!! $toolbar !!}
+    @endisset
+    <nav aria-label="breadcrumb">
+      <ol class="breadcrumb mb-0">
+        <li class="breadcrumb-item"><a href="{{ route('account.index') }}">{{ __('Accounting') }}</a></li>
+        <li class="breadcrumb-item active" aria-current="page">{{ $breadcrumb }}</li>
+      </ol>
+    </nav>
   </div>
 </div>

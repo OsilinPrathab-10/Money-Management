@@ -142,6 +142,47 @@
                 </div>
               </div>
             </div>
+
+            <!-- Bank Details Accordion -->
+            <div class="accordion-item">
+              <h2 class="accordion-header" id="headingBank">
+                <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse"
+                  data-bs-target="#collapseBank" aria-expanded="false" aria-controls="collapseBank">
+                  <small class="text-primary text-uppercase fw-semibold">Bank Details (For Salary)</small>
+                </button>
+              </h2>
+              <div id="collapseBank" class="accordion-collapse collapse" aria-labelledby="headingBank"
+                data-bs-parent="#agentInfoAccordion">
+                <div class="accordion-body">
+                  <div class="row g-4">
+                    <div class="col-sm-6">
+                      <small class="text-muted text-uppercase">Holder Name</small>
+                      <p class="mb-0 text-heading">{{ $agent->account_holder_name ?? 'N/A' }}</p>
+                    </div>
+                    <div class="col-sm-6">
+                      <small class="text-muted text-uppercase">Bank Name</small>
+                      <p class="mb-0 text-heading">{{ $agent->bank_name ?? 'N/A' }}</p>
+                    </div>
+                    <div class="col-sm-6">
+                      <small class="text-muted text-uppercase">Account No</small>
+                      <p class="mb-0 text-heading">{{ $agent->account_number ?? 'N/A' }}</p>
+                    </div>
+                    <div class="col-sm-6">
+                      <small class="text-muted text-uppercase">IFSC Code</small>
+                      <p class="mb-0 text-heading">{{ $agent->ifsc_code ?? 'N/A' }}</p>
+                    </div>
+                    <div class="col-sm-6">
+                      <small class="text-muted text-uppercase">Branch</small>
+                      <p class="mb-0 text-heading">{{ $agent->branch_name ?? 'N/A' }}</p>
+                    </div>
+                    <div class="col-sm-6">
+                      <small class="text-muted text-uppercase">UPI ID</small>
+                      <p class="mb-0 text-heading">{{ $agent->upi_id ?? 'N/A' }}</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -234,39 +275,16 @@
               </div>
               <div class="col-md-6">
                 <div class="form-floating form-floating-outline">
-                  <input type="text" class="form-control" id="pincode" name="pincode" value="{{ $agent->pincode }}"
+                  <input type="number" class="form-control" id="pincode" name="pincode" value="{{ $agent->pincode }}"
                     readonly data-editable="true" />
                   <label for="pincode">Pincode</label>
                 </div>
               </div>
               <div class="col-md-6">
-                <div class="form-password-toggle">
-                  <div class="input-group input-group-merge">
-                    <div class="form-floating form-floating-outline">
-                      <input type="password" class="form-control" id="password" name="password" 
-                        value="{{ $agent->user->plain_password ?? '' }}" placeholder="••••••••"
-                        readonly data-editable="true" autocomplete="new-password" />
-                      <label for="password">New Password (optional)</label>
-                    </div>
-                    <span class="input-group-text cursor-pointer">
-                      <i class="icon-base ri ri-eye-off-line icon-20px"></i>
-                    </span>
-                  </div>
-                </div>
-              </div>
-              <div class="col-md-6">
-                <div class="form-password-toggle">
-                  <div class="input-group input-group-merge">
-                    <div class="form-floating form-floating-outline">
-                      <input type="password" class="form-control" id="password_confirmation" name="password_confirmation" 
-                        value="{{ $agent->user->plain_password ?? '' }}" placeholder="••••••••"
-                        readonly data-editable="true" autocomplete="new-password" />
-                      <label for="password_confirmation">Confirm New Password</label>
-                    </div>
-                    <span class="input-group-text cursor-pointer">
-                      <i class="icon-base ri ri-eye-off-line icon-20px"></i>
-                    </span>
-                  </div>
+                <div class="form-floating form-floating-outline">
+                  <input type="number" class="form-control" id="salary_amount" name="salary_amount" value="{{ $agent->salary_amount }}"
+                    readonly data-editable="true" min="0" step="0.01" />
+                  <label for="salary_amount">Monthly Salary (₹)</label>
                 </div>
               </div>
               <div class="col-12">
@@ -275,6 +293,75 @@
                     data-editable="true">{{ $agent->address }}</textarea>
                   <label for="address">Address</label>
                 </div>
+              </div>
+
+              <div class="col-12">
+                <hr class="my-2">
+                <h6 class="mb-0 text-heading"><i class="ri-bank-line me-1"></i> Bank Details (For Salary / Payouts)</h6>
+              </div>
+              <div class="col-md-6">
+                <div class="form-floating form-floating-outline">
+                  <input type="text" class="form-control" id="account_holder_name" name="account_holder_name" value="{{ $agent->account_holder_name }}"
+                    readonly data-editable="true" />
+                  <label for="account_holder_name">Account Holder Name</label>
+                </div>
+              </div>
+              <div class="col-md-6">
+                <div class="form-floating form-floating-outline">
+                  <input type="text" class="form-control" id="bank_name" name="bank_name" value="{{ $agent->bank_name }}"
+                    readonly data-editable="true" />
+                  <label for="bank_name">Bank Name</label>
+                </div>
+              </div>
+              <div class="col-md-6">
+                <div class="form-floating form-floating-outline">
+                  <input type="text" class="form-control" id="account_number" name="account_number" value="{{ $agent->account_number }}"
+                    readonly data-editable="true" />
+                  <label for="account_number">Account Number</label>
+                </div>
+              </div>
+              <div class="col-md-6">
+                <div class="form-floating form-floating-outline">
+                  <input type="text" class="form-control text-uppercase" id="ifsc_code" name="ifsc_code" value="{{ $agent->ifsc_code }}"
+                    readonly data-editable="true" maxlength="11" />
+                  <label for="ifsc_code">IFSC Code</label>
+                </div>
+              </div>
+              <div class="col-md-6">
+                <div class="form-floating form-floating-outline">
+                  <input type="text" class="form-control" id="branch_name" name="branch_name" value="{{ $agent->branch_name }}"
+                    readonly data-editable="true" />
+                  <label for="branch_name">Branch Name</label>
+                </div>
+              </div>
+              <div class="col-md-6">
+                <div class="form-floating form-floating-outline">
+                  <input type="text" class="form-control" id="upi_id" name="upi_id" value="{{ $agent->upi_id }}"
+                    readonly data-editable="true" />
+                  <label for="upi_id">UPI ID / VPA</label>
+                </div>
+              </div>
+
+              <div class="col-12 password-edit-section d-none">
+                <hr class="my-2">
+                <h6 class="mb-0 text-heading">Login Password</h6>
+                <small class="text-muted">Leave blank to keep the current password. Fill both fields to set a new password.</small>
+              </div>
+              <div class="col-md-6 password-edit-section d-none">
+                <div class="form-floating form-floating-outline">
+                  <input type="password" class="form-control" id="password" name="password" value=""
+                    placeholder="New password" autocomplete="new-password" data-editable="true" />
+                  <label for="password">New Password</label>
+                </div>
+                <div class="invalid-feedback d-block" id="passwordError"></div>
+              </div>
+              <div class="col-md-6 password-edit-section d-none">
+                <div class="form-floating form-floating-outline">
+                  <input type="password" class="form-control" id="password_confirmation" name="password_confirmation" value=""
+                    placeholder="Confirm new password" autocomplete="new-password" data-editable="true" />
+                  <label for="password_confirmation">Confirm New Password</label>
+                </div>
+                <div class="invalid-feedback d-block" id="passwordConfirmationError"></div>
               </div>
             </div>
             <div class="mt-6 d-flex flex-wrap align-items-center gap-3 d-none" id="accountFormActions">

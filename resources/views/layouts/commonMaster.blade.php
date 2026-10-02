@@ -31,7 +31,10 @@
   $adminTitle = SettingsHelper::get('admin_title', config('variables.templateName', 'Loan App'));
   $adminSubtitle = SettingsHelper::get('admin_subtitle', config('variables.templateSuffix', 'Loan Management System'));
   $adminFavicon = SettingsHelper::get('admin_favicon');
-  $primaryColor = SettingsHelper::get('primary_color', '#696cff');
+  $primaryColorCookieName = $isAdminLayout ? 'admin-primaryColor' : 'front-primaryColor';
+  $primaryColor = isset($_COOKIE[$primaryColorCookieName]) && $_COOKIE[$primaryColorCookieName]
+      ? $_COOKIE[$primaryColorCookieName]
+      : SettingsHelper::get('primary_color', '#696cff');
   $secondaryColor = SettingsHelper::get('secondary_color', '#8592a3');
   $themeMode = AppearanceHelper::get('theme_mode', $configData['theme'] ?? 'light');
 
@@ -75,8 +78,8 @@
 
 <html lang="{{ session()->get('locale') ?? app()->getLocale() }}"
   class="{{ $navbarType ?? '' }} {{ $contentLayout ?? '' }} {{ $menuFixed ?? '' }} {{ $menuCollapsed ?? '' }} {{ $footerFixed ?? '' }} {{ $customizerHidden ?? '' }}"
-  dir="{{ $configData['textDirection'] }}" data-skin="{{ $skinName }}" data-assets-path="{{ asset('/assets') . '/' }}"
-  data-base-url="{{ url('/') }}" data-framework="laravel" data-template="{{ $configData['layout'] }}-menu-template"
+  dir="{{ $configData['textDirection'] }}" data-skin="{{ $skinName }}" data-assets-path="{{ Helpers::appWebBasePath() }}assets/"
+  data-base-url="{{ Helpers::appWebBasePath() }}" data-framework="laravel" data-template="{{ $configData['layout'] }}-menu-template"
   data-bs-theme="{{ $themeMode }}" @if ($isAdminLayout && $semiDarkEnabled) data-semidark-menu="true" @endif>
 
 <head>
@@ -202,7 +205,9 @@
       left: 0;
       width: 100%;
       height: 100%;
-      background: #fff; /* Solid white to hide menu during full page reload */
+      background: rgba(255, 255, 255, 0.6) !important; /* Blur background instead of solid white */
+      backdrop-filter: blur(15px);
+      -webkit-backdrop-filter: blur(15px);
       display: flex;
       justify-content: center;
       align-items: center;
@@ -211,21 +216,23 @@
     }
 
     [data-bs-theme="dark"] .page-loader {
-      background: #1e1e2e; /* Solid dark color to hide menu during full page reload */
+      background: rgba(30, 30, 46, 0.6) !important; /* Blur background instead of solid dark */
+      backdrop-filter: blur(15px);
+      -webkit-backdrop-filter: blur(15px);
     }
 
     /* Transition loader style (when switching menus) - translucent with blur */
     .page-loader.transition-loading {
-      background: rgba(255, 255, 255, 0.45) !important;
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
+      background: rgba(255, 255, 255, 0.6) !important;
+      backdrop-filter: blur(15px);
+      -webkit-backdrop-filter: blur(15px);
       z-index: 999; /* Below the sidebar overlay but above main content */
     }
 
     [data-bs-theme="dark"] .page-loader.transition-loading {
-      background: rgba(30, 30, 46, 0.45) !important;
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
+      background: rgba(30, 30, 46, 0.6) !important;
+      backdrop-filter: blur(15px);
+      -webkit-backdrop-filter: blur(15px);
     }
 
     /* Exclude the sidebar/sidemenu from being covered/blurred on desktop during transition */

@@ -240,14 +240,14 @@
     <div class="public-page-container">
         <div class="public-page-card">
             <div class="public-page-header">
-                <h1>Account Deletion Request</h1>
-                <p>Manage your account and data privacy</p>
+                <h1>Loan App — Account Deletion</h1>
+                <p>Request removal of your account and personal data</p>
             </div>
             
             <div class="public-page-content">
                 <div class="info-box">
                     <h3><i class="ri-information-line"></i> About Account Deletion</h3>
-                    <p>We respect your right to privacy and data control. If you wish to delete your account and all associated data from our system, please submit the form below.</p>
+                    <p>As a {{ config('variables.templateName') }} loan app user, you can request deletion of your account and associated personal data. Submit the form below and our admin team will review your request.</p>
                 </div>
 
                 <div class="warning-box">
@@ -256,7 +256,8 @@
                     <ul style="margin-top: 1rem; padding-left: 1.5rem;">
                         <li>Account deletion is permanent and cannot be undone</li>
                         <li>All your personal data will be permanently removed from our servers</li>
-                        <li>Any pending transactions or loans must be settled before deletion</li>
+                        <li>Any active or pending loans must be fully settled before deletion</li>
+                        <li>EMI records may be retained as required by financial regulations</li>
                         <li>You will lose access to all services and features</li>
                         <li>The deletion process may take up to 30 days to complete</li>
                         <li>Our team will verify your identity before processing the request</li>
@@ -269,7 +270,9 @@
                 <div class="deletion-form">
                     <div id="successAlert" class="alert alert-success">
                         <i class="ri-checkbox-circle-line"></i>
-                        <strong>Request Submitted!</strong> Your account deletion request has been received. Our team will contact you within 24-48 hours for verification.
+                        <strong>Request Submitted!</strong>
+                        <span id="successMessage">Your account deletion request has been received. Our team will contact you within 24–48 hours for verification.</span>
+                        <div id="requestNumberBox" class="mt-2 fw-semibold" style="display:none;">Reference: <span id="requestNumber"></span></div>
                     </div>
 
                     <div id="errorAlert" class="alert alert-error">
@@ -291,7 +294,7 @@
 
                         <div class="form-group">
                             <label for="mobile">Registered Mobile Number <span class="required">*</span></label>
-                            <input type="tel" id="mobile" name="mobile" class="form-control" required placeholder="Enter your registered mobile number">
+                            <input type="tel" id="mobile" name="mobile" class="form-control" required placeholder="10-digit mobile number registered in the app" maxlength="15">
                         </div>
 
                         <div class="form-group">
@@ -317,17 +320,23 @@
 
                 <div class="info-box" style="margin-top: 2rem;">
                     <h3><i class="ri-question-line"></i> Need Help?</h3>
-                    <p>If you have any questions about the account deletion process or our data policies, please don't hesitate to contact our support team at <a href="mailto:{{ get_setting('company_email', get_setting('support_email', 'support@' . request()->getHost())) }}" style="color: #696cff; text-decoration: none; font-weight: 500;">{{ get_setting('company_email', get_setting('support_email', 'support@' . request()->getHost())) }}</a></p>
+                    <p>If you have any questions about the account deletion process or our data policies, please contact our support team at <a href="mailto:{{ $supportEmail }}" style="color: #696cff; text-decoration: none; font-weight: 500;">{{ $supportEmail }}</a></p>
                 </div>
             </div>
             
             <div class="public-page-footer">
-                <a href="{{ route('login') }}" class="back-to-login">
-                    <i class="ri-arrow-left-line"></i>
-                    Back to Login
-                </a>
+                <div class="d-flex flex-wrap justify-content-center gap-2 mb-3">
+                    <a href="{{ route('client.login') }}" class="back-to-login">
+                        <i class="ri-smartphone-line"></i>
+                        Customer App Login
+                    </a>
+                    <a href="{{ url('/login') }}" class="back-to-login" style="background: #566a7f;">
+                        <i class="ri-admin-line"></i>
+                        Admin Login
+                    </a>
+                </div>
                 <div class="footer-text">
-                    &copy; {{ date('Y') }} <a href="{{ get_setting('company_website', url('/')) }}" target="_blank" style="color: #696cff; text-decoration: none; font-weight: 500;">{{ get_setting('company_name', config('app.name')) }}</a> - All rights reserved.
+                    &copy; {{ date('Y') }} <a href="https://codepluse.com/" target="_blank" style="color: #696cff; text-decoration: none; font-weight: 500;">Codepluse Gen pvt Ltd</a> - All rights reserved.
                 </div>
             </div>
         </div>
@@ -336,42 +345,55 @@
     <script>
         document.getElementById('deletionForm').addEventListener('submit', function(e) {
             e.preventDefault();
-            
+
             const submitBtn = document.getElementById('submitBtn');
             const successAlert = document.getElementById('successAlert');
             const errorAlert = document.getElementById('errorAlert');
-            
-            // Hide alerts
+            const requestNumberBox = document.getElementById('requestNumberBox');
+
             successAlert.style.display = 'none';
             errorAlert.style.display = 'none';
-            
-            // Check if required fields are filled
-            const fullName = document.getElementById('full_name').value.trim();
-            const email = document.getElementById('email').value.trim();
-            const mobile = document.getElementById('mobile').value.trim();
-            
-            if (!fullName || !email || !mobile) {
-                errorAlert.style.display = 'block';
-                document.getElementById('errorMessage').textContent = 'Please fill in all required fields.';
-                errorAlert.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                return;
-            }
-            
-            // Disable button temporarily
+            requestNumberBox.style.display = 'none';
+
+            const formData = new FormData(this);
+
             submitBtn.disabled = true;
             submitBtn.innerHTML = '<i class="ri-loader-4-line"></i> Submitting...';
-            
-            // Simulate submission delay for better UX
-            setTimeout(() => {
-                // Show success message
+
+            fetch('{{ route('public.account-deletion.store') }}', {
+                method: 'POST',
+                headers: {
+                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content,
+                    'Accept': 'application/json',
+                },
+                body: formData
+            })
+            .then(async (response) => {
+                const data = await response.json();
+                if (!response.ok) {
+                    throw new Error(data.message || 'Something went wrong. Please try again.');
+                }
+                return data;
+            })
+            .then((data) => {
+                document.getElementById('successMessage').textContent = data.message;
+                if (data.request_number) {
+                    document.getElementById('requestNumber').textContent = data.request_number;
+                    requestNumberBox.style.display = 'block';
+                }
                 successAlert.style.display = 'block';
                 this.reset();
                 successAlert.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                
-                // Re-enable button
+            })
+            .catch((err) => {
+                errorAlert.style.display = 'block';
+                document.getElementById('errorMessage').textContent = err.message;
+                errorAlert.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            })
+            .finally(() => {
                 submitBtn.disabled = false;
                 submitBtn.innerHTML = '<i class="ri-send-plane-fill"></i> Submit Deletion Request';
-            }, 800);
+            });
         });
     </script>
 </body>

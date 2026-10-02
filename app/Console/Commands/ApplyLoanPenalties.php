@@ -44,11 +44,7 @@ class ApplyLoanPenalties extends Command
 
                 $loanAccount = $emi->loanAccount;
 
-                // Resolve penalty settings: use global if set, otherwise fallback to loan account settings
-                $penaltyAmount = ($penaltyConfig->charge_value > 0) 
-                    ? $penaltyConfig->charge_value 
-                    : ($loanAccount->penalty ?? 0);
-
+                // Resolve grace days
                 $graceDays = ($penaltyConfig->eligibility_days !== null)
                     ? $penaltyConfig->eligibility_days
                     : ($loanAccount->grace_period_days ?? 0);
@@ -65,7 +61,11 @@ class ApplyLoanPenalties extends Command
                     return;
                 }
 
-                $penalty = round($penaltyAmount, 2);
+                $penalty = $penaltyConfig->calculatePenaltyForEmi($emi, $loanAccount);
+
+                if ($penalty <= 0) {
+                    return;
+                }
 
                 // ✅ Update EMI
                 $emi->penalty_amount = $penalty;

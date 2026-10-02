@@ -13,6 +13,8 @@ use App\Models\Emi;
 use Illuminate\Database\Eloquent\Builder;
 use App\Models\EmiFollowup;
 use App\Models\AgentActivity;
+use App\Models\Agent;
+use App\Models\User;
 use App\Services\PushNotificationService;
 use App\Models\AgentNotification;
 
@@ -442,6 +444,9 @@ class EmiPaymentControllerApi extends Controller
                 $statusBadge = 'Paid';
                 $statusColor = 'success';
                 $paidDate = $emi->paid_date ? \Carbon\Carbon::parse($emi->paid_date)->format('d-m-Y') : null;
+            } elseif ($emi->status === 'closed') {
+                $statusBadge = 'Closed';
+                $statusColor = 'secondary';
             } elseif ($emi->status === 'partial') {
                 $statusBadge = 'Partial';
                 $statusColor = 'warning';
@@ -919,7 +924,16 @@ class EmiPaymentControllerApi extends Controller
      */
     public function notifications(Request $request)
     {
-        $agentId = Auth::user()->id;
+        $agent = $this->authenticatedAgent();
+        if (! $agent) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Agent account not found.',
+            ], 403);
+        }
+
+        $agentId = (int) $agent->id;
+        $ownerIds = $this->notificationOwnerIds($agent);
         $today = now()->toDateString();
         $now = now();
         $time = now();
@@ -929,7 +943,7 @@ class EmiPaymentControllerApi extends Controller
         $notifications = [];
 
         // 0. BROADCAST NOTIFICATIONS - From admin panel
-        $broadcastNotifications = \App\Models\AgentNotification::where('agent_id', $agentId)
+        $broadcastNotifications = \App\Models\AgentNotification::whereIn('agent_id', $ownerIds)
             ->where('notification_type', 'broadcast')
             ->latest('created_at')
             ->get();
@@ -950,10 +964,14 @@ class EmiPaymentControllerApi extends Controller
             ];
         }
 
-        // 0.5. STORED PUSH NOTIFICATIONS - followup reminders, visit reminders, unresolved alerts, case assignments
-        $storedNotifications = \App\Models\AgentNotification::where('agent_id', $agentId)
-            ->whereIn('notification_type', ['followup_reminder', 'appointment_visit_reminder', 'unresolved_cases_alert', 'case_assigned'])
+        // 0.5. STORED PUSH / INBOX ROWS
+        // Skip mark-as-read stubs (empty title) so they do not hide real push items.
+        $storedNotifications = \App\Models\AgentNotification::whereIn('agent_id', $ownerIds)
+            ->where('notification_type', '!=', 'broadcast')
+            ->whereNotNull('title')
+            ->where('title', '!=', '')
             ->latest('created_at')
+            ->limit(200)
             ->get();
 
         // Pre-load EMI data for stored notifications that have an emi_id in action_data
@@ -981,7 +999,8 @@ class EmiPaymentControllerApi extends Controller
                 'icon' => $stored->icon,
                 'title' => $stored->title,
                 'message' => $stored->message,
-                'customer_name' => $storedClient?->client_name,
+                'customer_name' => $storedClient?->client_name
+                    ?? ($stored->action_data['customer_name'] ?? $stored->action_data['client_name'] ?? null),
                 'loan_account_number' => $storedEmi?->loanAccount?->account_number,
                 'time' => $stored->created_at->format('h:i A'),
                 'timestamp' => $stored->created_at->toIso8601String(),
@@ -989,7 +1008,10 @@ class EmiPaymentControllerApi extends Controller
                 'action_type' => match ($stored->notification_type) {
                     'appointment_visit_reminder' => 'start_visit',
                     'unresolved_cases_alert' => 'view_unactioned_cases',
-                    default => 'open_followup',
+                    'check_in_success', 'check_out_success' => 'none',
+                    'case_assigned' => 'open_case',
+                    'followup_scheduled', 'followup_reminder' => 'open_followup',
+                    default => $stored->action_data['screen'] ?? 'none',
                 },
                 'is_read' => $stored->read_at !== null,
             ];
@@ -1186,34 +1208,10 @@ class EmiPaymentControllerApi extends Controller
             ];
         }
 
-        // 5. CHECK-IN/CHECK-OUT SUCCESS - Recent attendance confirmations (last 12 hours)
-        $recentAttendance = \App\Models\AgentActivity::where('agent_id', $agentId)
-            ->whereIn('type', ['check_in', 'check_out'])
-            ->where('action_at', '>=', now()->subHours(12))
-            ->latest('action_at')
-            ->limit(2)
-            ->get();
-
-        foreach ($recentAttendance as $attendance) {
-            $notifications[] = [
-                'id' => 'attendance_' . $attendance->id,
-                'type' => $attendance->type === 'check_in' ? 'check_in_success' : 'check_out_success',
-                'priority' => 'low',
-                'icon' => $attendance->type === 'check_in' ? 'login' : 'logout',
-                'title' => $attendance->type === 'check_in' ? 'Checked In' : 'Checked Out',
-                'message' => $attendance->description ?? ($attendance->type === 'check_in' ? 'You have successfully checked in' : 'You have successfully checked out'),
-                'customer_name' => null,
-                'loan_account_number' => null,
-                'time' => $attendance->action_at->format('h:i A'),
-                'timestamp' => $attendance->action_at->toIso8601String(),
-                'action_data' => null,
-                'action_type' => 'none',
-                'is_read' => false,
-            ];
-        }
+        // 5. CHECK-IN/CHECK-OUT SUCCESS - Removed manual generation as it's fetched from AgentNotification
 
         // Get read notifications for this agent
-        $readNotifications = \App\Models\AgentNotification::where('agent_id', $agentId)
+        $readNotifications = \App\Models\AgentNotification::whereIn('agent_id', $ownerIds)
             ->whereNotNull('read_at')
             ->get()
             ->groupBy('notification_type')
@@ -1222,14 +1220,16 @@ class EmiPaymentControllerApi extends Controller
             })
             ->toArray();
 
-        // Mark each notification with is_read status
+        // Mark generated (non-stored) rows as read from tracking records.
+        // Stored rows already carry is_read from read_at — do not overwrite that.
         $notifications = array_map(function ($notification) use ($readNotifications) {
-            $type = $notification['type'];
-            $id = $notification['id'];
-
-            // Check if this notification has been marked as read
-            $isRead = isset($readNotifications[$type]) && in_array($id, $readNotifications[$type]);
-            $notification['is_read'] = $isRead;
+            if (array_key_exists('is_read', $notification)) {
+                return $notification;
+            }
+            $type = $notification['type'] ?? '';
+            $id = $notification['id'] ?? '';
+            $notification['is_read'] = isset($readNotifications[$type])
+                && in_array($id, $readNotifications[$type], true);
 
             return $notification;
         }, $notifications);
@@ -1240,26 +1240,47 @@ class EmiPaymentControllerApi extends Controller
             $notifications = array_values($notifications);
         }
 
-        // Sort by priority and timestamp (high priority first, then by time)
-        $priorityOrder = ['high' => 1, 'medium' => 2, 'low' => 3];
+        // Inbox order: unread first, then newest. Priority-first buried push
+        // rows (chit_approved, kyc, loan, ...) under hundreds of case_assigned.
+        $priorityOrder = ['high' => 1, 'medium' => 2, 'normal' => 2, 'low' => 3];
         usort($notifications, function ($a, $b) use ($priorityOrder) {
-            $priorityCompare = $priorityOrder[$a['priority']] <=> $priorityOrder[$b['priority']];
-            if ($priorityCompare !== 0) {
-                return $priorityCompare;
+            $unreadA = ! empty($a['is_read']) ? 1 : 0;
+            $unreadB = ! empty($b['is_read']) ? 1 : 0;
+            if ($unreadA !== $unreadB) {
+                return $unreadA <=> $unreadB;
             }
-            return strtotime($b['timestamp']) <=> strtotime($a['timestamp']);
+            $timeA = strtotime((string) ($a['timestamp'] ?? '')) ?: 0;
+            $timeB = strtotime((string) ($b['timestamp'] ?? '')) ?: 0;
+            if ($timeA !== $timeB) {
+                return $timeB <=> $timeA;
+            }
+            $pa = $priorityOrder[$a['priority'] ?? 'medium'] ?? 2;
+            $pb = $priorityOrder[$b['priority'] ?? 'medium'] ?? 2;
+
+            return $pa <=> $pb;
         });
 
         $unreadCount = count(array_filter($notifications, fn($n) => !$n['is_read']));
         $totalCount = count($notifications);
 
+        $page = $request->input('page', 1);
+        $perPage = $request->input('per_page', 20);
+        $offset = ($page - 1) * $perPage;
+        $paginatedNotifications = array_slice($notifications, $offset, $perPage);
+
         return response()->json([
             'success' => true,
             'filter' => $filter,
-            'count' => count($notifications),
+            'count' => count($paginatedNotifications),
             'unread_count' => $unreadCount,
             'total_count' => $totalCount,
-            'notifications' => $notifications,
+            'notifications' => $paginatedNotifications,
+            'meta' => [
+                'current_page' => (int) $page,
+                'last_page' => (int) ceil($totalCount / $perPage),
+                'per_page' => (int) $perPage,
+                'total' => $totalCount,
+            ]
         ]);
     }
 
@@ -1294,32 +1315,45 @@ class EmiPaymentControllerApi extends Controller
      */
     public function markAsRead(Request $request)
     {
+        $agent = $this->authenticatedAgent();
+        if (! $agent) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Agent account not found.',
+            ], 403);
+        }
+
         $request->validate([
             'notification_id' => 'required|string',
             'notification_type' => 'required|string',
         ]);
 
-        $agentId = Auth::user()->id;
+        $ownerIds = $this->notificationOwnerIds($agent);
 
         // Handle broadcast notifications
         if ($request->notification_type === 'broadcast') {
-            // For broadcast notifications, use notification_id to find and mark as read
-            \App\Models\AgentNotification::where('agent_id', $agentId)
+            \App\Models\AgentNotification::whereIn('agent_id', $ownerIds)
                 ->where('notification_type', 'broadcast')
                 ->where('notification_id', $request->notification_id)
                 ->update(['read_at' => now()]);
         } else {
-            // For system notifications, create tracking record
-            \App\Models\AgentNotification::updateOrCreate(
-                [
-                    'agent_id' => $agentId,
-                    'notification_type' => $request->notification_type,
-                    'notification_id' => $request->notification_id,
-                ],
-                [
-                    'read_at' => now(),
-                ]
-            );
+            $updated = \App\Models\AgentNotification::whereIn('agent_id', $ownerIds)
+                ->where('notification_type', $request->notification_type)
+                ->where('notification_id', $request->notification_id)
+                ->update(['read_at' => now()]);
+
+            if ($updated === 0) {
+                \App\Models\AgentNotification::updateOrCreate(
+                    [
+                        'agent_id' => $agent->id,
+                        'notification_type' => $request->notification_type,
+                        'notification_id' => $request->notification_id,
+                    ],
+                    [
+                        'read_at' => now(),
+                    ]
+                );
+            }
         }
 
         return response()->json([
@@ -1334,7 +1368,16 @@ class EmiPaymentControllerApi extends Controller
      */
     public function markAllAsRead(Request $request)
     {
-        $agentId = Auth::user()->id;
+        $agent = $this->authenticatedAgent();
+        if (! $agent) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Agent account not found.',
+            ], 403);
+        }
+
+        $agentId = (int) $agent->id;
+        $ownerIds = $this->notificationOwnerIds($agent);
         $today = now()->toDateString();
         $now = now();
 
@@ -1446,15 +1489,8 @@ class EmiPaymentControllerApi extends Controller
             );
         }
 
-        // Mark ALL stored notification types as read (broadcast + push notifications)
-        \App\Models\AgentNotification::where('agent_id', $agentId)
-            ->whereIn('notification_type', [
-                'broadcast',
-                'followup_reminder',
-                'appointment_visit_reminder',
-                'unresolved_cases_alert',
-                'case_assigned',
-            ])
+        // Mark ALL stored notification types as read
+        \App\Models\AgentNotification::whereIn('agent_id', $ownerIds)
             ->whereNull('read_at')
             ->update(['read_at' => now()]);
 
@@ -1476,11 +1512,17 @@ class EmiPaymentControllerApi extends Controller
             'notification_type' => 'required|string',
         ]);
 
-        $agentId = Auth::user()->id;
+        $agent = $this->authenticatedAgent();
+        if (! $agent) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Agent account not found.',
+            ], 403);
+        }
+
         $notificationType = $request->notification_type;
 
-        // Delete the specific notification
-        $deleted = \App\Models\AgentNotification::where('agent_id', $agentId)
+        $deleted = \App\Models\AgentNotification::whereIn('agent_id', $this->notificationOwnerIds($agent))
             ->where('notification_type', $notificationType)
             ->where('notification_id', $notificationId)
             ->delete();
@@ -1508,11 +1550,15 @@ class EmiPaymentControllerApi extends Controller
      */
     public function clearAllNotifications(Request $request)
     {
-        $agentId = Auth::user()->id;
+        $agent = $this->authenticatedAgent();
+        if (! $agent) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Agent account not found.',
+            ], 403);
+        }
 
-        // Delete all read notifications (broadcast + system tracking records)
-        $deletedCount = \App\Models\AgentNotification::where('agent_id', $agentId)
-            ->whereNotNull('read_at') // Only delete read notifications
+        $deletedCount = \App\Models\AgentNotification::whereIn('agent_id', $this->notificationOwnerIds($agent))
             ->delete();
 
         return response()->json([
@@ -1520,6 +1566,41 @@ class EmiPaymentControllerApi extends Controller
             'message' => 'All read notifications cleared successfully',
             'deleted_count' => $deletedCount,
         ]);
+    }
+
+    private function authenticatedAgent(): ?Agent
+    {
+        $user = auth('agent')->user()
+            ?? request()->user('agent')
+            ?? Auth::user();
+
+        if ($user instanceof Agent) {
+            return $user;
+        }
+
+        if ($user instanceof User) {
+            return $user->agent ?: Agent::where('user_id', $user->id)->first();
+        }
+
+        return null;
+    }
+
+    /**
+     * Inbox rows may have been stored with agents.id or users.id.
+     *
+     * @return list<int>
+     */
+    private function notificationOwnerIds(?Agent $agent = null): array
+    {
+        $agent = $agent ?: $this->authenticatedAgent();
+        if (! $agent) {
+            return [];
+        }
+
+        return array_values(array_unique(array_filter([
+            (int) $agent->id,
+            (int) $agent->user_id,
+        ])));
     }
 
 }

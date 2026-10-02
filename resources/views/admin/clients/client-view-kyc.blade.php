@@ -32,18 +32,25 @@
 @endsection
 
 @section('page-script')
+<script>
+  window.isAdmin = @json(auth()->user()->hasRole('Admin') || auth()->user()->hasRole('Super Admin') || auth()->user()->hasRole('Staff'));
+</script>
 @vite([
 'resources/assets/js/modal-edit-user.js',
 'resources/assets/js/app-user-view.js',
 'resources/assets/js/client-view-account.js',
 'resources/assets/custom-js/emi-calculator.js',
-'resources/assets/custom-js/loan-applications.js'
+'resources/assets/custom-js/loan-applications.js',
+'resources/assets/custom-js/chit-applications.js',
+'resources/assets/custom-js/chit-need-month.js'
 ])
 @endsection
 
 @section('content')
 
-@php($kyc = $client->kycDetail ?? $client->kyc ?? null)
+@php
+  $kyc = $client->kycDetail ?? $client->kyc ?? null;
+@endphp
 
 <!-- Success/Error Alerts -->
 @if(session('success'))
@@ -66,13 +73,16 @@
       <li class="nav-item"><a class="nav-link" href="{{ url('/clients/view/account/'.$client->id) }}"><i class="icon-base ri ri-user-3-line me-1_5"></i>Account</a></li>
       <li class="nav-item"><a class="nav-link active" href="javascript:void(0);"><i class="icon-base ri ri-shield-check-line me-1_5"></i>KYC</a></li>
       <li class="nav-item"><a class="nav-link" href="{{ url('/client/view/loans/'.$client->id) }}"><i class="icon-base ri ri-file-list-3-line me-1_5"></i>Loans</a></li>
+      <li class="nav-item"><a class="nav-link" href="{{ url('/client/view/chits/'.$client->id) }}"><i class="icon-base ri ri-group-2-line me-1_5"></i>Chits</a></li>
+      <li class="nav-item"><a class="nav-link" href="{{ url('/clients/view/ledger/'.$client->id) }}"><i class="icon-base ri ri-wallet-3-line me-1_5"></i>Ledger</a></li>
+      <li class="nav-item"><a class="nav-link" href="{{ url('/clients/view/notifications/'.$client->id) }}"><i class="icon-base ri ri-notification-3-line me-1_5"></i>Notifications</a></li>
     </ul>
   </div>
   <div class="d-flex gap-2 w-100 w-sm-auto ms-md-auto">
-    <!-- <a href="{{ route('client-management-add') }}" class="btn btn-sm btn-outline-primary  w-sm-auto d-inline-flex align-items-center justify-content-center">
-      <i class="icon-base ri ri-user-add-line me-1"></i>
-      <span>Add Client</span>
-    </a> -->
+    <button type="button" class="btn btn-sm btn-primary w-sm-auto d-inline-flex align-items-center justify-content-center" data-bs-toggle="modal" data-bs-target="#editKycModal">
+      <i class="icon-base ri ri-edit-box-line me-1"></i>
+      <span>Add/Edit KYC</span>
+    </button>
     <a href="{{ route('client-management') }}" class="btn btn-sm btn-outline-secondary  w-sm-auto d-inline-flex align-items-center justify-content-center">
       <i class="icon-base ri ri-arrow-left-line me-1"></i>
       <span>Back to Clients</span>
@@ -88,18 +98,40 @@
       <div class="card-body pt-12">
         <div class="user-avatar-section">
           <div class=" d-flex align-items-center flex-column">
-            @if(optional($kyc)->selfie_image && substr(optional($kyc)->selfie_image, 0, 5) === 'data:')
-              {{-- Base64 encoded image --}}
-              <img class="img-fluid rounded mb-4" src="{{ $kyc->selfie_image }}" height="120" width="120"
-                alt="User avatar" style="object-fit: cover;" />
-            @elseif(optional($kyc)->selfie_image)
-              {{-- File path image --}}
-              <img class="img-fluid rounded mb-4" src="{{ asset('storage/' . $kyc->selfie_image) }}" height="120" width="120"
-                alt="User avatar" style="object-fit: cover;" />
+            @php
+              $selfieSrc = null;
+              if (optional($kyc)->selfie_image && substr(optional($kyc)->selfie_image, 0, 5) === 'data:') {
+                $selfieSrc = $kyc->selfie_image;
+              } elseif (optional($kyc)->selfie_image) {
+                $selfieSrc = asset('storage/' . $kyc->selfie_image);
+              }
+            @endphp
+            @if($selfieSrc)
+              <a href="{{ $selfieSrc }}" target="_blank" rel="noopener" title="View profile photo">
+                <img class="img-fluid rounded mb-3" src="{{ $selfieSrc }}" height="120" width="120"
+                  alt="User avatar" style="object-fit: cover;" />
+              </a>
+              <div class="d-flex align-items-center justify-content-center gap-2 mb-3">
+                <a href="{{ $selfieSrc }}" target="_blank" class="btn btn-sm btn-icon btn-primary rounded-circle" title="View profile">
+                  <i class="ri-eye-line"></i>
+                </a>
+                <form action="{{ route('verification-kyc-update', $client->id) }}" method="POST" enctype="multipart/form-data" class="d-inline-block">
+                  @csrf
+                  <label class="btn btn-sm btn-icon btn-outline-success rounded-circle mb-0 cursor-pointer" title="Reupload profile photo">
+                    <i class="ri-upload-2-line"></i>
+                    <input type="file" name="selfie_image" class="d-none" accept="image/*" onchange="this.form.submit()">
+                  </label>
+                </form>
+              </div>
             @else
-              {{-- Default avatar --}}
-              <img class="img-fluid rounded mb-4" src="{{asset('assets/img/avatars/1.png')}}" height="120" width="120"
+              <img class="img-fluid rounded mb-2" src="{{asset('assets/img/avatars/1.png')}}" height="120" width="120"
                 alt="User avatar" />
+              <form action="{{ route('verification-kyc-update', $client->id) }}" method="POST" enctype="multipart/form-data" class="d-inline-block mb-3">
+                @csrf
+                <div class="input-group input-group-sm">
+                  <input type="file" name="selfie_image" class="form-control" accept="image/*" required onchange="this.form.submit()">
+                </div>
+              </form>
             @endif
             <div class="user-info text-center">
               <h5>{{ $client->client_name ?? 'Client Name' }}</h5>
@@ -134,14 +166,19 @@
           </div>
         </div>
         <div class="d-flex flex-column gap-4">
-          <!-- @if($verificationStatus === 'verified')
+          @if($verificationStatus === 'verified')
             <div class="border rounded-3 p-4 bg-label-primary">
               <h6 class="mb-3">Quick Actions</h6>
-              <button type="button" class="btn btn-primary w-100" data-bs-toggle="modal" data-bs-target="#modalApplyLoan">
-                <i class="ri-add-line me-1"></i> Apply for Loan
-              </button>
+              <div class="d-flex flex-column flex-sm-row gap-2">
+                <button type="button" class="btn btn-primary w-100" data-bs-toggle="modal" data-bs-target="#modalApplyLoan">
+                  <i class="ri-add-line me-1"></i> Apply for Loan
+                </button>
+                <button type="button" class="btn btn-outline-primary w-100" data-bs-toggle="modal" data-bs-target="#modalApplyChit">
+                  <i class="ri-add-line me-1"></i> Apply for Chit
+                </button>
+              </div>
             </div>
-          @endif -->
+          @endif
 
           <div class="border rounded-3 p-4">
             <small class="text-primary text-uppercase fw-semibold d-block mb-3">Identity Details</small>
@@ -185,6 +222,29 @@
 
   <!-- User Content -->
   <div class="col-xl-8 col-lg-7 col-md-7 order-0 order-md-1">
+    @if(!$kyc || !$kyc->selfie_image || !$kyc->aadhaar_image || !$kyc->aadhaar_image_back)
+      <div class="alert alert-warning alert-dismissible d-flex align-items-center mb-6" role="alert">
+        <span class="alert-icon text-warning me-2">
+          <i class="icon-base ri ri-error-warning-line icon-22px"></i>
+        </span>
+        <div>
+          <h6 class="alert-heading mb-1 fw-bold">Missing Mandatory Documents</h6>
+          <span>Selfie, Aadhaar Front, and Aadhaar Back must be uploaded to approve KYC. Missing: 
+            <strong>
+              @php
+                $missing = [];
+                if (!$kyc || !$kyc->selfie_image) $missing[] = 'Selfie';
+                if (!$kyc || !$kyc->aadhaar_image) $missing[] = 'Aadhaar Front';
+                if (!$kyc || !$kyc->aadhaar_image_back) $missing[] = 'Aadhaar Back';
+                echo implode(', ', $missing);
+              @endphp
+            </strong>.
+          </span>
+        </div>
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+      </div>
+    @endif
+
     <!-- KYC Content -->
     <div class="card mb-6">
       <h5 class="card-header">KYC Documents</h5>
@@ -232,26 +292,54 @@
                     <div class="col-md-6">
                       <p class="small text-muted mb-1 text-center">Front Side</p>
                       @if(optional($kyc)->aadhaar_image)
-                        <div class="text-center bg-light rounded-3 p-2 d-flex align-items-center justify-content-center" style="min-height: 200px;">
-                          <img src="{{ asset('storage/' . $kyc->aadhaar_image) }}" class="img-fluid rounded shadow-sm" style="max-height: 250px; object-fit: contain;" alt="Aadhar Front" />
+                        <div class="text-center bg-light rounded-3 p-2 d-flex flex-column align-items-center justify-content-center" style="min-height: 200px;">
+                          <a href="{{ asset('storage/' . $kyc->aadhaar_image) }}" target="_blank" rel="noopener" title="View Aadhaar Front">
+                            <img src="{{ asset('storage/' . $kyc->aadhaar_image) }}" class="img-fluid rounded shadow-sm" style="max-height: 220px; object-fit: contain;" alt="Aadhar Front" />
+                          </a>
+                          <form action="{{ route('verification-kyc-update', $client->id) }}" method="POST" enctype="multipart/form-data" class="mt-2 w-100 px-2">
+                            @csrf
+                            <label class="btn btn-sm btn-outline-success w-100 mb-0">
+                              <i class="ri-upload-2-line me-1"></i> Reupload Front
+                              <input type="file" name="aadhaar_image" class="d-none" accept="image/*" onchange="this.form.submit()">
+                            </label>
+                          </form>
                         </div>
                       @else
-                        <div class="text-center py-5 border rounded">
+                        <div class="text-center py-4 border rounded px-3">
                           <i class="ri-image-line text-muted" style="font-size: 32px;"></i>
-                          <p class="text-muted mt-2 mb-0 small">No Front View</p>
+                          <div class="mt-2 text-danger small fw-semibold"><i class="ri-error-warning-line me-1"></i> Aadhaar Front is missing</div>
+                          <p class="text-muted mt-2 mb-2 small">Upload Aadhaar Front</p>
+                          <form action="{{ route('verification-kyc-update', $client->id) }}" method="POST" enctype="multipart/form-data">
+                            @csrf
+                            <input type="file" name="aadhaar_image" class="form-control form-control-sm mb-2" accept="image/*" required onchange="this.form.submit()">
+                          </form>
                         </div>
                       @endif
                     </div>
                     <div class="col-md-6">
                       <p class="small text-muted mb-1 text-center">Back Side</p>
                       @if(optional($kyc)->aadhaar_image_back)
-                        <div class="text-center bg-light rounded-3 p-2 d-flex align-items-center justify-content-center" style="min-height: 200px;">
-                          <img src="{{ asset('storage/' . $kyc->aadhaar_image_back) }}" class="img-fluid rounded shadow-sm" style="max-height: 250px; object-fit: contain;" alt="Aadhar Back" />
+                        <div class="text-center bg-light rounded-3 p-2 d-flex flex-column align-items-center justify-content-center" style="min-height: 200px;">
+                          <a href="{{ asset('storage/' . $kyc->aadhaar_image_back) }}" target="_blank" rel="noopener" title="View Aadhaar Back">
+                            <img src="{{ asset('storage/' . $kyc->aadhaar_image_back) }}" class="img-fluid rounded shadow-sm" style="max-height: 220px; object-fit: contain;" alt="Aadhar Back" />
+                          </a>
+                          <form action="{{ route('verification-kyc-update', $client->id) }}" method="POST" enctype="multipart/form-data" class="mt-2 w-100 px-2">
+                            @csrf
+                            <label class="btn btn-sm btn-outline-success w-100 mb-0">
+                              <i class="ri-upload-2-line me-1"></i> Reupload Back
+                              <input type="file" name="aadhaar_image_back" class="d-none" accept="image/*" onchange="this.form.submit()">
+                            </label>
+                          </form>
                         </div>
                       @else
-                        <div class="text-center py-5 border rounded">
+                        <div class="text-center py-4 border rounded px-3">
                           <i class="ri-image-line text-muted" style="font-size: 32px;"></i>
-                          <p class="text-muted mt-2 mb-0 small">No Back View</p>
+                          <div class="mt-2 text-danger small fw-semibold"><i class="ri-error-warning-line me-1"></i> Aadhaar Back is missing</div>
+                          <p class="text-muted mt-2 mb-2 small">Upload Aadhaar Back</p>
+                          <form action="{{ route('verification-kyc-update', $client->id) }}" method="POST" enctype="multipart/form-data">
+                            @csrf
+                            <input type="file" name="aadhaar_image_back" class="form-control form-control-sm mb-2" accept="image/*" required onchange="this.form.submit()">
+                          </form>
                         </div>
                       @endif
                     </div>
@@ -301,13 +389,27 @@
                 </div>
                 <div class="tab-pane fade p-2" id="navs-pan-document" role="tabpanel">
                   @if(optional($kyc)->pan_image)
-                    <div class="text-center bg-light rounded-3 p-2 d-flex align-items-center justify-content-center" style="min-height: 200px;">
-                      <img src="{{ asset('storage/' . $kyc->pan_image) }}" class="img-fluid rounded shadow-sm" style="max-height: 250px; object-fit: contain;" alt="PAN Card" />
+                    <div class="text-center bg-light rounded-3 p-2 d-flex flex-column align-items-center justify-content-center" style="min-height: 200px;">
+                      <a href="{{ asset('storage/' . $kyc->pan_image) }}" target="_blank" rel="noopener" title="View PAN">
+                        <img src="{{ asset('storage/' . $kyc->pan_image) }}" class="img-fluid rounded shadow-sm" style="max-height: 220px; object-fit: contain;" alt="PAN Card" />
+                      </a>
+                      <form action="{{ route('verification-kyc-update', $client->id) }}" method="POST" enctype="multipart/form-data" class="mt-2" style="max-width: 250px;">
+                        @csrf
+                        <label class="btn btn-sm btn-outline-success w-100 mb-0">
+                          <i class="ri-upload-2-line me-1"></i> Reupload PAN
+                          <input type="file" name="pan_image" class="d-none" accept="image/*" onchange="this.form.submit()">
+                        </label>
+                      </form>
                     </div>
                   @else
-                    <div class="text-center py-5">
+                    <div class="text-center py-4 border rounded px-3">
                       <i class="ri-image-line text-muted" style="font-size: 48px;"></i>
-                      <p class="text-muted mt-3 mb-0">No document uploaded</p>
+                      <div class="mt-2 text-danger small fw-semibold"><i class="ri-error-warning-line me-1"></i> PAN Card is missing</div>
+                      <p class="text-muted mt-2 mb-2">Upload PAN Card Image</p>
+                      <form action="{{ route('verification-kyc-update', $client->id) }}" method="POST" enctype="multipart/form-data">
+                        @csrf
+                        <input type="file" name="pan_image" class="form-control form-control-sm mx-auto mb-2" style="max-width: 250px;" accept="image/*" required onchange="this.form.submit()">
+                      </form>
                     </div>
                   @endif
                 </div>
@@ -356,6 +458,10 @@
   <!--/ User Content -->
 </div>
 
-@endsection
+@include('admin.clients.modals.modal-edit-kyc')
 
 @include('admin.clients.modals.modal-apply-loan')
+
+@include('admin.clients.modals.modal-apply-chit')
+
+@endsection

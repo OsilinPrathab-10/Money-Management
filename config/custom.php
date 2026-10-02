@@ -13,8 +13,8 @@ return [
         'mySkins' => 'default', // Skin options: 'default', 'bordered'
         'hasSemiDark' => false, // Semi-dark mode: true/false (false by default)
         'myRTLMode' => false, // Right-to-left (RTL) layout: true/false (false by default)
-        'hasCustomizer' => false, // Enable/Disable customizer: true (default) or false
-        'displayCustomizer' => false, // Display customizer UI: true (default) or false
+        'hasCustomizer' => true, // Enable theme switcher + layout customizer
+        'displayCustomizer' => true, // Show layout/menu customization panel
         'contentLayout' => 'wide', // Layout size: 'compact' (container-xxl) or 'wide' (container-fluid)
         'navbarType' => 'sticky', // Navbar type: 'sticky', 'static', or 'hidden' (only for vertical layout)
         'footerFixed' => false, // Footer fixed position: true/false (false by default)

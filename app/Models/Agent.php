@@ -25,7 +25,14 @@ class Agent extends Model
         'pincode',
         'location_id',
         'salary_amount',
+        'monthly_salary',
         'salary_details',
+        'account_holder_name',
+        'bank_name',
+        'account_number',
+        'ifsc_code',
+        'branch_name',
+        'upi_id',
         'status',
         'is_deleted',
     ];
@@ -34,6 +41,18 @@ class Agent extends Model
         'salary_details' => 'array',
         'salary_amount' => 'decimal:2',
     ];
+
+    protected $appends = ['monthly_salary'];
+
+    public function getMonthlySalaryAttribute()
+    {
+        return $this->salary_amount;
+    }
+
+    public function setMonthlySalaryAttribute($value)
+    {
+        $this->attributes['salary_amount'] = $value;
+    }
 
     public function user()
     {

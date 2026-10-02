@@ -24,33 +24,62 @@ class LoanType extends Model
         'loan_type_banner_url',
     ];
 
+    public static function formatImageUrl(?string $path): ?string
+    {
+        if ($path === null || trim((string) $path) === '') {
+            return null;
+        }
+
+        $trimmed = trim((string) $path);
+
+        if (str_starts_with($trimmed, 'http://') || str_starts_with($trimmed, 'https://')) {
+            return $trimmed;
+        }
+
+        $cleanPath = ltrim($trimmed, '/');
+
+        if (str_starts_with($cleanPath, 'app/public/')) {
+            $cleanPath = substr($cleanPath, strlen('app/public/'));
+        }
+
+        if (str_starts_with($cleanPath, 'public/storage/')) {
+            $cleanPath = substr($cleanPath, strlen('public/storage/'));
+        } elseif (str_starts_with($cleanPath, 'storage/')) {
+            $cleanPath = substr($cleanPath, strlen('storage/'));
+        }
+
+        if (str_starts_with($cleanPath, 'uploads/')) {
+            return route('uploads.serve', ['path' => substr($cleanPath, strlen('uploads/'))], true);
+        }
+
+        if (str_starts_with($cleanPath, 'assets/') || str_starts_with($cleanPath, 'images/') || file_exists(public_path($cleanPath))) {
+            return asset($cleanPath);
+        }
+
+        return asset('storage/' . ltrim($cleanPath, '/'));
+    }
+
     public function getLoanTypeIconUrlAttribute()
     {
-        return $this->loan_type_icon
-            ? asset('storage/' . $this->loan_type_icon)
-            : null;
+        return self::formatImageUrl($this->loan_type_icon);
     }
 
     public function getLoanTypeImageUrlAttribute()
     {
-        return $this->loan_type_image
-            ? asset('storage/' . $this->loan_type_image)
-            : null;
+        return self::formatImageUrl($this->loan_type_image);
     }
 
     public function getLoanTypeBannerUrlAttribute()
     {
-        return $this->loan_type_banner
-            ? asset('storage/' . $this->loan_type_banner)
-            : null;
+        return self::formatImageUrl($this->loan_type_banner);
     }
-
-    protected $casts = [
-        'status' => 'boolean',
-    ];
 
     public function products()
     {
         return $this->hasMany(LoanProduct::class, 'loan_type_id');
     }
+
+    protected $casts = [
+        'status' => 'boolean',
+    ];
 }

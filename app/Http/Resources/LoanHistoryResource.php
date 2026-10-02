@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources;
 
+use App\Support\CollectedDocuments;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Carbon\Carbon;
@@ -54,6 +55,39 @@ class LoanHistoryResource extends JsonResource
         $minPrepaymentAmount = round((float) ($this->emi_amount ?? $emiAmount ?? 0), 2);
         $maxPrepaymentAmount = $prepaymentTotal;
 
+        $encodedAccountId = \App\Support\HashId::encode($this->id);
+        $statementUrl = url('/loan/statement/' . ($encodedAccountId ?: $this->id));
+        $adminStatementUrl = url('/emi/statement/print/' . ($encodedAccountId ?: $this->id));
+
+        $application = $this->loanApplication;
+        $disbursement = $application?->disbursementDetail;
+        $collectedDocuments = CollectedDocuments::forLoanDisbursement($disbursement, $application);
+        $generatedDocuments = $this->relationLoaded('clientLoanDocuments')
+            ? $this->clientLoanDocuments
+            : collect();
+        $generatedDocuments = $generatedDocuments
+            ->filter(fn ($doc) => $doc->isVisible())
+            ->map(function ($doc) {
+                $url = $doc->file_url;
+                return [
+                    'type' => $doc->document_type,
+                    'title' => $doc->document_title ?: ucfirst(str_replace('_', ' ', (string) $doc->document_type)),
+                    'file_name' => $doc->file_name,
+                    'file_path' => $doc->file_path,
+                    'file_url' => $url,
+                    'url' => $url,
+                ];
+            })
+            ->values()
+            ->all();
+        $collateralDoc = collect($collectedDocuments)->firstWhere('type', 'collateral_document');
+        $otherDoc = collect($collectedDocuments)->firstWhere('type', 'other_document');
+        $paymentMode = $disbursement
+            ? ((strtoupper((string) $disbursement->bank_name) === 'CASH' || strtoupper((string) $disbursement->bank_account_number) === 'OFFLINE')
+                ? 'cash'
+                : 'bank_transfer')
+            : null;
+
         return [
             'id' => $this->id,
             'account_number' => $this->account_number,
@@ -72,6 +106,31 @@ class LoanHistoryResource extends JsonResource
             'status' => ucfirst($this->status),
             'disbursed_at' => optional($this->disbursed_at)->format('d-m-Y'),
             'closed_at' => optional($this->closed_at)->format('d-m-Y'),
+            'statement_url' => $statementUrl,
+            'statement_view_url' => $statementUrl,
+            'statement_download_url' => $statementUrl,
+            'admin_statement_url' => $adminStatementUrl,
+            'disbursement_details' => [
+                'disbursement_amount' => (float) ($disbursement?->disbursement_amount ?? $this->disbursed_amount),
+                'loan_amount' => (float) $this->loan_amount,
+                'disbursed_at' => optional($disbursement?->disburse_at ?? $this->disbursed_at)?->format('Y-m-d'),
+                'transaction_id' => $disbursement?->transaction_id ?? $this->transaction_id,
+                'utr_number' => $disbursement?->utr_number ?? $this->utr_number,
+                'payment_mode' => $paymentMode,
+                'payment_mode_label' => $paymentMode === 'cash' ? 'Cash' : ($paymentMode === 'bank_transfer' ? 'Bank Transfer' : null),
+                'bank_name' => $disbursement?->bank_name,
+                'account_number' => $disbursement?->bank_account_number,
+                'ifsc_code' => $disbursement?->ifsc_code,
+                'holder_name' => $disbursement?->holder_name,
+                'account_type' => $disbursement?->account_type,
+                'live_photo_url' => CollectedDocuments::url($application?->live_photo),
+                'cash_photo_url' => CollectedDocuments::url($application?->cash_photo),
+                'collateral_document_url' => $collateralDoc['file_url'] ?? null,
+                'other_document_url' => $otherDoc['file_url'] ?? null,
+                'documents' => $collectedDocuments,
+            ],
+            'documents' => array_values(array_merge($collectedDocuments, $generatedDocuments)),
+            'collateral_documents' => $collectedDocuments,
             'emis' => EmiResource::collection($this->whenLoaded('emis')),
             "summary" => [
                 "percentage_complete" => $percentageComplete ?? null,
@@ -79,11 +138,15 @@ class LoanHistoryResource extends JsonResource
                 "emi_paid_count" => $paidEmis ?? null,
                 "total_emis" => $totalEmis ?? null,
                 "emi_amount" => $emiAmount ?? null,
-                    "next_due_date" => $nextDueDate ?? null,
-                    "prepayment" => [
-                        "min_amount" => $minPrepaymentAmount,
-                        "max_amount" => $maxPrepaymentAmount,
-                    ],
+                "next_due_date" => $nextDueDate ?? null,
+                "statement_url" => $statementUrl,
+                "statement_view_url" => $statementUrl,
+                "statement_download_url" => $statementUrl,
+                "admin_statement_url" => $adminStatementUrl,
+                "prepayment" => [
+                    "min_amount" => $minPrepaymentAmount,
+                    "max_amount" => $maxPrepaymentAmount,
+                ],
             ],
         ];
     }

@@ -44,4 +44,41 @@ return [
         'account_id' => env('GALLABOX_ACCOUNT_ID', env('GALLABOX_WORKSPACE_ID')),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | API Hub (Aadhaar / PAN / Bank verification)
+    |--------------------------------------------------------------------------
+    */
+    'apihub' => [
+        'base_url' => rtrim(env('APIHUB_BASE_URL', 'http://apihub.services'), '/'),
+        'client_id' => env('APIHUB_CLIENT_API_ID', env('APIHUB_API_KEY', env('API_KEY'))),
+        'client_secret' => env('APIHUB_CLIENT_API_SECRET', env('APIHUB_API_SECRET', env('SECRET_KEY'))),
+        'mode' => env('APIHUB_API_MODE', env('MODE', 'production')),
+        'use_sandbox' => filter_var(env('APIHUB_USE_SANDBOX', false), FILTER_VALIDATE_BOOLEAN),
+        'aadhaar_send' => env('APIHUB_AADHAAR_SEND_PATH', 'v5/okyc/inititate'),
+        'aadhaar_verify' => env('APIHUB_AADHAAR_VERIFY_PATH', 'v5/okyc/verify'),
+        'pan_path' => env('APIHUB_PAN_PATH', 'v1/pan'),
+        'bank_path' => env('APIHUB_BANK_PATH', 'v4/bank-hybrid'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | MSG91 SMS / OTP
+    |--------------------------------------------------------------------------
+    */
+    'msg91' => [
+        'auth_key' => env('MSG91_AUTH_KEY'),
+        'base_url' => rtrim(env('MSG91_BASE_URL', 'https://control.msg91.com/api/v5'), '/'),
+        'otp_template_id' => env('MSG91_OTP_TEMPLATE_ID', '69ef6a68ccafa7555605e383'),
+        'otp_identifier' => env('MSG91_OTP_IDENTIFIER', 'basic_otp'),
+    ],
+
+    'firebase' => [
+        'project_id' => env('FIREBASE_PROJECT_ID', 'fintronixmicrofinance-c2656'),
+        'credentials' => env(
+            'FIREBASE_CREDENTIALS',
+            'storage/app/firebase/fintronixmicrofinance-c2656-firebase-adminsdk-fbsvc-7d456d1b6f.json'
+        ),
+    ],
+
 ];

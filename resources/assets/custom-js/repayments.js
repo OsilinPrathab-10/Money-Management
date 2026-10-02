@@ -5,11 +5,8 @@
 'use strict';
 
 document.addEventListener('DOMContentLoaded', function () {
-  let dataBaseUrl = document.documentElement.getAttribute('data-base-url');
-  let baseUrl = window.baseUrl || (dataBaseUrl ? dataBaseUrl.replace(/\/+$/, '') + '/' : window.location.origin + '/');
-  if (window.location.protocol === 'https:' && baseUrl) {
-    baseUrl = baseUrl.replace(/^http:/, 'https:');
-  }
+  const rawBaseUrl = window.baseUrl || document.documentElement.getAttribute('data-base-url') || window.location.origin || '';
+  const baseUrl = rawBaseUrl.endsWith('/') ? rawBaseUrl : rawBaseUrl + '/';
   let table;
   let emiDetailsModal;
   let emiDetailsBody;
@@ -19,15 +16,240 @@ document.addEventListener('DOMContentLoaded', function () {
   let selectedEmis = new Map();
   let updateBulkPaymentState;
 
+  // Apply dashboard / deep-link query params before DataTable loads
+  const urlParams = new URLSearchParams(window.location.search);
+  const urlStatus = urlParams.get('status');
+  const urlFromDate = urlParams.get('from_date');
+  const urlToDate = urlParams.get('to_date');
+  const urlTermUnit = urlParams.get('term_unit');
+  const urlLoanMode = urlParams.get('loan_mode');
+
+  if (urlStatus && ['overdue', 'pending', 'upcoming', 'partial', 'paid'].includes(urlStatus)) {
+    $('#statusFilter').val(urlStatus);
+    $('#repaymentsTabs button').removeClass('active');
+    $(`#repaymentsTabs button[data-status="${urlStatus}"]`).addClass('active');
+    const titles = {
+      overdue: 'Overdue Clients',
+      pending: 'Pending Clients (This Month)',
+      upcoming: 'Upcoming Clients',
+      partial: 'Partial Paid Clients',
+      paid: 'Paid Clients',
+    };
+    $('#tableTitle').text(titles[urlStatus] || 'EMI Repayments List');
+  }
+  if (urlFromDate) {
+    $('#fromDateFilter').val(urlFromDate);
+  }
+  if (urlToDate) {
+    $('#toDateFilter').val(urlToDate);
+  }
+  if (urlTermUnit) {
+    $('#termUnitFilter').val(urlTermUnit);
+  }
+  if (urlLoanMode) {
+    $('#loanModeFilter').val(urlLoanMode);
+  }
+
   const sanitizeExportValue = value => {
-    if (value == null) return '';
-    if (typeof value === 'string') {
-      return value.replace(/<[^>]*>/g, '').trim();
+    if (value == null || value === false) return '';
+    if (typeof value === 'object') {
+      if (Array.isArray(value)) {
+        return value.map(sanitizeExportValue).filter(Boolean).join(', ');
+      }
+      if (typeof value.text === 'string' || typeof value.text === 'number') {
+        return sanitizeExportValue(value.text);
+      }
+      return '';
     }
-    return String(value);
+    let text = String(value);
+    text = text.replace(/<script[\s\S]*?<\/script>/gi, ' ');
+    text = text.replace(/<style[\s\S]*?<\/style>/gi, ' ');
+    text = text.replace(/<[^>]+>/g, ' ');
+    text = text.replace(/&nbsp;/gi, ' ').replace(/&#?\w+;/g, ' ');
+    text = text.replace(/₹/g, 'Rs. ');
+    return text.replace(/\s+/g, ' ').trim();
   };
 
-  const pdfTitle = document.title ? `EMI Repayments | ${document.title}` : 'EMI Repayments Report';
+  const repaymentExportTitle = () => {
+    const status = ($('#statusFilter').val() || 'overdue').toLowerCase();
+    const titles = {
+      overdue: 'Overdue Loans',
+      pending: 'Pending Loans',
+      upcoming: 'Upcoming Loans',
+      partial: 'Partial Paid Loans',
+      paid: 'Paid Loans'
+    };
+    return titles[status] || 'EMI Repayments';
+  };
+
+  const statusSummaryExportText = full => {
+    const parts = [];
+    [
+      ['overdue_count', 'Overdue'],
+      ['pending_count', 'Pending'],
+      ['upcoming_count', 'Upcoming'],
+      ['partial_count', 'Partial'],
+      ['paid_count', 'Paid']
+    ].forEach(([key, label]) => {
+      const count = parseInt(full?.[key], 10) || 0;
+      if (count > 0) {
+        parts.push(count + ' ' + label);
+      }
+    });
+    return parts.join(', ');
+  };
+
+  const exportColumnOptions = {
+    columns: [1, 2, 3, 4, 5, 6, 7, 8],
+    orthogonal: 'export',
+    stripHtml: true,
+    format: {
+      body: sanitizeExportValue
+    }
+  };
+
+  const statusSectionConfig = [
+    { key: 'overdue', label: 'Overdue', color: 'danger' },
+    { key: 'pending', label: 'Pending', color: 'warning' },
+    { key: 'upcoming', label: 'Upcoming', color: 'secondary' },
+    { key: 'partial', label: 'Partial Paid', color: 'info' },
+    { key: 'paid', label: 'Paid', color: 'success' },
+  ];
+
+  const renderEmiActionButtons = (emi, full) => {
+    const publicToken = emi.application_number ? btoa(emi.application_number) : '';
+    const publicLink = publicToken ? `${window.location.origin}/view-schedule/${publicToken}` : '#';
+    const phoneNumber = full.client_phone && full.client_phone !== 'N/A' ? full.client_phone : '';
+    const callBtn = phoneNumber
+      ? `<a href="tel:${phoneNumber.replace(/\s/g, '')}" class="btn btn-sm btn-icon btn-text-secondary rounded-pill" title="Call Client"><i class="icon-base ri ri-phone-line icon-20px"></i></a>`
+      : '';
+
+    let whatsappBtn = '';
+    let smsBtn = '';
+    const status = emi?.status || '';
+    const paidAmount = parseFloat(emi?.paid_amount_raw || 0);
+    const balance = parseFloat(emi?.balance_raw || emi?.balance || 0);
+    const amountDue = balance > 0 ? balance : parseFloat(emi?.amount_raw || emi?.amount || 0);
+    const clientName = emi?.client_name || full?.client_name || 'Client';
+    const isPartialPayment = status === 'partial' || (paidAmount > 0 && status !== 'paid');
+
+    if (phoneNumber && phoneNumber !== 'N/A') {
+      let cleanPhone = phoneNumber.replace(/\D/g, '');
+      if (cleanPhone.length === 10) {
+        cleanPhone = '91' + cleanPhone;
+      }
+      const linkPart = publicLink !== '#' ? `\n\nPlease check your EMI Schedule here: ${publicLink}` : '';
+      const companySlogan = emi.company_slogan || full.company_slogan || 'Codepluse Gen PVT Ltd';
+      const companyPhone = emi.company_phone || full.company_phone || '';
+      const accountNo = emi.account_number || full.account_number || '';
+      const period = emi.period_label || ('EMI Month ' + (emi.month_number || ''));
+      const dueDate = emi.due_date_formatted || emi.due_date || '';
+      const paidDate = emi.paid_date_formatted || emi.paid_date || '';
+
+      let waMessage = '';
+      let smsMessage = '';
+      let waTitle = 'Send WhatsApp Message';
+      let smsTitle = 'Send SMS Message';
+
+      if (status === 'paid' || isPartialPayment) {
+        if (isPartialPayment) {
+          waTitle = 'Send WhatsApp Partial Payment Confirmation';
+          smsTitle = 'Send SMS Partial Payment Confirmation';
+          waMessage = `Dear Customer, a partial payment of *Rs.${paidAmount}* for your EMI on *Loan Account No: ${accountNo}* has been successfully received on *${paidDate}*.${linkPart}\n\nThank you for choosing ${companySlogan}. For queries, contact us at ${companyPhone}.`;
+          smsMessage = `Dear Customer, a partial payment of Rs.${paidAmount} for your EMI on Loan Account No: ${accountNo} has been successfully received on ${paidDate}.${linkPart}\n\nThank you for choosing ${companySlogan}. For queries, contact us at ${companyPhone}.`;
+        } else {
+          waTitle = 'Send WhatsApp Payment Confirmation';
+          smsTitle = 'Send SMS Payment Confirmation';
+          waMessage = `Dear Customer, your EMI for *Loan Account No: ${accountNo}* of *Rs.${paidAmount}* has been successfully paid on *${paidDate}*.${linkPart}\n\nThank you for choosing ${companySlogan}. For queries, contact us at ${companyPhone}.`;
+          smsMessage = `Dear Customer, your EMI for Loan Account No: ${accountNo} of Rs.${paidAmount} has been successfully paid on ${paidDate}.${linkPart}\n\nThank you for choosing ${companySlogan}. For queries, contact us at ${companyPhone}.`;
+        }
+      } else if (status === 'overdue') {
+        waTitle = 'Send Overdue Reminder via WhatsApp';
+        smsTitle = 'Send Overdue Reminder via SMS';
+        waMessage = `Dear *${clientName}*, your EMI payment of *Rs.${amountDue}* for *Loan Account No: ${accountNo}* (${period}) was due on *${dueDate}*. Please clear your overdue EMI at the earliest to avoid penalty and credit score impact.${linkPart}\n\nThank you, ${companySlogan}. For queries: ${companyPhone}.`;
+        smsMessage = `Dear ${clientName}, your EMI payment of Rs.${amountDue} for Loan Account No: ${accountNo} (${period}) was due on ${dueDate}. Please clear your overdue EMI at the earliest to avoid penalty.${linkPart}\n\nThank you, ${companySlogan}.`;
+      } else {
+        waTitle = 'Send Pending Reminder via WhatsApp';
+        smsTitle = 'Send Pending Reminder via SMS';
+        waMessage = `Dear *${clientName}*, your upcoming EMI payment of *Rs.${amountDue}* for *Loan Account No: ${accountNo}* (${period}) is due on *${dueDate}*. Kindly arrange payment on or before the due date.${linkPart}\n\nThank you, ${companySlogan}. For queries: ${companyPhone}.`;
+        smsMessage = `Dear ${clientName}, your upcoming EMI payment of Rs.${amountDue} for Loan Account No: ${accountNo} (${period}) is due on ${dueDate}. Kindly arrange payment on or before the due date.${linkPart}\n\nThank you, ${companySlogan}.`;
+      }
+
+      const encodedWaMsg = encodeURIComponent(waMessage);
+      whatsappBtn = `<a href="https://wa.me/${cleanPhone}?text=${encodedWaMsg}" target="_blank" class="btn btn-sm btn-icon btn-text-secondary rounded-pill text-success" title="${waTitle}"><i class="icon-base ri ri-whatsapp-line icon-20px"></i></a>`;
+
+      const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+      const smsSeparator = isIOS ? '&' : '?';
+      const encodedSmsMsg = encodeURIComponent(smsMessage);
+      smsBtn = `<a href="sms:+${cleanPhone}${smsSeparator}body=${encodedSmsMsg}" class="btn btn-sm btn-icon btn-text-secondary rounded-pill text-info" title="${smsTitle}"><i class="icon-base ri ri-message-3-line icon-20px"></i></a>`;
+    }
+
+    return (
+      '<div class="d-flex align-items-center gap-1 text-nowrap">' +
+      `<button type="button" class="btn btn-sm btn-icon btn-text-secondary rounded-pill btn-view-emi" data-emi-id="${emi.id}" data-application-number="${emi.application_number || full.application_number || ''}" title="View EMI Details">` +
+      '<i class="icon-base ri ri-eye-line icon-20px"></i>' +
+      '</button>' +
+      `<button type="button" class="btn btn-sm btn-icon btn-text-secondary rounded-pill btn-copy-public-link" data-link="${publicLink}" title="Copy Public Schedule Link">` +
+      '<i class="icon-base ri ri-link icon-20px"></i>' +
+      '</button>' +
+      callBtn +
+      whatsappBtn +
+      smsBtn +
+      '</div>'
+    );
+  };
+
+  const formatClientEmiDetails = (clientRow) => {
+    const grouped = clientRow.emis_grouped || {};
+    const activeStatus = $('#statusFilter').val();
+    const bulkSelectableStatuses = ['overdue', 'pending', 'partial', 'upcoming', 'paid'];
+    const showCheckbox = window.isAdmin && bulkSelectableStatuses.includes(activeStatus);
+
+    let html = '<div class="client-emi-details">';
+
+    statusSectionConfig.forEach(({ key, label, color }) => {
+      const emis = grouped[key] || [];
+      if (!emis.length) return;
+
+      html += `<div class="emi-section-title text-${color}">${label} (${emis.length})</div>`;
+      html += '<div class="table-responsive mb-3"><table class="table table-sm table-bordered align-middle mb-0">';
+      html += '<thead class="table-light"><tr>';
+      if (showCheckbox) {
+        html += '<th style="width:30px;"></th>';
+      }
+      html += '<th>Inst. #</th><th>Due Date</th><th>EMI Amt</th><th>Interest</th><th>Principal</th><th>Paid</th><th>Pending</th><th>Status</th><th>Actions</th>';
+      html += '</tr></thead><tbody>';
+
+      emis.forEach((emi) => {
+        const checkboxAmount = emi.status === 'paid'
+          ? (parseFloat(emi.paid_amount_raw) || parseFloat(emi.total_amount) || 0)
+          : (parseFloat(emi.pending_amount) || parseFloat(emi.total_amount) || 0);
+        html += `<tr data-emi-id="${emi.id}" data-instalment="${emi.instalment_number}" data-total="${emi.total_amount_formatted}">`;
+        if (showCheckbox) {
+          html += `<td class="text-center"><input type="checkbox" class="form-check-input emi-select-checkbox align-middle" data-id="${emi.id}" data-amount="${checkboxAmount}" data-client="${clientRow.client_name}" data-account="${clientRow.account_number}"></td>`;
+        }
+        html += `<td class="fw-semibold">#${emi.instalment_number}</td>`;
+        html += `<td>${emi.due_date}</td>`;
+        html += `<td>${emi.total_amount_formatted}</td>`;
+        html += `<td>${emi.interest_amount_formatted}</td>`;
+        html += `<td>${emi.principal_amount_formatted}</td>`;
+        html += `<td>${emi.paid_amount}</td>`;
+        html += `<td>${emi.pending_amount_formatted}</td>`;
+        html += `<td>${emi.status_badge}</td>`;
+        html += `<td>${renderEmiActionButtons(emi, clientRow)}</td>`;
+        html += '</tr>';
+      });
+
+      html += '</tbody></table></div>';
+    });
+
+    if (!clientRow.emis || clientRow.emis.length === 0) {
+      html += '<p class="text-muted mb-0">No EMI details available for this client.</p>';
+    }
+
+    html += '</div>';
+    return html;
+  };
 
   // Initialize DataTable
   if ($('#repaymentsTable').length) {
@@ -44,167 +266,137 @@ document.addEventListener('DOMContentLoaded', function () {
           d.from_date = $('#fromDateFilter').val();
           d.to_date = $('#toDateFilter').val();
           d.location_id = $('#areaFilter').val();
-          d.loan_type_id = $('#loanTypeFilter').val();
-          d.product_id = $('#productFilter').val();
+          d.account_number = $('#accountNumberFilter').val();
+          d.term_unit = $('#termUnitFilter').val();
           d.loan_mode = $('#loanModeFilter').val();
+          d.loan_type_id = $('#loanTypeFilter').val();
         }
       },
       columns: [
         {
-          data: null,
+          className: 'details-control',
           orderable: false,
           searchable: false,
-          className: 'text-center',
-          render: function (data, type, full) {
-            if (!window.isAdmin) return '';
-            const checkboxAmount = full.status === 'paid' ? (parseFloat(full.paid_amount_raw) || parseFloat(full.total_amount) || 0) : (parseFloat(full.total_amount) || 0);
-            return `<input type="checkbox" class="form-check-input emi-select-checkbox align-middle" data-id="${full.id}" data-amount="${checkboxAmount}" data-client="${full.client_name}" data-account="${full.account_number}">`;
-          }
+          data: null,
+          defaultContent: '<i class="icon-base ri ri-arrow-right-s-line"></i>'
         },
-        { 
+        {
+          data: 'sno',
+          defaultContent: '',
           render: function (data, type, full, meta) {
-            return meta.settings._iDisplayStart + meta.row + 1;
+            return data || (meta.settings._iDisplayStart + meta.row + 1);
           }
         },
         {
           data: 'account_number',
           render: function (data, type, full) {
-            const accountNumber = data || 'N/A';
+            const systemAccountNumber = data || 'N/A';
+            const displayNumber = full.customer_loan_account_number || systemAccountNumber;
+            if (type === 'export') {
+              return displayNumber;
+            }
             if (!full.loan_account_id) {
-              return `<span class="text-muted">${accountNumber}</span>`;
+              return `<span class="text-muted">${displayNumber}</span>`;
             }
             const scheduleTarget = full.application_number
               ? `${baseUrl}emi/repayments/view/${full.application_number}`
               : `${baseUrl}loan/loan-account/${full.loan_account_id}`;
-            return `<a href="${scheduleTarget}" class="text-primary fw-semibold loan-account-link">${accountNumber}</a>`;
+            if (full.customer_loan_account_number) {
+              return `<div class="d-flex flex-column">
+                        <a href="${scheduleTarget}" class="text-primary fw-semibold loan-account-link">${full.customer_loan_account_number}</a>
+                        <small class="text-muted" style="font-size: 0.75rem;">Sys ID: ${systemAccountNumber}</small>
+                      </div>`;
+            }
+            return `<a href="${scheduleTarget}" class="text-primary fw-semibold loan-account-link">${systemAccountNumber}</a>`;
           }
         },
         { data: 'client_name' },
-        { 
+        {
           data: 'agent_name',
-          render: function (data) {
-            return `<span class="badge bg-label-info">${data || 'Unassigned'}</span>`;
+          render: function (data, type) {
+            const label = data || 'Unassigned';
+            if (type === 'export') {
+              return label;
+            }
+            return `<span class="badge bg-label-info">${label}</span>`;
           }
         },
-        { 
+        {
           data: 'client_phone',
-          render: function (data, type, full) {
-            if (!data || data === 'N/A') return data;
+          render: function (data, type) {
+            if (!data || data === 'N/A') return type === 'export' ? '' : (data || '');
+            if (type === 'export') {
+              return data;
+            }
             return `<a href="tel:${data.replace(/\s/g, '')}" class="text-body">${data}</a>`;
           }
         },
-        { 
+        {
           data: 'zone',
-          render: function (data) {
-            return '<span class="badge bg-label-secondary">' + (data || 'N/A') + '</span>';
-          }
-        },
-        { data: 'due_date' },
-        {
-          data: 'total_amount_formatted',
-          render: function (data, type, full) {
-            const total = full.total_amount_formatted || '₹0.00';
-            const interest = full.interest_amount_formatted || '₹0.00';
-            const principal = full.principal_amount_formatted || '₹0.00';
-            return `
-              <div>
-                <span class="fw-bold text-dark me-1">${total}</span>
-                <div class="text-muted small" style="font-size: 11px;">
-                  <span class="text-info">Int:</span> ${interest} &bull; <span class="text-success">Prin:</span> ${principal}
-                </div>
-              </div>
-            `;
+          render: function (data, type) {
+            const label = data || 'N/A';
+            if (type === 'export') {
+              return label;
+            }
+            return '<span class="badge bg-label-secondary">' + label + '</span>';
           }
         },
         {
-          data: 'status_badge',
+          data: 'status_summary',
           orderable: false,
-          searchable: false
+          searchable: false,
+          render: function (data, type, full) {
+            if (type === 'export') {
+              return statusSummaryExportText(full) || sanitizeExportValue(data);
+            }
+            return data;
+          }
         },
         {
-          // Actions
-          targets: -1,
-          title: 'Actions',
+          data: 'total_due_formatted',
+          render: function (data, type, full) {
+            if (type === 'export') {
+              return data || '';
+            }
+            if (full.total_due > 0) {
+              return `<span class="fw-semibold text-danger">${data}</span>`;
+            }
+            return `<span class="text-muted">${data}</span>`;
+          }
+        },
+        {
+          data: null,
+          defaultContent: '',
           searchable: false,
           orderable: false,
-          render: function (data, type, full, meta) {
+          render: function (data, type, full) {
+            if (type === 'export') {
+              return '';
+            }
             const publicToken = full.application_number ? btoa(full.application_number) : '';
             const publicLink = publicToken ? `${window.location.origin}/view-schedule/${publicToken}` : '#';
-            
-            // Call Button
             const phoneNumber = full.client_phone && full.client_phone !== 'N/A' ? full.client_phone : '';
-            const callBtn = phoneNumber 
-              ? `<a href="tel:${phoneNumber}" class="btn btn-sm btn-icon btn-text-secondary rounded-pill" title="Call Client"><i class="icon-base ri ri-phone-line icon-20px"></i></a>` 
+            const callBtn = phoneNumber
+              ? `<a href="tel:${phoneNumber.replace(/\s/g, '')}" class="btn btn-sm btn-icon btn-text-secondary rounded-pill" title="Call Client"><i class="icon-base ri ri-phone-line icon-20px"></i></a>`
               : '';
-
-            // WhatsApp and SMS Buttons (For both PAID and PARTIAL status)
-            let whatsappBtn = '';
-            let smsBtn = '';
-            const isPartialPayment = full.status === 'partial' || (parseFloat(full.paid_amount_raw) > 0 && full.status !== 'paid');
-            if ((full.status === 'paid' || isPartialPayment) && phoneNumber) {
-              let cleanPhone = phoneNumber.replace(/\D/g, '');
-              if (cleanPhone.length === 10) {
-                cleanPhone = '91' + cleanPhone;
-              }
-              const linkPart = publicLink !== '#' ? `\n\nPlease check your EMI Schedule here: ${publicLink}` : '';
-              
-              let waMessage = '';
-              let smsMessage = '';
-
-              if (isPartialPayment) {
-                // WhatsApp Message for partial payment (supports bold using asterisks)
-                waMessage = `Dear Customer, a partial payment of *Rs.${full.paid_amount_raw}* for your EMI on *Loan Account No: ${full.account_number}* has been successfully received on *${full.paid_date_formatted}*.${linkPart}\n\nThank you for choosing Shanmuga Finance. For queries, contact us at ${full.company_phone}.`;
-
-                // SMS Message for partial payment (standard text without asterisks, without link)
-                smsMessage = `Dear Customer, a partial payment of Rs.${full.paid_amount_raw} for your EMI on Loan Account No: ${full.account_number} has been successfully received on ${full.paid_date_formatted}.\n\nThank you for choosing Shanmuga Finance. For queries, contact us at ${full.company_phone}.`;
-              } else {
-                // WhatsApp Message for full payment (supports bold using asterisks)
-                waMessage = `Dear Customer, your EMI for *Loan Account No: ${full.account_number}* of *Rs.${full.paid_amount_raw}* has been successfully paid on *${full.paid_date_formatted}*.${linkPart}\n\nThank you for choosing Shanmuga Finance. For queries, contact us at ${full.company_phone}.`;
-
-                // SMS Message for full payment (standard text without asterisks, without link)
-                smsMessage = `Dear Customer, your EMI for Loan Account No: ${full.account_number} of Rs.${full.paid_amount_raw} has been successfully paid on ${full.paid_date_formatted}.\n\nThank you for choosing Shanmuga Finance. For queries, contact us at ${full.company_phone}.`;
-              }
-
-              const encodedWaMsg = encodeURIComponent(waMessage);
-              whatsappBtn = `<a href="https://wa.me/${cleanPhone}?text=${encodedWaMsg}" target="_blank" class="btn btn-sm btn-icon btn-text-secondary rounded-pill text-success" title="Send WhatsApp Confirmation"><i class="icon-base ri ri-whatsapp-line icon-20px"></i></a>`;
-
-              const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-              const smsSeparator = isIOS ? '&' : '?';
-
-              const encodedSmsMsg = encodeURIComponent(smsMessage);
-              smsBtn = `<a href="sms:+${cleanPhone}${smsSeparator}body=${encodedSmsMsg}" class="btn btn-sm btn-icon btn-text-secondary rounded-pill text-info" title="Send SMS Confirmation"><i class="icon-base ri ri-message-3-line icon-20px"></i></a>`;
-            }
+            const scheduleTarget = full.application_number
+              ? `${baseUrl}emi/repayments/view/${full.application_number}`
+              : `${baseUrl}loan/loan-account/${full.loan_account_id}`;
 
             return (
               '<div class="d-flex align-items-center gap-1 text-nowrap">' +
-              `<button type="button" class="btn btn-sm btn-icon btn-text-secondary rounded-pill btn-view-emi" data-emi-id="${full.id}" data-application-number="${full.application_number}" title="View EMI Details">` +
-              '<i class="icon-base ri ri-eye-line icon-20px"></i>' +
-              '</button>' +
+              `<a href="${scheduleTarget}" class="btn btn-sm btn-icon btn-text-secondary rounded-pill" title="View Full Schedule"><i class="icon-base ri ri-file-list-3-line icon-20px"></i></a>` +
               `<button type="button" class="btn btn-sm btn-icon btn-text-secondary rounded-pill btn-copy-public-link" data-link="${publicLink}" title="Copy Public Schedule Link">` +
               '<i class="icon-base ri ri-link icon-20px"></i>' +
               '</button>' +
               callBtn +
-              whatsappBtn +
-              smsBtn +
               '</div>'
             );
           }
         }
       ],
-      columnDefs: [
-        {
-          targets: 0,
-          visible: window.isAdmin,
-          orderable: false,
-          searchable: false
-        },
-        {
-          targets: 4, // Agent column (shifted from 3 to 4)
-          visible: true
-        }
-      ],
       order: [
-        [7, 'desc'] // Order by Due Date Descending (shifted from 6 to 7)
+        [8, 'desc']
       ],
  dom:
         '<"card-header d-flex border-top rounded-0 flex-wrap pb-md-0 pb-4"' +
@@ -215,12 +407,15 @@ document.addEventListener('DOMContentLoaded', function () {
         '<"col-sm-12 col-md-6"i>' +
         '<"col-sm-12 col-md-6"p>' +
         '>',
-      pageLength: 20,
-      lengthMenu: [20, 10, 25, 50, 100],
+      pageLength: 25,
+      lengthMenu: [
+        [25, 50, 100, 150, 300],
+        [25, 50, 100, 150, 300]
+      ],
       language: {
-        sLengthMenu: '_MENU_',
+        sLengthMenu: 'Show _MENU_',
         search: '',
-        searchPlaceholder: 'Search EMIs...',
+        searchPlaceholder: 'Search clients...',
         info: 'Showing _START_ to _END_ of _TOTAL_ entries',
         paginate: {
           next: '<i class="icon-base ri ri-arrow-right-s-line"></i>',
@@ -237,16 +432,12 @@ document.addEventListener('DOMContentLoaded', function () {
               extend: 'print',
               text: '<i class="icon-base ri ri-printer-line me-2"></i>Print',
               className: 'dropdown-item',
-              exportOptions: {
-                columns: [1, 2, 3, 4, 5, 6, 7, 8, 9],
-                format: {
-                  body: sanitizeExportValue
-                }
-              },
+              title: repaymentExportTitle,
+              exportOptions: exportColumnOptions,
               customize: function (win) {
                 $(win.document.body)
                   .css('font-size', '10pt')
-                  .prepend('<h3 class="text-center">EMI Repayments Report</h3>');
+                  .prepend('<h3 class="text-center">' + repaymentExportTitle() + '</h3>');
 
                 $(win.document.body)
                   .find('table')
@@ -258,37 +449,27 @@ document.addEventListener('DOMContentLoaded', function () {
               extend: 'csv',
               text: '<i class="icon-base ri ri-file-text-line me-2"></i>CSV',
               className: 'dropdown-item',
-              exportOptions: {
-                columns: [1, 2, 3, 4, 5, 6, 7, 8, 9],
-                format: {
-                  body: sanitizeExportValue
-                }
-              }
+              title: repaymentExportTitle,
+              exportOptions: exportColumnOptions
             },
             {
               extend: 'excel',
               text: '<i class="icon-base ri ri-file-excel-2-line me-2"></i>Excel',
               className: 'dropdown-item',
-              exportOptions: {
-                columns: [1, 2, 3, 4, 5, 6, 7, 8, 9],
-                format: {
-                  body: sanitizeExportValue
-                }
-              }
+              title: repaymentExportTitle,
+              exportOptions: exportColumnOptions
             },
             {
               extend: 'pdf',
               text: '<i class="icon-base ri ri-file-pdf-line me-2"></i>PDF',
               className: 'dropdown-item',
-              title: pdfTitle,
-              exportOptions: {
-                columns: [1, 2, 3, 4, 5, 6, 7, 8, 9],
-                format: {
-                  body: sanitizeExportValue
-                }
-              },
+              title: repaymentExportTitle,
+              orientation: 'landscape',
+              pageSize: 'A4',
+              exportOptions: exportColumnOptions,
               customize: function (doc) {
                 const generatedDate = new Date().toLocaleString();
+                const title = repaymentExportTitle();
                 doc.pageMargins = [20, 40, 20, 40];
                 doc.defaultStyle.fontSize = 9;
                 doc.styles.tableHeader.fontSize = 10;
@@ -297,7 +478,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 doc.styles.tableHeader.alignment = 'left';
 
                 if (doc.content?.length) {
-                  doc.content[0].text = pdfTitle;
+                  doc.content[0].text = title;
                   doc.content[0].alignment = 'center';
                   doc.content[0].margin = [0, 0, 0, 12];
                 }
@@ -305,20 +486,28 @@ document.addEventListener('DOMContentLoaded', function () {
                 const tableContent = doc.content?.find(item => item.table);
                 if (tableContent) {
                   const table = tableContent.table;
-                  table.widths = ['5%', '12%', '15%', '12%', '12%', '8%', '11%', '15%', '10%'];
+                  table.widths = ['6%', '14%', '16%', '12%', '12%', '10%', '18%', '12%'];
                   table.body.forEach((row, rowIndex) => {
                     row.forEach((cell, colIndex) => {
-                      const cellObj = typeof cell === 'object' ? cell : { text: cell };
-                      cellObj.margin = [4, 3, 4, 3];
-                      // Keep serial left-aligned as required by PDF spec.
-                      cellObj.alignment = colIndex === 0 ? 'left' : (colIndex === 7 ? 'right' : 'left');
-                      
+                      let text = '';
+                      if (cell == null) {
+                        text = '';
+                      } else if (typeof cell === 'string' || typeof cell === 'number' || typeof cell === 'boolean') {
+                        text = String(cell);
+                      } else if (typeof cell === 'object' && (typeof cell.text === 'string' || typeof cell.text === 'number')) {
+                        text = String(cell.text);
+                      } else {
+                        text = sanitizeExportValue(cell);
+                      }
+                      const cellObj = {
+                        text: text,
+                        margin: [4, 3, 4, 3],
+                        alignment: colIndex === 7 ? 'right' : 'left'
+                      };
                       if (rowIndex === 0) {
                         cellObj.fillColor = '#eef1f5';
                         cellObj.color = '#111111';
                         cellObj.bold = true;
-                        // Match header alignment to body
-                        cellObj.alignment = colIndex === 0 ? 'left' : (colIndex === 7 ? 'right' : 'left');
                       }
                       row[colIndex] = cellObj;
                     });
@@ -348,18 +537,41 @@ document.addEventListener('DOMContentLoaded', function () {
               extend: 'copy',
               text: '<i class="icon-base ri ri-file-copy-line me-2"></i>Copy',
               className: 'dropdown-item',
-              exportOptions: {
-                columns: [1, 2, 3, 4, 5, 6, 7, 8, 9],
-                format: {
-                  body: sanitizeExportValue
-                }
-              }
+              title: repaymentExportTitle,
+              exportOptions: exportColumnOptions
             }
           ]
         }
       ],
       autoWidth: false,
     });
+
+    // Expand/collapse client rows to show EMI details
+    $('#repaymentsTable tbody').on('click', 'td.details-control', function () {
+      const tr = $(this).closest('tr');
+      const row = table.row(tr);
+
+      if (row.child.isShown()) {
+        row.child.hide();
+        tr.removeClass('shown');
+      } else {
+        row.child(formatClientEmiDetails(row.data())).show();
+        tr.addClass('shown');
+        if (window.isAdmin && typeof updateBulkPaymentState === 'function') {
+          syncExpandedRowCheckboxes(tr);
+        }
+      }
+    });
+
+    const syncExpandedRowCheckboxes = (parentTr) => {
+      const childRow = parentTr.next('tr');
+      childRow.find('.emi-select-checkbox').each(function () {
+        const id = $(this).data('id');
+        if (selectedEmis.has(id) || selectedEmis.has(String(id))) {
+          $(this).prop('checked', true);
+        }
+      });
+    };
 
     $(window).on('resize', function() {
       table.columns.adjust();
@@ -393,9 +605,9 @@ document.addEventListener('DOMContentLoaded', function () {
         $('#stat-overdue-emis').text(parseFloat(stats.overdue_emis).toLocaleString('en-IN'));
 
         // Update tab badges
-        $('#tab-count-all').text(parseFloat(stats.total_emis).toLocaleString('en-IN'));
         $('#tab-count-overdue').text(parseFloat(stats.overdue_emis).toLocaleString('en-IN'));
         $('#tab-count-pending').text(parseFloat(stats.pending_emis).toLocaleString('en-IN'));
+        $('#tab-count-upcoming').text(parseFloat(stats.upcoming_emis || 0).toLocaleString('en-IN'));
         $('#tab-count-partial').text(parseFloat(stats.partial_emis).toLocaleString('en-IN'));
         $('#tab-count-paid').text(parseFloat(stats.paid_emis).toLocaleString('en-IN'));
 
@@ -403,7 +615,7 @@ document.addEventListener('DOMContentLoaded', function () {
         if ($('#fromDateFilter').val() || $('#toDateFilter').val()) {
           $('#stat-total-emis-label').text('Selected date range');
         } else {
-          $('#stat-total-emis-label').text('Overdue & Upcoming');
+          $('#stat-total-emis-label').text('Overdue, Pending & Upcoming');
         }
       }
     });
@@ -443,7 +655,7 @@ document.addEventListener('DOMContentLoaded', function () {
           $('#bulkUndoBtn').removeClass('d-none');
         } else {
           $('#bulkBarTitle').text('EMIs Selected for Bulk Payment');
-          $('#bulkTotalLabel').text('Total Overdue:');
+          $('#bulkTotalLabel').text('Total Due:');
           $('#bulkPayBtn').removeClass('d-none');
           $('#bulkUndoBtn').addClass('d-none');
         }
@@ -491,26 +703,20 @@ document.addEventListener('DOMContentLoaded', function () {
         $('#bulkClientsContainer').html(clientsHtml);
       }
 
-      // Handle Table Draw Event to check selected checkboxes
+      // Handle Table Draw Event to collapse expanded rows and keep bulk selection bar
       table.on('draw', function () {
-        let allChecked = true;
-        let anyVisible = false;
-
-        $('#repaymentsTable tbody .emi-select-checkbox').each(function () {
-          anyVisible = true;
-          const id = $(this).data('id');
-          if (selectedEmis.has(id)) {
-            $(this).prop('checked', true);
-          } else {
-            $(this).prop('checked', false);
-            allChecked = false;
+        table.rows().every(function () {
+          if (this.child.isShown()) {
+            this.child.hide();
+            $(this.node()).removeClass('shown');
           }
         });
-
-        $('#selectAllEmis').prop('checked', anyVisible && allChecked);
+        if (typeof updateBulkPaymentState === 'function') {
+          updateBulkPaymentState();
+        }
       });
 
-      // Individual Checkbox Click
+      // Individual Checkbox Click (delegated for expanded EMI rows)
       $('#repaymentsTable').on('change', '.emi-select-checkbox', function () {
         const id = $(this).data('id');
         const amount = parseFloat($(this).data('amount')) || 0;
@@ -523,92 +729,176 @@ document.addEventListener('DOMContentLoaded', function () {
           selectedEmis.delete(id);
         }
 
-        // Sync select all state
-        let allChecked = true;
-        let anyVisible = false;
-        $('#repaymentsTable tbody .emi-select-checkbox').each(function () {
-          anyVisible = true;
-          if (!this.checked) allChecked = false;
-        });
-        $('#selectAllEmis').prop('checked', anyVisible && allChecked);
-
-        updateBulkPaymentState();
-      });
-
-      // Select All Checkbox Click
-      $('#selectAllEmis').on('change', function () {
-        const checked = this.checked;
-        $('#repaymentsTable tbody .emi-select-checkbox').each(function () {
-          $(this).prop('checked', checked);
-          const id = $(this).data('id');
-          const amount = parseFloat($(this).data('amount')) || 0;
-          const clientName = $(this).data('client') || 'N/A';
-          const accountNumber = $(this).data('account') || 'N/A';
-
-          if (checked) {
-            selectedEmis.set(id, { amount, clientName, accountNumber });
-          } else {
-            selectedEmis.delete(id);
-          }
-        });
-
         updateBulkPaymentState();
       });
 
       // Cancel Selection
       $(document).on('click', '#bulkCancelBtn', function () {
         selectedEmis.clear();
-        $('#selectAllEmis').prop('checked', false);
-        $('#repaymentsTable tbody .emi-select-checkbox').prop('checked', false);
+        $('#repaymentsTable .emi-select-checkbox').prop('checked', false);
         updateBulkPaymentState();
       });
 
-      // Submit Bulk Payment
+      // Select every EMI matching the active filters, not just the visible page
+      $(document).on('click', '#selectAllMatchingEmis', function () {
+        const btn = $(this);
+        const originalHtml = btn.html();
+        btn.prop('disabled', true).html('<span class="spinner-border spinner-border-sm me-1"></span>Loading...');
+
+        $.ajax({
+          url: baseUrl + 'emi/repayments/all-ids',
+          type: 'GET',
+          data: {
+            status: $('#statusFilter').val(),
+            from_date: $('#fromDateFilter').val(),
+            to_date: $('#toDateFilter').val(),
+            location_id: $('#areaFilter').val(),
+            account_number: $('#accountNumberFilter').val(),
+            term_unit: $('#termUnitFilter').val(),
+            loan_mode: $('#loanModeFilter').val(),
+            loan_type_id: $('#loanTypeFilter').val(),
+            search: table.search()
+          }
+        })
+          .done(function (res) {
+            if (!res || !res.success) {
+              showAlert('danger', 'Error', (res && res.message) || 'Could not load matching EMIs.');
+              return;
+            }
+
+            if (!res.data.length) {
+              showAlert('info', 'Nothing to select', 'No EMIs match the current filters.');
+              return;
+            }
+
+            res.data.forEach(item => {
+              selectedEmis.set(item.id, {
+                amount: parseFloat(item.amount) || 0,
+                clientName: item.client,
+                accountNumber: item.account
+              });
+            });
+
+            $('#repaymentsTable .emi-select-checkbox').each(function () {
+              if (selectedEmis.has($(this).data('id'))) {
+                $(this).prop('checked', true);
+              }
+            });
+
+            updateBulkPaymentState();
+            showAlert('success', 'Selected', `${res.data.length} EMI(s) selected across all pages.`);
+          })
+          .fail(function () {
+            showAlert('danger', 'Error', 'Could not load matching EMIs.');
+          })
+          .always(function () {
+            btn.prop('disabled', false).html(originalHtml);
+          });
+      });
+
+      window.syncSelectAllMatchingVisibility = function () {
+        const activeStatus = $('#statusFilter').val();
+        const canBulkAct = ['overdue', 'pending', 'partial', 'upcoming', 'paid'].includes(activeStatus);
+        $('#selectAllMatchingEmis').toggleClass('d-none', !canBulkAct);
+        $('#selectAllMatchingEmis').html(activeStatus === 'paid'
+          ? '<i class="icon-base ri ri-checkbox-multiple-line me-1"></i>Select all matching paid EMIs'
+          : '<i class="icon-base ri ri-checkbox-multiple-line me-1"></i>Select all matching EMIs (all pages)');
+      };
+
+      window.syncSelectAllMatchingVisibility();
+
+      // Open Bulk Payment Modal
       $(document).on('click', '#bulkPayBtn', function () {
         if (selectedEmis.size === 0) return;
 
-        const emiIds = Array.from(selectedEmis.keys());
         let totalSum = 0;
-        selectedEmis.forEach(info => totalSum += info.amount);
+        const summaryItems = [];
+        selectedEmis.forEach((info) => {
+          totalSum += info.amount;
+          summaryItems.push(`<div><strong>${info.accountNumber}</strong> (${info.clientName}): ₹${info.amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>`);
+        });
+
+        $('#bulkSelectedEmisSummary').html(summaryItems.join(''));
+        $('#bulk_paid_amount').val(totalSum.toFixed(2)).data('full-total', totalSum);
+        $('#bulkPayTypeFull').prop('checked', true);
+        $('#bulk_paid_amount').prop('readonly', true);
+        $('#bulkPaidAmountHelp').text('Full payment selected. Total due: ₹' + totalSum.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+        
+        if (window.BankPaymentFields) {
+          window.BankPaymentFields.resetToInHand('bulk_payment_method');
+        }
+
+        $('#bulkPayBar').addClass('d-none');
+        $('#bulkPayModal').modal('show');
+      });
+
+      // Handle Full vs Partial radio mode toggle in Bulk Pay Modal
+      $(document).on('change', 'input[name="bulk_pay_type"]', function () {
+        const mode = $(this).val();
+        const fullTotal = parseFloat($('#bulk_paid_amount').data('full-total')) || 0;
+        if (mode === 'full') {
+          $('#bulk_paid_amount').val(fullTotal.toFixed(2)).prop('readonly', true);
+          $('#bulkPaidAmountHelp').text('Full payment selected. Total due: ₹' + fullTotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+        } else {
+          $('#bulk_paid_amount').prop('readonly', false).focus();
+          $('#bulkPaidAmountHelp').text('Partial payment mode: enter custom amount to allocate across selected EMIs.');
+        }
+      });
+
+      // Submit Bulk Payment Form
+      $(document).on('submit', '#bulkPayForm', function (e) {
+        e.preventDefault();
+        if (selectedEmis.size === 0) return;
+
+        const emiIds = Array.from(selectedEmis.keys());
+        const methodSelect = document.getElementById('bulk_payment_method');
+        const bankSelect = document.getElementById('repaymentBulkBankAccount');
+
+        if (window.BankPaymentFields) {
+          const bankValidationError = window.BankPaymentFields.validateBankPayment(methodSelect, bankSelect, this);
+          if (bankValidationError) {
+            Swal.fire({ icon: 'warning', title: 'Action Required', text: bankValidationError });
+            return;
+          }
+        }
+
+        let formData;
+        if (window.BankPaymentFields) {
+          formData = window.BankPaymentFields.prepareFormData(this, methodSelect, bankSelect);
+        } else {
+          formData = new FormData(this);
+        }
+
+        emiIds.forEach(id => formData.append('emi_ids[]', id));
+
+        const btn = $('#btnSubmitRepaymentBulkPay');
+        const spinner = btn.find('.spinner-border');
+        btn.prop('disabled', true);
+        spinner.removeClass('d-none');
 
         const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
 
-        Swal.fire({
-          title: 'Confirm Bulk Payment',
-          text: `You are about to record full payments for all ${selectedEmis.size} selected EMIs. Total payment amount is ₹${totalSum.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}. This will immediately mark these EMIs as PAID!`,
-          icon: 'question',
-          showCancelButton: true,
-          confirmButtonText: 'Yes, Pay All Fully!',
-          cancelButtonText: 'Cancel',
-          confirmButtonColor: '#7367f0',
-          showLoaderOnConfirm: true,
-          preConfirm: () => {
-            return fetch(`${baseUrl}emi/repayments/bulk-pay`, {
-              method: 'POST',
-              headers: {
-                'X-CSRF-TOKEN': csrfToken,
-                'Content-Type': 'application/json',
-                'Accept': 'application/json',
-                'X-Requested-With': 'XMLHttpRequest'
-              },
-              body: JSON.stringify({ emi_ids: emiIds })
-            })
-            .then(response => {
-              if (!response.ok) {
-                return response.json().then(err => { throw new Error(err.message || 'Bulk payment failed.') });
-              }
-              return response.json();
-            })
-            .catch(error => {
-              Swal.showValidationMessage(`Error: ${error.message}`);
-            });
+        fetch(`${baseUrl}emi/repayments/bulk-pay`, {
+          method: 'POST',
+          headers: {
+            'X-CSRF-TOKEN': csrfToken,
+            'Accept': 'application/json',
+            'X-Requested-With': 'XMLHttpRequest'
           },
-          allowOutsideClick: () => !Swal.isLoading()
-        }).then((result) => {
-          if (result.isConfirmed && result.value && result.value.success) {
+          body: formData
+        })
+        .then(response => {
+          if (!response.ok) {
+            return response.json().then(err => { throw new Error(err.message || 'Bulk payment failed.'); });
+          }
+          return response.json();
+        })
+        .then(data => {
+          if (data.success) {
+            $('#bulkPayModal').modal('hide');
             Swal.fire({
               title: 'Bulk Payment Successful!',
-              text: result.value.message || 'Selected payments successfully recorded.',
+              text: data.message || 'Selected payments successfully recorded.',
               icon: 'success',
               confirmButtonColor: '#7367f0'
             }).then(() => {
@@ -616,7 +906,16 @@ document.addEventListener('DOMContentLoaded', function () {
               updateBulkPaymentState();
               table.ajax.reload();
             });
+          } else {
+            Swal.fire('Error!', data.message || 'Bulk payment failed.', 'error');
           }
+        })
+        .catch(error => {
+          Swal.fire('Error!', error.message || 'Bulk payment failed.', 'error');
+        })
+        .finally(() => {
+          btn.prop('disabled', false);
+          spinner.addClass('d-none');
         });
       });
 
@@ -686,102 +985,64 @@ document.addEventListener('DOMContentLoaded', function () {
     
     // Update table title
     const titles = {
-      'all': 'All EMI Repayments',
-      'overdue': 'Overdue EMIs',
-      'pending': 'Pending EMIs',
-      'partial': 'Partial Paid EMIs',
-      'paid': 'Paid EMIs'
+      'overdue': 'Overdue Clients',
+      'pending': 'Pending Clients (This Month)',
+      'upcoming': 'Upcoming Clients',
+      'partial': 'Partial Paid Clients',
+      'paid': 'Paid Clients'
     };
     $('#tableTitle').text(titles[status] || 'EMI Repayments List');
 
-    // Dynamically show/hide checkbox column (index 0) based on active tab
-    if (window.isAdmin) {
-      if (status === 'all' || status === 'overdue' || status === 'paid') {
-        table.column(0).visible(true);
-      } else {
-        table.column(0).visible(false);
-      }
-      
-      // Clear bulk selections when switching tabs
-      if (selectedEmis) {
-        selectedEmis.clear();
-        $('#selectAllEmis').prop('checked', false);
-        if (typeof updateBulkPaymentState === 'function') {
-          updateBulkPaymentState();
-        }
+    if (window.isAdmin && selectedEmis) {
+      selectedEmis.clear();
+      if (typeof updateBulkPaymentState === 'function') {
+        updateBulkPaymentState();
       }
     }
-    
+
+    if (typeof window.syncSelectAllMatchingVisibility === 'function') {
+      window.syncSelectAllMatchingVisibility();
+    }
+
     table.ajax.reload();
   });
 
-  let fromPicker, toPicker;
-  if (typeof flatpickr !== 'undefined') {
-    const fromEl = document.getElementById('fromDateFilter');
-    const toEl = document.getElementById('toDateFilter');
-
-    if (fromEl) {
-      fromPicker = flatpickr(fromEl, {
-        dateFormat: 'd/m/Y',
-        allowInput: true,
-        onChange: function () {
-          if (table) table.ajax.reload();
-        }
-      });
-    }
-
-    if (toEl) {
-      toPicker = flatpickr(toEl, {
-        dateFormat: 'd/m/Y',
-        allowInput: true,
-        onChange: function () {
-          if (table) table.ajax.reload();
-        }
-      });
-    }
-  }
-
-  // Dynamic filtering of Product dropdown when Loan Type changes
-  $('#loanTypeFilter').on('change', function () {
-    const selectedTypeId = $(this).val();
-    $('#productFilter option').each(function () {
-      const typeId = $(this).attr('data-loan-type-id');
-      if (!selectedTypeId || !typeId || typeId === selectedTypeId) {
-        $(this).show();
-      } else {
-        $(this).hide();
+  // Ensure toolbar filter dropdowns remain clean native selects
+  ['#loanModeFilter', '#loanTypeFilter', '#areaFilter'].forEach(function (sel) {
+    var $el = $(sel);
+    if ($el.length) {
+      $el.addClass('no-search');
+      if ($el.data('select2')) {
+        $el.select2('destroy');
       }
-    });
-
-    // Reset product selection if current selection is now hidden
-    const selectedProduct = $('#productFilter option:selected');
-    if (selectedProduct.length && selectedProduct.css('display') === 'none') {
-      $('#productFilter').val('');
     }
-
-    if (table) table.ajax.reload();
   });
 
-  // Filter Change Event
-  $('#fromDateFilter, #toDateFilter, #areaFilter, #productFilter, #loanModeFilter').on('change', function () {
-    if (table) table.ajax.reload();
+  // Status Filter Change Event
+  $('#fromDateFilter, #toDateFilter, #areaFilter, #loanModeFilter, #loanTypeFilter').on('change', function () {
+    table.ajax.reload();
+  });
+
+  $('#accountNumberFilter').on('keyup change', function () {
+    table.ajax.reload();
   });
 
   $('#resetFilters').on('click', function () {
-    $('#statusFilter').val('all');
-    if (fromPicker) fromPicker.clear(); else $('#fromDateFilter').val('');
-    if (toPicker) toPicker.clear(); else $('#toDateFilter').val('');
+    $('#statusFilter').val('overdue');
+    $('#fromDateFilter').val('');
+    $('#toDateFilter').val('');
     $('#areaFilter').val('');
-    $('#loanTypeFilter').val('').trigger('change');
-    $('#productFilter').val('');
-    $('#loanModeFilter').val('all');
+    $('#termUnitFilter').val('');
+    $('#loanModeFilter').val('');
+    $('#loanTypeFilter').val('');
+    $('#accountNumberFilter').val('');
     
     // Reset active tab in UI
     $('#repaymentsTabs button').removeClass('active');
-    $('#repaymentsTabs button[data-status="all"]').addClass('active');
-    $('#tableTitle').text('All EMI Repayments');
+    $('#repaymentsTabs button[data-status="overdue"]').addClass('active');
+    $('#tableTitle').text('Overdue Clients');
     
-    if (table) table.ajax.reload();
+    table.ajax.reload();
   });
 
   // EMI detail modal setup
@@ -799,8 +1060,7 @@ document.addEventListener('DOMContentLoaded', function () {
     emiScheduleLink.href = `${baseUrl}emi/repayments/view/${applicationNumber}`;
     if (emiPrintReceiptLink) {
       emiPrintReceiptLink.href = `${baseUrl}emi/receipts/print/${emiId}`;
-      const isPaid = this.closest('tr').querySelector('.badge.bg-label-success') !== null || (table.row($(this).closest('tr')).data().status === 'paid');
-      emiPrintReceiptLink.classList.toggle('d-none', !isPaid);
+      emiPrintReceiptLink.classList.add('d-none');
     }
     emiDetailsBody.innerHTML = `
       <div class="text-center py-5">
@@ -822,10 +1082,15 @@ document.addEventListener('DOMContentLoaded', function () {
         const emi = data.emi;
         const loan = data.loan;
 
+        if (emiPrintReceiptLink) {
+          emiPrintReceiptLink.classList.toggle('d-none', emi.status !== 'paid');
+        }
+
         const formatValue = (value, prefix = '') => (value ? `${prefix}${value}` : '-');
         const statusBadge = `<span class="badge bg-label-${emi.status_color} px-3 py-2">${emi.status_label}</span>`;
 
         const detailRows = [
+          { label: 'Account Number', value: loan.account_number || 'N/A', valueClass: 'text-primary fw-bold' },
           { label: 'Client Name', value: loan.client_name || 'N/A' },
           { label: 'Loan Product', value: loan.product || 'N/A' },
           { label: 'Instalment No.', value: emi.instalment_number },
@@ -919,17 +1184,17 @@ document.addEventListener('DOMContentLoaded', function () {
   const historyTotalAmount = document.getElementById('historyTotalAmount');
   const historyPaidAmount = document.getElementById('historyPaidAmount');
 
-  $('#repaymentsTable').on('click', '.fa-info-circle', function () {
-    const row = table.row($(this).closest('tr')).data();
-    const emiId = row.id;
+  $('#repaymentsTable').on('click', '.emi-history-trigger, .fa-info-circle', function () {
+    const emiRow = $(this).closest('tr');
+    const emiId = emiRow.data('emi-id');
+    const instalmentNumber = emiRow.data('instalment');
+    const totalFormatted = emiRow.data('total');
 
-    historyEmiNumber.textContent = row.instalment_number;
-    historyTotalAmount.textContent = row.total_amount_formatted;
-    
-    // Extract raw text from paid_amount HTML
-    const tempDiv = document.createElement('div');
-    tempDiv.innerHTML = row.paid_amount;
-    historyPaidAmount.textContent = tempDiv.textContent.trim();
+    if (!emiId) return;
+
+    historyEmiNumber.textContent = instalmentNumber || '';
+    historyTotalAmount.textContent = totalFormatted || '₹0.00';
+    historyPaidAmount.textContent = $(this).closest('td').text().trim() || '₹0.00';
 
     historyTableBody.innerHTML = '<tr><td colspan="4" class="text-center py-4"><div class="spinner-border spinner-border-sm text-primary" role="status"></div></td></tr>';
     historyModal.show();

@@ -42,13 +42,23 @@ window.config = {
 };
 
 window.assetsPath = document.documentElement.getAttribute('data-assets-path');
-window.baseUrl = document.documentElement.getAttribute('data-base-url');
-if (window.baseUrl) {
-  if (window.location.protocol === 'https:') {
-    window.baseUrl = window.baseUrl.replace(/^http:/, 'https:');
-  }
-  if (!window.baseUrl.endsWith('/')) {
-    window.baseUrl += '/';
-  }
+window.baseUrl = document.documentElement.getAttribute('data-base-url') || '/';
+if (!window.baseUrl.endsWith('/')) {
+  window.baseUrl += '/';
 }
+if (window.location.protocol === 'https:' && window.baseUrl.indexOf('http://') === 0) {
+  window.baseUrl = window.baseUrl.replace(/^http:\/\//i, 'https://');
+}
+try {
+  if (/^https?:\/\//i.test(window.baseUrl)) {
+    var parsedBase = new URL(window.baseUrl, window.location.href);
+    if (parsedBase.protocol !== window.location.protocol || parsedBase.host !== window.location.host) {
+      window.baseUrl = parsedBase.pathname.endsWith('/') ? parsedBase.pathname : parsedBase.pathname + '/';
+      if (!window.baseUrl) {
+        window.baseUrl = '/';
+      }
+    }
+  }
+} catch (e) {}
 window.templateName = document.documentElement.getAttribute('data-template');
+window.isDarkStyle = window.Helpers ? window.Helpers.isDarkStyle() : false;

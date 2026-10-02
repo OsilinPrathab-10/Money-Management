@@ -5,6 +5,8 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\AdminNotification;
 use App\Models\AgentNotification;
+use App\Models\Client;
+use App\Models\CustomerNotification;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -20,7 +22,47 @@ class NotificationControllerApi extends Controller
         try {
             $page = $request->input('page', 1);
             $limit = $request->input('limit', 20);
-            $type = $request->input('type'); // 'admin', 'agent'
+            $type = $request->input('type'); // 'admin', 'agent', 'customer'
+
+            if ($this->usingCustomerInbox($request)) {
+                $client = $this->authenticatedClient();
+                if (! $client) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Client profile not found',
+                    ], 404);
+                }
+
+                $status = $request->input('status'); // read or unread
+
+                $query = CustomerNotification::where('client_id', $client->id);
+
+                if ($status === 'read') {
+                    $query->whereNotNull('read_at');
+                } elseif ($status === 'unread') {
+                    $query->whereNull('read_at');
+                }
+
+                $notifications = $query->orderByDesc('created_at')
+                    ->paginate($limit, ['*'], 'page', $page);
+
+                return response()->json([
+                    'success' => true,
+                    'data' => collect($notifications->items())
+                        ->map(fn ($notification) => $this->formatCustomerNotification($notification, true))
+                        ->values(),
+                    'notification_count' => [
+                        'unread' => CustomerNotification::where('client_id', $client->id)->whereNull('read_at')->count(),
+                        'total' => $notifications->total(),
+                    ],
+                    'pagination' => [
+                        'current_page' => $notifications->currentPage(),
+                        'per_page' => $notifications->perPage(),
+                        'total' => $notifications->total(),
+                        'last_page' => $notifications->lastPage(),
+                    ],
+                ]);
+            }
 
             if ($type === 'agent') {
                 // Agent notifications
@@ -57,7 +99,11 @@ class NotificationControllerApi extends Controller
                 ]
             ]);
         } catch (\Exception $e) {
-            Log::error('Error fetching notifications', ['error' => $e->getMessage()]);
+            Log::error('Error fetching notifications', [
+                'error' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+            ]);
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch notifications'
@@ -72,7 +118,22 @@ class NotificationControllerApi extends Controller
     {
         try {
             $limit = $request->input('limit', 10);
-            $type = $request->input('type', 'admin'); // 'admin' or 'agent'
+            $type = $request->input('type', 'admin'); // 'admin', 'agent', or customer inbox
+
+            if ($this->usingCustomerInbox($request)) {
+                $client = $this->authenticatedClient();
+                $notifications = CustomerNotification::where('client_id', $client->id)
+                    ->orderByDesc('created_at')
+                    ->limit($limit)
+                    ->get()
+                    ->map(fn ($notification) => $this->formatCustomerNotification($notification, true));
+
+                return response()->json([
+                    'success' => true,
+                    'notifications' => $notifications,
+                    'unread_count' => CustomerNotification::where('client_id', $client->id)->whereNull('read_at')->count(),
+                ]);
+            }
 
             if ($type === 'agent') {
                 $notifications = AgentNotification::where('agent_id', Auth::id())
@@ -158,6 +219,16 @@ class NotificationControllerApi extends Controller
         try {
             $type = $request->input('type', 'admin');
 
+            if ($this->usingCustomerInbox($request)) {
+                $notification = CustomerNotification::where('client_id', $this->authenticatedClient()->id)
+                    ->findOrFail($id);
+
+                return response()->json([
+                    'success' => true,
+                    'data' => $this->formatCustomerNotification($notification, false),
+                ]);
+            }
+
             if ($type === 'agent') {
                 $notification = AgentNotification::where('agent_id', Auth::id())
                     ->findOrFail($id);
@@ -202,11 +273,55 @@ class NotificationControllerApi extends Controller
 
     /**
      * Mark notification as read
+     * POST /api/customer/notifications/read
+     * POST /api/customer/notifications/read/{id}
+     * POST /api/customer/notifications/{id}/mark-read
+     * Body: { id } or { notification_id }
      */
-    public function markAsRead($id, Request $request): JsonResponse
+    public function markAsRead(Request $request, $id = null): JsonResponse
     {
         try {
+            $id = $id
+                ?: $request->route('id')
+                ?: $request->input('id')
+                ?: $request->input('notification_id');
+
+            if (! $id) {
+                return response()->json([
+                    'success' => false,
+                    'status' => false,
+                    'message' => 'Notification id is required',
+                ], 422);
+            }
+
             $type = $request->input('type', 'admin');
+
+            if ($this->usingCustomerInbox($request)) {
+                $client = $this->authenticatedClient();
+                $notification = CustomerNotification::where('client_id', $client->id)
+                    ->find($id);
+
+                if (! $notification) {
+                    return response()->json([
+                        'success' => false,
+                        'status' => false,
+                        'message' => 'Notification not found',
+                    ], 404);
+                }
+
+                if (! $notification->read_at) {
+                    $notification->update(['read_at' => now()]);
+                    $notification->refresh();
+                }
+
+                return response()->json([
+                    'success' => true,
+                    'status' => true,
+                    'message' => 'Notification marked as read',
+                    'data' => $this->formatCustomerNotification($notification, true),
+                    'unread_count' => CustomerNotification::where('client_id', $client->id)->whereNull('read_at')->count(),
+                ]);
+            }
 
             if ($type === 'agent') {
                 $notification = AgentNotification::where('agent_id', Auth::id())
@@ -223,12 +338,14 @@ class NotificationControllerApi extends Controller
 
             return response()->json([
                 'success' => true,
+                'status' => true,
                 'message' => 'Notification marked as read',
             ]);
         } catch (\Exception $e) {
             Log::error('Error marking notification as read', ['error' => $e->getMessage()]);
             return response()->json([
                 'success' => false,
+                'status' => false,
                 'message' => 'Failed to mark notification as read',
             ], 500);
         }
@@ -236,11 +353,29 @@ class NotificationControllerApi extends Controller
 
     /**
      * Mark all notifications as read
+     * POST /api/customer/notifications/read-all
+     * POST /api/customer/notifications/readall
+     * POST /api/customer/notifications/mark-all-read
      */
     public function markAllAsRead(Request $request): JsonResponse
     {
         try {
             $type = $request->input('type', 'admin');
+
+            if ($this->usingCustomerInbox($request)) {
+                $client = $this->authenticatedClient();
+                $updated = CustomerNotification::where('client_id', $client->id)
+                    ->whereNull('read_at')
+                    ->update(['read_at' => now()]);
+
+                return response()->json([
+                    'success' => true,
+                    'status' => true,
+                    'message' => 'All notifications marked as read',
+                    'updated_count' => $updated,
+                    'unread_count' => 0,
+                ]);
+            }
 
             if ($type === 'agent') {
                 AgentNotification::where('agent_id', Auth::id())
@@ -255,12 +390,14 @@ class NotificationControllerApi extends Controller
 
             return response()->json([
                 'success' => true,
+                'status' => true,
                 'message' => 'All notifications marked as read',
             ]);
         } catch (\Exception $e) {
             Log::error('Error marking all notifications as read', ['error' => $e->getMessage()]);
             return response()->json([
                 'success' => false,
+                'status' => false,
                 'message' => 'Failed to mark all notifications as read',
             ], 500);
         }
@@ -273,6 +410,17 @@ class NotificationControllerApi extends Controller
     {
         try {
             $type = $request->input('type', 'admin');
+
+            if ($this->usingCustomerInbox($request)) {
+                CustomerNotification::where('client_id', $this->authenticatedClient()->id)
+                    ->findOrFail($id)
+                    ->delete();
+
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Notification deleted successfully',
+                ]);
+            }
 
             if ($type === 'agent') {
                 $notification = AgentNotification::where('agent_id', Auth::id())
@@ -304,6 +452,17 @@ class NotificationControllerApi extends Controller
         try {
             $type = $request->input('type', 'admin');
 
+            if ($this->usingCustomerInbox($request)) {
+                CustomerNotification::where('client_id', $this->authenticatedClient()->id)
+                    ->whereNotNull('read_at')
+                    ->delete();
+
+                return response()->json([
+                    'success' => true,
+                    'message' => 'All read notifications cleared',
+                ]);
+            }
+
             if ($type === 'agent') {
                 AgentNotification::where('agent_id', Auth::id())
                     ->whereNotNull('read_at')
@@ -332,6 +491,21 @@ class NotificationControllerApi extends Controller
     {
         try {
             $type = $request->input('type', 'admin');
+
+            if ($this->usingCustomerInbox($request)) {
+                $clientId = $this->authenticatedClient()->id;
+                $total = CustomerNotification::where('client_id', $clientId)->count();
+                $unread = CustomerNotification::where('client_id', $clientId)->whereNull('read_at')->count();
+
+                return response()->json([
+                    'success' => true,
+                    'stats' => [
+                        'total' => $total,
+                        'unread' => $unread,
+                        'read' => $total - $unread,
+                    ],
+                ]);
+            }
 
             if ($type === 'agent') {
                 $total = AgentNotification::where('agent_id', Auth::id())->count();
@@ -365,11 +539,51 @@ class NotificationControllerApi extends Controller
      */
     private function getUnreadNotificationCount($type)
     {
+        if ($this->authenticatedClient() && $type !== 'agent') {
+            return CustomerNotification::where('client_id', $this->authenticatedClient()->id)
+                ->whereNull('read_at')
+                ->count();
+        }
         if ($type === 'agent') {
             return AgentNotification::where('agent_id', Auth::id())
                 ->whereNull('read_at')
                 ->count();
         }
         return AdminNotification::unread()->count();
+    }
+
+    private function usingCustomerInbox(Request $request): bool
+    {
+        if ($request->input('type') === 'agent') {
+            return false;
+        }
+
+        return $this->authenticatedClient() !== null;
+    }
+
+    private function authenticatedClient(): ?Client
+    {
+        $user = Auth::user();
+        if (!$user) return null;
+
+        return $user->client 
+            ?? Client::where('user_id', $user->id)->first()
+            ?? Client::where('client_phone', $user->phone ?? '')->first();
+    }
+
+    private function formatCustomerNotification(CustomerNotification $notification, bool $humanDates): array
+    {
+        return [
+            'id' => $notification->id,
+            'type' => $notification->notification_type,
+            'title' => $notification->title,
+            'message' => $notification->message,
+            'icon' => $notification->icon,
+            'priority' => $notification->priority,
+            'action_data' => $notification->action_data,
+            'is_read' => ! empty($notification->read_at),
+            'created_at' => $humanDates ? $notification->created_at?->diffForHumans() : $notification->created_at,
+            'created_at_formatted' => $notification->created_at?->format('d-m-Y h:i A'),
+        ];
     }
 }

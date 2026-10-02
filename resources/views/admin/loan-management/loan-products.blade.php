@@ -56,6 +56,7 @@
           <th>S.No</th>
           <th>Loan Code</th>
           <th>Name</th>
+          <th>Loan Type</th>
           <th>Status</th>
           <th>Actions</th>
         </tr>
@@ -251,6 +252,13 @@
               <label class="form-label" for="otherCharges">Other Charges</label>
               <input type="number" id="otherCharges" class="form-control @error('otherCharges') is-invalid @enderror" placeholder="0.00" step="0.01" name="otherCharges" value="{{ old('otherCharges') }}" />
               @error('otherCharges')
+                <div class="invalid-feedback">{{ $message }}</div>
+              @enderror
+            </div>
+            <div class="mb-5 @error('bankingCharges') is-invalid @enderror">
+              <label class="form-label" for="bankingCharges">Bank Transfer Charges</label>
+              <input type="number" id="bankingCharges" class="form-control @error('bankingCharges') is-invalid @enderror" placeholder="0.00" step="0.01" name="bankingCharges" value="{{ old('bankingCharges') }}" />
+              @error('bankingCharges')
                 <div class="invalid-feedback">{{ $message }}</div>
               @enderror
             </div>

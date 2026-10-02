@@ -18,7 +18,7 @@ class StaffAssignmentService
                 ->firstOrCreate(['id' => 1]);
 
             // Get staff using Spatie role
-            $staffs = User::role('staff')
+            $staffs = User::whereHas('roles', fn ($rq) => $rq->whereIn('name', ['staff', 'Staff']))
                 ->where('is_active', 1)
                 ->withCount(['loans as active_loans_count' => function ($q) {
                     $q->whereIn('status', LoanStatus::ACTIVE);

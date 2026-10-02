@@ -214,7 +214,7 @@
   $fyEnd = $financialYear['year_end_date'] ?? date('Y') . '-12-31';
 @endphp
 
-<div class="container-xxl flex-grow-1 container-p-y">
+<div class="account-module">
   @include('admin.account.shared.page-header', [
     'title' => __('Accounting Reports'),
     'subtitle' => __('Comprehensive financial analytics, aging reports, tax summaries, and balance statements.'),
@@ -239,13 +239,13 @@
   @endphp
 
   <!-- Primary Reports -->
-  <!-- <div class="d-flex align-items-center mb-4 mt-2">
+  {{-- <div class="d-flex align-items-center mb-4 mt-2">
     <h5 class="mb-0 fw-bold"><i class="ri-bar-chart-box-line text-primary me-2"></i>{{ __('Core Financials') }}</h5>
     <div class="flex-grow-1 ms-3 border-top"></div>
   </div> -->
 
   <!-- <div class="row g-4 mb-5">
-    {{-- Invoice aging --}}
+    <!-- Invoice aging -->
     <div class="col-md-6 col-xl-4">
       <div class="card premium-report-card h-100">
         <div class="card-body d-flex flex-column">
@@ -292,7 +292,7 @@
       </div>
     </div>
 
-    {{-- Bill aging --}}
+    <!-- Bill aging -->
     <div class="col-md-6 col-xl-4">
       <div class="card premium-report-card h-100">
         <div class="card-body d-flex flex-column">
@@ -330,7 +330,7 @@
       </div>
     </div>
 
-    {{-- Tax summary --}}
+    <!-- Tax summary -->
     <div class="col-md-6 col-xl-4">
       <div class="card premium-report-card h-100">
         <div class="card-body d-flex flex-column">
@@ -375,16 +375,16 @@
         </div>
       </div>
     </div>
-  </div> -->
+  </div> --}}
 
   <!-- Balances Section -->
-  <!-- <div class="d-flex align-items-center mb-4 mt-2">
+  {{-- <div class="d-flex align-items-center mb-4 mt-2">
     <h5 class="mb-0 fw-bold"><i class="ri-scales-3-line text-primary me-2"></i>{{ __('Ledger Balances') }}</h5>
     <div class="flex-grow-1 ms-3 border-top"></div>
   </div>
 
   <div class="row g-4 mb-5">
-    {{-- Customer balance --}}
+    <!-- Customer balance -->
     <div class="col-md-6">
       <div class="card premium-report-card h-100">
         <div class="card-body d-flex flex-column">
@@ -427,51 +427,7 @@
         </div>
       </div>
     </div>
-
-    {{-- Vendor balance --}}
-    <div class="col-md-6">
-      <div class="card premium-report-card h-100">
-        <div class="card-body d-flex flex-column">
-          <div class="d-flex align-items-center gap-4 mb-3">
-            <div class="premium-icon-wrapper flex-shrink-0" style="background: linear-gradient(135deg, rgba(245, 158, 11, 0.15) 0%, rgba(245, 158, 11, 0.05) 100%); color: #f59e0b;">
-              <i class="icon-base ri ri-store-2-line fs-3"></i>
-            </div>
-            <div>
-              <h5 class="premium-title mb-1">{{ __('Vendor Balance') }}</h5>
-              <p class="premium-subtitle mb-0">{{ __('Comprehensive summary of outstanding accounts payable organized by vendor.') }}</p>
-            </div>
-          </div>
-
-          <div class="report-date-filter mt-2 mb-4 d-flex align-items-end gap-3">
-            <div class="flex-grow-1">
-              <label class="form-label">{{ __('As of Date') }}</label>
-              <input type="date" class="form-control report-filter-input" data-target="vendor-balance" value="{{ $today }}">
-            </div>
-            <div class="form-check form-switch mb-2">
-              <input class="form-check-input report-filter-checkbox" type="checkbox" role="switch" data-target="vendor-balance" id="showZeroVendor" value="true">
-              <label class="form-check-label text-secondary small fw-medium" for="showZeroVendor">{{ __('Show Zero Balances') }}</label>
-            </div>
-          </div>
-
-          <div class="d-flex justify-content-end gap-2 premium-btn-group mt-auto">
-            <a href="{{ route('account.reports.vendor-balance.print', ['as_of_date' => $today]) }}" id="btn-view-vendor-balance" class="btn btn-outline-warning px-4 text-warning border-warning" data-base-url="{{ route('account.reports.vendor-balance.print') }}">
-              <i class="ri-eye-line me-1"></i> {{ __('View Report') }}
-            </a>
-            <div class="dropdown">
-              <button class="btn btn-warning btn-icon dropdown-toggle hide-arrow text-white rounded-3 px-3" style="background: linear-gradient(135deg, #f59e0b, #d97706); border: none; box-shadow: 0 4px 10px rgba(245, 158, 11, 0.3);" type="button" data-bs-toggle="dropdown" aria-expanded="false">
-                <i class="ri-download-cloud-2-line"></i>
-              </button>
-              <ul class="dropdown-menu dropdown-menu-end shadow-sm border-0 mt-2">
-                <li><a class="dropdown-item d-flex align-items-center export-link" data-base-url="{{ route('account.reports.vendor-balance.export', ['format' => 'pdf']) }}" href="{{ route('account.reports.vendor-balance.export', ['format' => 'pdf', 'as_of_date' => $today]) }}"><i class="ri-file-pdf-line text-danger me-2"></i>PDF</a></li>
-                <li><a class="dropdown-item d-flex align-items-center export-link" data-base-url="{{ route('account.reports.vendor-balance.export', ['format' => 'xlsx']) }}" href="{{ route('account.reports.vendor-balance.export', ['format' => 'xlsx', 'as_of_date' => $today]) }}"><i class="ri-file-excel-2-line text-success me-2"></i>Excel</a></li>
-                <li><a class="dropdown-item d-flex align-items-center export-link" data-base-url="{{ route('account.reports.vendor-balance.export', ['format' => 'csv']) }}" href="{{ route('account.reports.vendor-balance.export', ['format' => 'csv', 'as_of_date' => $today]) }}"><i class="ri-file-text-line text-secondary me-2"></i>CSV</a></li>
-              </ul>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div> -->
+  </div> --}}
 
   <!-- Navigation Tabs -->
   <ul class="nav nav-tabs mb-5 border-bottom" role="tablist" style="display: flex !important; flex-direction: row !important; flex-wrap: wrap !important; width: 100% !important; gap: 0.5rem;">
@@ -482,7 +438,7 @@
     </li>
     <li class="nav-item" role="presentation">
       <button type="button" class="nav-link" role="tab" data-bs-toggle="tab" data-bs-target="#navs-ledgers" aria-controls="navs-ledgers" aria-selected="false">
-        <i class="ri-book-2-line me-1"></i> {{ __('General Ledger & Books') }}
+        <i class="ri-book-2-line me-1"></i> {{ __('Books') }}
       </button>
     </li>
     <li class="nav-item" role="presentation">
@@ -534,12 +490,11 @@
       </div>
     </div>
 
-    <!-- Tab 2: General Ledger & Books -->
+    <!-- Tab 2: Books -->
     <div class="tab-pane fade" id="navs-ledgers" role="tabpanel">
       <div class="row g-4">
         @php
           $ledgerBooks = [
-        ['title' => 'General Ledger Report', 'icon' => 'ri-file-paper-2-line', 'color' => '#eab308', 'desc' => 'Master record of all your financial transactions.', 'route' => route('account.reports.general-ledger')],
             ['title' => 'Day Book Report', 'icon' => 'ri-calendar-todo-line', 'color' => '#f97316', 'desc' => 'Daily chronological record of transactions.', 'route' => route('account.reports.day-book')],
           ];
         @endphp

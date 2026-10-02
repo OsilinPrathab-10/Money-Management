@@ -19,6 +19,7 @@ class Staff extends Model
         'email',
         'phone',
         'salary_amount',
+        'monthly_salary',
         'profile_photo',
         'aadhar_photo',
         'bank_account_photo',
@@ -41,6 +42,18 @@ class Staff extends Model
         'salary_details' => 'array',
         'salary_amount' => 'decimal:2',
     ];
+
+    protected $appends = ['monthly_salary'];
+
+    public function getMonthlySalaryAttribute()
+    {
+        return $this->salary_amount;
+    }
+
+    public function setMonthlySalaryAttribute($value)
+    {
+        $this->attributes['salary_amount'] = $value;
+    }
 
     public function attendances()
     {

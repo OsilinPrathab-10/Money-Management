@@ -18,6 +18,8 @@ class Expense extends Model
         'chart_of_account_id',
         'amount',
         'description',
+        'module_tag',
+        'entry_tag',
         'reference_number',
         'status',
         'approved_by',

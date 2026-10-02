@@ -1,5 +1,6 @@
 @php
   use Illuminate\Support\Facades\Vite;
+  use App\Helpers\SettingsHelper;
 
   $menuCollapsed = $configData['menuCollapsed'] === 'layout-menu-collapsed' ? json_encode(true) : false;
 
@@ -16,10 +17,10 @@
   $isAdminLayout = !str_contains($configData['layout'] ?? '', 'front');
   $primaryColorCookieName = $isAdminLayout ? 'admin-primaryColor' : 'front-primaryColor';
 
-  // Get primary color - first from cookie, then from config
+  // Customizer cookie wins so a live color change survives menu navigation
   $primaryColor = isset($_COOKIE[$primaryColorCookieName])
       ? $_COOKIE[$primaryColorCookieName]
-      : $configData['color'] ?? null;
+      : (SettingsHelper::get('primary_color', null) ?: ($configData['color'] ?? null));
 @endphp
 <!-- laravel style -->
 @vite(['resources/assets/vendor/js/helpers.js'])
@@ -55,13 +56,6 @@
           lang: '{{ app()->getLocale() }}',
           'controls': <?php echo json_encode($configData['customizerControls']); ?>,
         });
-
-        // Ensure color is applied on page load
-        @if ($primaryColor)
-          if (window.Helpers && typeof window.Helpers.setColor === 'function') {
-            window.Helpers.setColor("{{ $primaryColor }}", true);
-          }
-        @endif
       } catch (error) {
         console.warn('Template customizer initialization error:', error);
       }

@@ -140,16 +140,36 @@
     <h5 class="mb-0">Loan Accounts</h5>
     <div class="d-flex flex-wrap align-items-center gap-3">
       <div class="d-flex align-items-center gap-2">
-        <label for="fromDate" class="form-label mb-0 text-nowrap fw-medium">From Date:</label>
-        <input type="date" id="fromDate" class="form-control form-control-sm" style="min-width: 150px;">
+        <label for="accountNumberFilter" class="form-label mb-0 text-nowrap fw-medium">Cus A/C No:</label>
+        <input type="text" id="accountNumberFilter" class="form-control form-control-sm" placeholder="Search A/C No" style="min-width: 140px;">
+      </div>
+      @include('partials.date-range-filter', [
+        'fromId' => 'fromDate',
+        'toId' => 'toDate',
+        'presetId' => 'loanAccountsDatePreset',
+      ])
+      <div class="d-flex align-items-center gap-2">
+        <label for="loanModeFilter" class="form-label mb-0 text-nowrap fw-medium">Mode:</label>
+        <select id="loanModeFilter" class="form-select form-select-sm no-search" style="width: 130px;">
+          <option value="">All Modes</option>
+          <option value="emi">Standard EMI</option>
+          <option value="interest_only">Open Loan</option>
+        </select>
       </div>
       <div class="d-flex align-items-center gap-2">
-        <label for="toDate" class="form-label mb-0 text-nowrap fw-medium">To Date:</label>
-        <input type="date" id="toDate" class="form-control form-control-sm" style="min-width: 150px;">
+        <label for="loanTypeFilter" class="form-label mb-0 text-nowrap fw-medium">Loan Type:</label>
+        <select id="loanTypeFilter" class="form-select form-select-sm no-search" style="min-width: 160px; max-width: 220px;">
+          <option value="">All Types</option>
+          @if(isset($loanTypes))
+            @foreach($loanTypes as $lt)
+              <option value="{{ $lt->id }}">{{ trim($lt->name) }}</option>
+            @endforeach
+          @endif
+        </select>
       </div>
       <div class="d-flex align-items-center gap-2">
         <label class="mb-0">Filter by Status:</label>
-        <select id="statusFilter" class="form-select form-select-sm" style="width: 150px;">
+        <select id="statusFilter" class="form-select form-select-sm no-search" style="width: 150px;">
           <option value="">All Statuses</option>
           <option value="active">Active</option>
           <option value="closed">Closed</option>
@@ -163,7 +183,7 @@
         <thead>
           <tr>
             <th>S.No</th>
-            <th>Account Number</th>
+            <th>Loan A/C No</th>
             <th>Client Name</th>
             <th>Zone</th>
             <th>Loan Type</th>

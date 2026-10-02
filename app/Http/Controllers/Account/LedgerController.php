@@ -2,18 +2,26 @@
 
 namespace App\Http\Controllers\Account;
 
-use App\Models\Account\ChartOfAccount;
+use App\Models\Account\BankAccount;
+use App\Models\Client;
 use App\Services\Account\AccountExportService;
-use Carbon\Carbon;
+use App\Services\Account\AccountingTags;
+use App\Services\Account\OperationalLedgerService;
+use App\Support\DateRangePreset;
 use Illuminate\Http\Request;
+use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Routing\Controller;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
 
 class LedgerController extends Controller
 {
-    public function __construct(protected AccountExportService $exportService)
-    {
+    private const PER_PAGE_OPTIONS = [25, 50, 100, 250, 500];
+
+    public function __construct(
+        protected AccountExportService $exportService,
+        protected OperationalLedgerService $operationalLedger
+    ) {
         //
     }
 
@@ -26,50 +34,97 @@ class LedgerController extends Controller
         $validated = $request->validate([
             'from_date' => 'nullable|date',
             'to_date' => 'nullable|date',
-            'status' => 'nullable|string|in:all,draft,posted,reversed',
-            'account_id' => 'nullable|integer',
+            'status' => 'nullable|string|in:all,draft,approved,posted',
+            'module_tag' => 'nullable|string|in:all,CHIT,LOAN,FD,TRANSFER,OTHER',
+            'entry_tag' => 'nullable|string|max:40',
+            'bank_account_id' => 'nullable|integer',
+            'client_id' => 'nullable|integer',
+            'source' => 'nullable|string|in:all,Bank,Revenue,Expense,Dividend',
             'search' => 'nullable|string|max:255',
-            'per_page' => 'nullable|integer|min:10|max:200',
+            'per_page' => ['nullable', 'integer', Rule::in(self::PER_PAGE_OPTIONS)],
         ]);
 
-        $fromDate = !empty($validated['from_date'] ?? null)
-            ? Carbon::parse($validated['from_date'])->toDateString()
-            : now()->startOfMonth()->toDateString();
-        $toDate = !empty($validated['to_date'] ?? null)
-            ? Carbon::parse($validated['to_date'])->toDateString()
-            : now()->endOfMonth()->toDateString();
+        [$fromDate, $toDate] = DateRangePreset::applyToRequest($request);
         $status = $validated['status'] ?? 'posted';
-        $accountId = $validated['account_id'] ?? null;
+        $moduleTag = $validated['module_tag'] ?? 'all';
+        $entryTag = $validated['entry_tag'] ?? null;
+        $bankAccountId = isset($validated['bank_account_id']) ? (int) $validated['bank_account_id'] : null;
+        $clientId = isset($validated['client_id']) ? (int) $validated['client_id'] : null;
+        $source = $validated['source'] ?? 'all';
         $search = $validated['search'] ?? null;
+        $perPage = (int) ($validated['per_page'] ?? 25);
+        if (! in_array($perPage, self::PER_PAGE_OPTIONS, true)) {
+            $perPage = 25;
+        }
 
-        $chartOfAccounts = ChartOfAccount::query()
+        $built = $this->operationalLedger->build(
+            $creatorId,
+            $fromDate,
+            $toDate,
+            $moduleTag,
+            $entryTag,
+            $bankAccountId,
+            $search,
+            $status,
+            $clientId,
+            $source
+        );
+
+        $page = max(1, (int) $request->get('page', 1));
+        $slice = $built['rows']->forPage($page, $perPage)->values();
+        $ledger = new LengthAwarePaginator(
+            $slice,
+            $built['rows']->count(),
+            $perPage,
+            $page,
+            [
+                'path' => $request->url(),
+                'query' => $request->query(),
+            ]
+        );
+
+        $bankAccounts = BankAccount::query()
             ->where('created_by', $creatorId)
             ->where('is_active', true)
-            ->select('id', 'account_code', 'account_name')
-            ->orderBy('account_code')
+            ->select('id', 'account_name', 'bank_name')
+            ->orderBy('account_name')
             ->get();
 
-        $perPage = (int) ($validated['per_page'] ?? 20);
-
-        $baseQuery = $this->ledgerBaseQuery($creatorId, $fromDate, $toDate, $status, $accountId, $search);
-
-        $ledger = $baseQuery
-            ->orderByDesc('journal_entries.journal_date')
-            ->orderByDesc('journal_entries.id')
-            ->paginate($perPage)
-            ->withQueryString();
-
-        $totals = $this->ledgerTotals($creatorId, $fromDate, $toDate, $status, $accountId, $search);
+        $clients = Client::query()
+            ->select('id', 'client_name')
+            ->orderBy('client_name')
+            ->limit(2000)
+            ->get();
 
         return view('admin.account.ledger.index', [
             'fromDate' => $fromDate,
             'toDate' => $toDate,
             'status' => $status,
-            'accountId' => $accountId,
+            'moduleTag' => $moduleTag,
+            'entryTag' => $entryTag,
+            'bankAccountId' => $bankAccountId,
+            'clientId' => $clientId,
+            'source' => $source,
             'search' => $search,
-            'chartOfAccounts' => $chartOfAccounts,
+            'perPage' => $perPage,
+            'perPageOptions' => self::PER_PAGE_OPTIONS,
+            'bankAccounts' => $bankAccounts,
+            'clients' => $clients,
+            'moduleOptions' => AccountingTags::modules(),
+            'entryOptions' => AccountingTags::entries(),
+            'sourceOptions' => ['Bank', 'Revenue', 'Expense', 'Dividend'],
             'ledger' => $ledger,
-            'totals' => $totals,
+            'totals' => [
+                'total_debit' => $built['totals']['debit'],
+                'total_credit' => $built['totals']['credit'],
+                'bank_debit' => $built['totals']['bank_debit'],
+                'bank_credit' => $built['totals']['bank_credit'],
+                'revenue' => $built['totals']['revenue'],
+                'expense' => $built['totals']['expense'],
+                'chit_fees' => $built['totals']['chit_fees'],
+                'loan_fees' => $built['totals']['loan_fees'],
+                'fd_fees' => $built['totals']['fd_fees'],
+            ],
         ]);
     }
 
@@ -81,140 +136,84 @@ class LedgerController extends Controller
             'format' => 'required|in:pdf,csv,xlsx',
             'from_date' => 'nullable|date',
             'to_date' => 'nullable|date',
-            'status' => 'nullable|string|in:all,draft,posted,reversed',
-            'account_id' => 'nullable|integer',
+            'status' => 'nullable|string|in:all,draft,approved,posted',
+            'module_tag' => 'nullable|string|in:all,CHIT,LOAN,FD,TRANSFER,OTHER',
+            'entry_tag' => 'nullable|string|max:40',
+            'bank_account_id' => 'nullable|integer',
+            'client_id' => 'nullable|integer',
+            'source' => 'nullable|string|in:all,Bank,Revenue,Expense,Dividend',
             'search' => 'nullable|string|max:255',
         ]);
 
         $creatorId = creatorId();
-        $fromDate = !empty($validated['from_date'] ?? null)
-            ? Carbon::parse($validated['from_date'])->toDateString()
-            : now()->startOfMonth()->toDateString();
-        $toDate = !empty($validated['to_date'] ?? null)
-            ? Carbon::parse($validated['to_date'])->toDateString()
-            : now()->endOfMonth()->toDateString();
+        [$fromDate, $toDate] = DateRangePreset::applyToRequest($request);
         $status = $validated['status'] ?? 'posted';
-        $accountId = $validated['account_id'] ?? null;
+        $moduleTag = $validated['module_tag'] ?? 'all';
+        $entryTag = $validated['entry_tag'] ?? null;
+        $bankAccountId = isset($validated['bank_account_id']) ? (int) $validated['bank_account_id'] : null;
+        $clientId = isset($validated['client_id']) ? (int) $validated['client_id'] : null;
+        $source = $validated['source'] ?? 'all';
         $search = $validated['search'] ?? null;
 
-        $rows = $this->ledgerBaseQuery($creatorId, $fromDate, $toDate, $status, $accountId, $search)
-            ->orderByDesc('journal_entries.journal_date')
-            ->orderByDesc('journal_entries.id')
-            ->get()
-            ->map(function ($row) {
-                return [
-                    'date' => $row->journal_date,
-                    'journal' => $row->journal_number,
-                    'account' => $row->account_code . ' — ' . $row->account_name,
-                    'debit' => (float) $row->debit_amount,
-                    'credit' => (float) $row->credit_amount,
-                    'description' => $row->line_description ?? $row->journal_description ?? '',
-                    'status' => $row->journal_status,
-                ];
-            })
-            ->all();
+        $built = $this->operationalLedger->build(
+            $creatorId,
+            $fromDate,
+            $toDate,
+            $moduleTag,
+            $entryTag,
+            $bankAccountId,
+            $search,
+            $status,
+            $clientId,
+            $source
+        );
 
-        $totals = $this->ledgerTotals($creatorId, $fromDate, $toDate, $status, $accountId, $search);
+        $rows = $built['rows']->map(function ($row) {
+            $bankLabel = $row['bank'] ?? '—';
+            if (! empty($row['bank_name'])) {
+                $bankLabel .= ' (' . $row['bank_name'] . ')';
+            }
+
+            return [
+                'date' => $row['date'] ?? '—',
+                'module' => $row['module_tag'] ?? '—',
+                'entry' => $row['entry_tag'] ?? '—',
+                'bank' => $bankLabel,
+                'ref' => $row['ref'] ?? '—',
+                'source' => $row['source'] ?? '—',
+                'debit' => (float) ($row['debit'] ?? 0),
+                'credit' => (float) ($row['credit'] ?? 0),
+                'description' => $row['description'] ?? '',
+                'status' => $row['status'] ?? '—',
+            ];
+        })->all();
 
         return $this->exportService->exportByFormat(
             $validated['format'],
             'admin.account.ledger.exports.ledger',
             [
-                'pageTitle' => __('Ledger'),
+                'pageTitle' => __('Operational Ledger'),
                 'fromDate' => $fromDate,
                 'toDate' => $toDate,
                 'status' => $status,
-                'accountId' => $accountId,
-                'search' => $search,
                 'filters' => [
                     'from_date' => $fromDate,
                     'to_date' => $toDate,
                     'status' => $status,
-                    'account_id' => $accountId,
+                    'module_tag' => $moduleTag,
+                    'entry_tag' => $entryTag,
+                    'bank_account_id' => $bankAccountId,
+                    'client_id' => $clientId,
+                    'source' => $source,
                     'search' => $search,
                 ],
                 'rows' => $rows,
-                'totals' => $totals,
+                'totals' => [
+                    'total_debit' => $built['totals']['debit'],
+                    'total_credit' => $built['totals']['credit'],
+                ],
             ],
             'ledger-' . $fromDate . '-to-' . $toDate
         );
     }
-
-    /**
-     * @return \Illuminate\Database\Query\Builder
-     */
-    private function ledgerBaseQuery($creatorId, string $fromDate, string $toDate, string $status, $accountId = null, ?string $search = null): \Illuminate\Database\Query\Builder
-    {
-        $query = DB::table('journal_entries')
-            ->join('journal_entry_items', 'journal_entries.id', '=', 'journal_entry_items.journal_entry_id')
-            ->join('chart_of_accounts', 'journal_entry_items.account_id', '=', 'chart_of_accounts.id')
-            ->select(
-                'journal_entries.id',
-                'journal_entries.journal_date',
-                'journal_entries.journal_number',
-                'journal_entries.description as journal_description',
-                'journal_entries.status as journal_status',
-                'journal_entry_items.description as line_description',
-                'chart_of_accounts.account_code',
-                'chart_of_accounts.account_name',
-                'journal_entry_items.debit_amount',
-                'journal_entry_items.credit_amount'
-            )
-            ->where('journal_entries.created_by', $creatorId)
-            ->whereBetween('journal_entries.journal_date', [$fromDate, $toDate]);
-
-        if ($status !== 'all') {
-            $query->where('journal_entries.status', $status);
-        }
-
-        if ($accountId) {
-            $query->where('journal_entry_items.account_id', $accountId);
-        }
-
-        if ($search) {
-            $query->where(function ($q) use ($search) {
-                $q->where('journal_entries.journal_number', 'like', '%' . $search . '%')
-                    ->orWhere('journal_entries.description', 'like', '%' . $search . '%')
-                    ->orWhere('journal_entry_items.description', 'like', '%' . $search . '%')
-                    ->orWhere('chart_of_accounts.account_code', 'like', '%' . $search . '%')
-                    ->orWhere('chart_of_accounts.account_name', 'like', '%' . $search . '%');
-            });
-        }
-
-        return $query;
-    }
-
-    private function ledgerTotals($creatorId, string $fromDate, string $toDate, string $status, $accountId = null, ?string $search = null): array
-    {
-        $totalsQuery = DB::table('journal_entries')
-            ->join('journal_entry_items', 'journal_entries.id', '=', 'journal_entry_items.journal_entry_id')
-            ->join('chart_of_accounts', 'journal_entry_items.account_id', '=', 'chart_of_accounts.id')
-            ->selectRaw('COALESCE(SUM(journal_entry_items.debit_amount),0) as total_debit, COALESCE(SUM(journal_entry_items.credit_amount),0) as total_credit')
-            ->where('journal_entries.created_by', $creatorId)
-            ->whereBetween('journal_entries.journal_date', [$fromDate, $toDate]);
-
-        if ($status !== 'all') {
-            $totalsQuery->where('journal_entries.status', $status);
-        }
-        if ($accountId) {
-            $totalsQuery->where('journal_entry_items.account_id', $accountId);
-        }
-        if ($search) {
-            $totalsQuery->where(function ($q) use ($search) {
-                $q->where('journal_entries.journal_number', 'like', '%' . $search . '%')
-                    ->orWhere('journal_entries.description', 'like', '%' . $search . '%')
-                    ->orWhere('journal_entry_items.description', 'like', '%' . $search . '%')
-                    ->orWhere('chart_of_accounts.account_code', 'like', '%' . $search . '%')
-                    ->orWhere('chart_of_accounts.account_name', 'like', '%' . $search . '%');
-            });
-        }
-
-        $totals = $totalsQuery->first();
-
-        return [
-            'total_debit' => (float) ($totals?->total_debit ?? 0),
-            'total_credit' => (float) ($totals?->total_credit ?? 0),
-        ];
-    }
 }
-

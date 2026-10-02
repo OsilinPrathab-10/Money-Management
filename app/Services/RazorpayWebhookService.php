@@ -276,8 +276,11 @@ class RazorpayWebhookService
                     continue;
                 }
 
-                if ($collection->status === 'completed') {
-                    Log::info('[COLLECTION] Collection already completed', ['collection_id' => $id]);
+                if (in_array($collection->status, ['completed', 'verified', 'rejected'], true)) {
+                    Log::info('[COLLECTION] Collection already finalized', [
+                        'collection_id' => $id,
+                        'status' => $collection->status,
+                    ]);
                     continue;
                 }
 
@@ -373,12 +376,10 @@ class RazorpayWebhookService
             'pending_amount' => $emi->pending_amount,
         ]);
 
-        // Sync loan account totals and EMI balances
-        $paymentService = app(\App\Services\LoanPaymentService::class);
-        $paymentService->syncEmiBalances($emi->loan_account_id);
-        $paymentService->syncLoanTotals($emi->loan_account_id);
-
         if ($emi->status === 'paid') {
+            app(\App\Services\LoanPaymentService::class)
+                ->syncLoanTotals($emi->loan_account_id);
+
             EmiAgentAssignment::where('emi_id', $emi->id)
                 ->whereIn('status', ['assigned', 'visited'])
                 ->update([
@@ -554,10 +555,8 @@ class RazorpayWebhookService
             'paid_amount' => $amount,
         ]);
 
-        // Sync loan account totals and EMI balances
-        $paymentService = app(\App\Services\LoanPaymentService::class);
-        $paymentService->syncEmiBalances($emi->loan_account_id);
-        $paymentService->syncLoanTotals($emi->loan_account_id);
+        app(\App\Services\LoanPaymentService::class)
+            ->syncLoanTotals($emi->loan_account_id);
 
         // Resolve any active agent assignments
         EmiAgentAssignment::where('emi_id', $emi->id)

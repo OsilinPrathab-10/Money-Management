@@ -9,7 +9,7 @@ use App\Models\LoanAccount;
 use App\Models\LoanDocumentTemplate;
 use App\Models\ClientLoanDocument;
 use App\Models\FileSystemCredential;
-use App\Models\Appearance;
+use App\Models\Appearance; 
 use App\Models\Emi;
 use App\Models\EmiCollection;
 use Illuminate\Http\JsonResponse;
@@ -35,16 +35,19 @@ class ClientViewLoansController extends Controller
     {
         $decodedId = \App\Support\HashId::decode($id) ?? $id;
         $client = Client::with(['kycDetail'])->findOrFail($decodedId);
-        $loanAccounts = LoanAccount::where('client_id', $decodedId)
+        $loanAccounts = LoanAccount::with(['product.loanType', 'loanApplication.product.loanType'])
+            ->where('client_id', $decodedId)
             ->orderBy('created_at', 'desc')
             ->get();
         
-        $loanApplications = \App\Models\LoanApplication::with('product')
-            ->where('client_id', $id)
+        $loanApplications = \App\Models\LoanApplication::with('product.loanType')
+            ->where('client_id', $decodedId)
             ->orderBy('created_at', 'desc')
             ->get();
+
+        $loanTypes = \App\Models\LoanType::orderBy('name')->get();
         
-        return view('admin.clients.client-view-loans', compact('client', 'loanAccounts', 'loanApplications'));
+        return view('admin.clients.client-view-loans', compact('client', 'loanAccounts', 'loanApplications', 'loanTypes'));
     }
 
     public function getEmiDetails($loanId): JsonResponse
@@ -108,11 +111,16 @@ class ClientViewLoansController extends Controller
         $paymentService->syncLoanTotals($decodedLoanId);
         $loanAccount->refresh();
 
-        // Paginate EMIs - 10 per page
+        // Paginate EMIs with configurable per_page limit
+        $perPage = (int) request('per_page', 10);
+        if (!in_array($perPage, [10, 20, 25, 50, 100, 200, 500, 1000], true)) {
+            $perPage = 10;
+        }
         $emis = Emi::with('collections')
             ->where('loan_account_id', $decodedLoanId)
             ->orderBy('instalment_number', 'asc')
-            ->paginate(10);
+            ->paginate($perPage)
+            ->withQueryString();
         
         // Get available document templates based on loan status and product
         $availableTemplates = $this->documentService->getAvailableDocuments($loanAccount);
@@ -164,6 +172,16 @@ class ClientViewLoansController extends Controller
         }
         $partialPaymentConfig = \App\Models\LoanConfiguration::getPartialPaymentConfig();
 
+        $bankAccounts = \App\Models\Account\BankAccount::where('is_active', true)
+            ->orderBy('account_name')
+            ->get();
+
+        $walletBalance = 0.0;
+        if ($loanAccount->client_id) {
+            $walletBalance = app(\App\Services\FixedDeposit\WalletService::class)
+                ->balanceForClient((int) $loanAccount->client_id);
+        }
+
         return view('admin.clients.client-loan-emi-details', compact(
             'loanAccount', 
             'client', 
@@ -173,7 +191,9 @@ class ClientViewLoansController extends Controller
             'partialPaymentConfig', 
             'firstUnpaidInstalment',
             'principalPaid',
-            'interestPaid'
+            'interestPaid',
+            'bankAccounts',
+            'walletBalance',
         ));
     }
 
@@ -207,114 +227,67 @@ class ClientViewLoansController extends Controller
     public function viewDocument($loanId, $documentType)
     {
         try {
-            $decodedLoanId = \App\Support\HashId::decode($loanId) ?? $loanId;
-            Log::info('ViewDocument called', ['loanId' => $loanId, 'decodedLoanId' => $decodedLoanId, 'documentType' => $documentType]);
-            
-            // Check if document already exists in database
-            $existingDocument = $this->documentService->getExistingDocument($decodedLoanId, $documentType);
-            
-            if ($existingDocument && Storage::disk('public')->exists($existingDocument->file_path)) {
-                // Serve existing document from storage
-                Log::info('Serving existing document from storage', ['file_path' => $existingDocument->file_path]);
-                
-                $fileContent = Storage::disk('public')->get($existingDocument->file_path);
-                
-                return response($fileContent, 200, [
-                    'Content-Type' => 'application/pdf',
-                    'Content-Disposition' => 'inline; filename="' . $existingDocument->file_name . '"'
-                ]);
-            }
-            
-            // Check if template exists
-            $template = LoanDocumentTemplate::whereRaw('LOWER(type) = ?', [strtolower($documentType)])->first();
-            if (!$template && $documentType === 'loan_agreement') {
-                $loanAccount = LoanAccount::find($decodedLoanId);
-                $loanProduct = $loanAccount->loanApplication->product ?? null;
-                if ($loanProduct) {
-                    $productSpecificType = 'loan_agreement_' . strtolower(str_replace(' ', '_', $loanProduct->loan_name ?? ''));
-                    $template = LoanDocumentTemplate::whereRaw('LOWER(type) = ?', [strtolower($productSpecificType)])->first();
-                    if ($template) {
-                        $documentType = $productSpecificType;
-                    }
-                }
-            }
-            if (!$template) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Document template not found. Please create a template for "' . ucfirst(str_replace('_', ' ', $documentType)) . '" first in the admin panel.',
-                    'redirect' => route('loan-document-templates.index')
-                ], 404);
-            }
-            
-            // Generate new document and save to database
-            $document = $this->documentService->generateAndSaveDocument($decodedLoanId, $documentType);
-
-            return response($document['binary'], 200, [
-                'Content-Type' => 'application/pdf',
-                'Content-Disposition' => 'inline; filename="' . $document['fileName'] . '"'
-            ]);
+            return $this->streamLoanDocument($loanId, $documentType, 'inline');
         } catch (\Exception $e) {
             Log::error('ViewDocument error', ['error' => $e->getMessage(), 'trace' => $e->getTraceAsString()]);
-            return back()->with('error', 'Failed to view document: ' . $e->getMessage());
+
+            return response(
+                '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Document error</title></head><body style="font-family:sans-serif;padding:40px;">'
+                . '<h3>Unable to open loan document</h3>'
+                . '<p>' . e($e->getMessage()) . '</p>'
+                . '<p>Please click <strong>Regenerate All</strong> on the loan account page and try again.</p>'
+                . '</body></html>',
+                500
+            )->header('Content-Type', 'text/html; charset=UTF-8');
         }
     }
 
     public function downloadDocument($loanId, $documentType)
     {
         try {
-            $decodedLoanId = \App\Support\HashId::decode($loanId) ?? $loanId;
-            // Check if document already exists in database
-            $existingDocument = $this->documentService->getExistingDocument($decodedLoanId, $documentType);
-            
-            if ($existingDocument && Storage::disk('public')->exists($existingDocument->file_path)) {
-                // Serve existing document from storage
-                Log::info('Downloading existing document from storage', ['file_path' => $existingDocument->file_path]);
-                
-                $fileContent = Storage::disk('public')->get($existingDocument->file_path);
-                
-                return response($fileContent, 200, [
-                    'Content-Type' => 'application/pdf',
-                    'Content-Disposition' => 'attachment; filename="' . $existingDocument->file_name . '"'
-                ]);
-            }
-            
-            // Check if template exists
-            $template = LoanDocumentTemplate::where('type', $documentType)->first();
-            if (!$template && $documentType === 'loan_agreement') {
-                $loanAccount = LoanAccount::find($loanId);
-                $loanProduct = $loanAccount->loanApplication->product ?? null;
-                if ($loanProduct) {
-                    $productSpecificType = 'loan_agreement_' . strtolower(str_replace(' ', '_', $loanProduct->loan_name ?? ''));
-                    $template = LoanDocumentTemplate::where('type', $productSpecificType)->first();
-                    if ($template) {
-                        $documentType = $productSpecificType;
-                    }
-                }
-            }
-            if (!$template) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Document template not found. Please create a template for "' . ucfirst(str_replace('_', ' ', $documentType)) . '" first in the admin panel.',
-                    'redirect' => route('loan-document-templates.index')
-                ], 404);
-            }
-            
-            // Generate new document and save to database
-            $document = $this->documentService->generateAndSaveDocument($loanId, $documentType);
-
-            return response($document['binary'], 200, [
-                'Content-Type' => 'application/pdf',
-                'Content-Disposition' => 'attachment; filename="' . $document['fileName'] . '"'
-            ]);
-
+            return $this->streamLoanDocument($loanId, $documentType, 'attachment');
         } catch (\Exception $e) {
-            return back()->with('error', 'Failed to download document: ' . $e->getMessage());
+            Log::error('DownloadDocument error', ['error' => $e->getMessage(), 'trace' => $e->getTraceAsString()]);
+
+            return response(
+                '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Document error</title></head><body style="font-family:sans-serif;padding:40px;">'
+                . '<h3>Unable to download loan document</h3>'
+                . '<p>' . e($e->getMessage()) . '</p>'
+                . '</body></html>',
+                500
+            )->header('Content-Type', 'text/html; charset=UTF-8');
         }
     }
 
     /**
+     * Generate (or refresh) a loan PDF and stream it. Old cached files can be hundreds
+     * of blank pages from a previous layout bug, so view/download always regenerates.
+     */
+    private function streamLoanDocument($loanId, $documentType, string $disposition)
+    {
+        $decodedLoanId = \App\Support\HashId::decode((string) $loanId) ?? $loanId;
+        $documentType = urldecode((string) $documentType);
+
+        Log::info('StreamLoanDocument called', [
+            'loanId' => $loanId,
+            'decodedLoanId' => $decodedLoanId,
+            'documentType' => $documentType,
+            'disposition' => $disposition,
+        ]);
+
+        $document = $this->documentService->generateAndSaveDocument((int) $decodedLoanId, $documentType);
+
+        return response($document['binary'], 200, [
+            'Content-Type' => 'application/pdf',
+            'Content-Disposition' => $disposition . '; filename="' . $document['fileName'] . '"',
+            'Cache-Control' => 'private, max-age=0, must-revalidate',
+            'Pragma' => 'public',
+        ]);
+    }
+
+    /**
      * Process EMI payment
-     * - Agents: creates a pending EmiCollection (awaits admin approval)
+     * - Agents: auto-verify and process payment immediately
      * - Admin/Staff: processes payment immediately
      */
     public function payEmi(Request $request): JsonResponse
@@ -327,7 +300,8 @@ class ClientViewLoansController extends Controller
                 'paid_date'        => 'required|date',
                 'payment_method'   => 'required|in:cash,upi,bank_transfer,in_hand',
                 'payment_reference'=> 'nullable|string|max:255',
-                'remarks'          => 'nullable|string'
+                'remarks'          => 'nullable|string',
+                'internal_bank_account_id' => 'required_if:payment_method,upi,bank_transfer|nullable|exists:bank_accounts,id',
             ]);
 
             $emiId       = $validated['emi_id'];
@@ -337,8 +311,7 @@ class ClientViewLoansController extends Controller
             $currentUser = auth()->user();
             $isAgent     = $currentUser->hasRole('Agent');
 
-            // ── AGENT PATH ────────────────────────────────────────────────────────────
-            // Create a pending collection; admin must approve before the EMI is marked paid
+            // ── AGENT PATH: auto-verify and process payment immediately ───────────────
             if ($isAgent) {
                 $agent   = optional($currentUser->agent);
                 $agentId = $agent->id ?? null;
@@ -348,7 +321,6 @@ class ClientViewLoansController extends Controller
                     $pendingAmount = max(0, $emi->pending_amount);
                     $paymentType   = ((float)$validated['paid_amount'] >= ($pendingAmount - 0.01)) ? 'full' : 'partial';
 
-                    // Upsert: accumulate onto any existing in_progress collection for this EMI
                     $existing = \App\Models\EmiCollection::where('emi_id', $emi->id)
                         ->where('status', 'in_progress')
                         ->first();
@@ -357,11 +329,15 @@ class ClientViewLoansController extends Controller
                         $newAmount = $existing->amount + (float)$validated['paid_amount'];
                         $isNowFull = ($newAmount >= ($pendingAmount - 0.01));
                         $existing->update([
-                            'amount'       => $newAmount,
-                            'payment_type' => $isNowFull ? 'full' : 'partial',
-                            'payment_method'=> $validated['payment_method'],
-                            'collected_at' => $validated['paid_date'],
-                            'remarks'      => trim(($existing->remarks ?? '') . "\n[Agent Updated via Client EMI View]"),
+                            'amount'         => $newAmount,
+                            'payment_type'   => $isNowFull ? 'full' : 'partial',
+                            'payment_method' => $validated['payment_method'],
+                            'collected_at'   => $validated['paid_date'],
+                            'status'         => 'verified',
+                            'verified_by'    => auth()->id(),
+                            'verified_at'    => now(),
+                            'remarks'        => trim(($existing->remarks ?? '') . "\n[Agent Updated via Client EMI View]"),
+                            'bank_account_id'=> $validated['internal_bank_account_id'] ?? $existing->bank_account_id,
                         ]);
                         $collection = $existing;
                     } else {
@@ -372,13 +348,15 @@ class ClientViewLoansController extends Controller
                             'payment_method'    => $validated['payment_method'],
                             'payment_type'      => $paymentType,
                             'payment_reference' => $validated['payment_reference'] ?? null,
-                            'status'            => 'in_progress',
+                            'status'            => 'verified',
                             'collected_at'      => $validated['paid_date'],
-                            'remarks'           => trim(($validated['remarks'] ?? '') . ' [Agent Created via Client EMI View]'),
+                            'verified_by'       => auth()->id(),
+                            'verified_at'       => now(),
+                            'remarks'           => trim(($validated['remarks'] ?? '') . ' [Agent Collected via Client EMI View]'),
+                            'bank_account_id'   => $validated['internal_bank_account_id'] ?? null,
                         ]);
                     }
 
-                    // Log agent activity
                     if ($agentId) {
                         \App\Models\AgentActivity::create([
                             'emi_id'      => $emi->id,
@@ -392,10 +370,27 @@ class ClientViewLoansController extends Controller
                         ]);
                     }
 
-                    // Mark active assignment as resolved
                     \App\Models\EmiAgentAssignment::where('emi_id', $emi->id)
                         ->whereIn('status', ['assigned', 'visited'])
                         ->update(['status' => 'resolved', 'resolved_at' => now()]);
+
+                    $paymentService = app(\App\Services\LoanPaymentService::class);
+                    $result = $paymentService->processPayment(
+                        $decodedEmiId,
+                        $validated['paid_amount'],
+                        $validated['paid_date'],
+                        $validated['payment_method'],
+                        $validated['payment_reference'],
+                        $collection->remarks,
+                        true,
+                        $validated['principal_amount'] ?? 0,
+                        false,
+                        $validated['internal_bank_account_id'] ?? null
+                    );
+
+                    if (!$result['success']) {
+                        throw new \Exception($result['message']);
+                    }
 
                     DB::commit();
                 } catch (\Exception $e) {
@@ -403,6 +398,8 @@ class ClientViewLoansController extends Controller
                     throw $e;
                 }
 
+                $emi->refresh();
+                $loanAccount->refresh();
                 $client = $loanAccount->loanApplication->client ?? $loanAccount->client;
                 $mobileNo = $client->mobile_no ?? $client->client_phone ?? '';
                 $cleanMobile = preg_replace('/[^0-9]/', '', $mobileNo);
@@ -410,52 +407,23 @@ class ClientViewLoansController extends Controller
                     $cleanMobile = '91' . $cleanMobile;
                 }
 
-                // For agent (pending) submissions, processPayment has NOT run yet, so
-                // outstanding_amount is still the pre-payment value. Estimate the expected
-                // post-payment balance so the SMS shows the correct anticipated balance.
-                $isKandhuvatti = ($loanAccount->loan_mode === 'interest_only');
-                $amountPaidForSms = ($isKandhuvatti && ($validated['principal_amount'] ?? 0) > 0.001 && $validated['paid_amount'] <= 0.001)
-                    ? $validated['principal_amount']
-                    : $validated['paid_amount'];
-                $paymentTypeForSms = ($isKandhuvatti && ($validated['principal_amount'] ?? 0) > 0.001) ? 'principal'
-                    : ($isKandhuvatti ? 'interest' : 'emi');
-                $remainingBalance = $loanAccount->outstanding_amount;
-                if ($isKandhuvatti) {
-                    if ($paymentTypeForSms === 'principal') {
-                        $remainingBalance = max(0, $remainingBalance - $amountPaidForSms);
-                    }
-                } else {
-                    $isReducing = $loanAccount->loanApplication && $loanAccount->loanApplication->product
-                        && in_array($loanAccount->loanApplication->product->interest_type, ['reducing', 'declining_balance']);
-                    if ($isReducing) {
-                        $interestPart   = (float)($emi->interest_amount ?? 0);
-                        $alreadyPaid    = (float)($emi->paid_amount ?? 0);
-                        $unpaidInterest = max(0, $interestPart - min($alreadyPaid, $interestPart));
-                        $principalHere  = max(0, $amountPaidForSms - $unpaidInterest);
-                        $remainingBalance = max(0, $remainingBalance - $principalHere);
-                    } else {
-                        $remainingBalance = max(0, $remainingBalance - $amountPaidForSms);
-                    }
-                }
-
                 $smsData = [
                     'client_name' => ($client->first_name ?? '') . ' ' . ($client->last_name ?? ''),
                     'mobile_no' => $cleanMobile,
                     'account_no' => $loanAccount->account_number,
-                    'amount_paid' => $amountPaidForSms,
-                    'remaining_balance' => $remainingBalance,
+                    'amount_paid' => ($loanAccount->loan_mode === 'interest_only' && ($validated['principal_amount'] ?? 0) > 0.001 && $validated['paid_amount'] <= 0.001) ? $validated['principal_amount'] : $validated['paid_amount'],
+                    'remaining_balance' => $loanAccount->outstanding_amount,
                     'loan_mode' => $loanAccount->loan_mode,
-                    'payment_type' => $paymentTypeForSms,
+                    'payment_type' => ($loanAccount->loan_mode === 'interest_only' && ($validated['principal_amount'] ?? 0) > 0.001) ? 'principal' : (($loanAccount->loan_mode === 'interest_only') ? 'interest' : 'emi'),
                     'application_number' => $loanAccount->application_number,
-                    'is_partial' => ($paymentType === 'partial'),
-                    'emi_balance' => max(0, $emi->pending_amount - $validated['paid_amount']),
+                    'is_partial' => ($emi->status !== 'paid'),
+                    'emi_balance' => max(0, $emi->pending_amount),
                 ];
                 $smsData = array_merge($smsData, \App\Helpers\NotificationTemplateHelper::getRepaymentMessages($smsData));
 
                 return response()->json([
                     'success' => true,
-                    'message' => 'Repayment submitted successfully and is awaiting Admin approval.',
-                    'pending_approval' => true,
+                    'message' => 'Repayment processed successfully.',
                     'sms_data' => $smsData
                 ]);
             }
@@ -470,7 +438,9 @@ class ClientViewLoansController extends Controller
                 $validated['payment_reference'],
                 $validated['remarks'] ?? 'Paid via Client Portal',
                 false,
-                $validated['principal_amount'] ?? 0
+                $validated['principal_amount'] ?? 0,
+                false,
+                $validated['internal_bank_account_id'] ?? null
             );
 
             if (!$result['success']) {
@@ -663,5 +633,79 @@ class ClientViewLoansController extends Controller
         ];
 
         return $map[$status] ?? ['label' => 'Unknown', 'color' => 'secondary'];
+    }
+
+    public function generateOpenLoanCycles(Request $request, $loanId)
+    {
+        try {
+            $decodedLoanId = \App\Support\HashId::decode($loanId) ?? $loanId;
+            $loanAccount = LoanAccount::with(['emis', 'loanApplication'])->findOrFail($decodedLoanId);
+
+            $cycleService = app(\App\Services\OpenLoanCycleService::class);
+            if (! $cycleService->isOpenLoan($loanAccount)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Cycles can only be generated for Open Loans (Interest-Only).',
+                ], 422);
+            }
+
+            if (strtolower((string) $loanAccount->status) !== 'active' || $loanAccount->closed_at) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Cannot generate cycles for an inactive or closed loan.',
+                ], 422);
+            }
+
+            if ($cycleService->outstandingPrincipal($loanAccount) <= 0.01) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Remaining principal is ₹0.00. No further interest cycles are needed.',
+                ], 422);
+            }
+
+            $validated = $request->validate([
+                'cycle_count' => 'required|integer|min:1|max:365',
+            ]);
+
+            $count = (int) $validated['cycle_count'];
+            $created = $cycleService->generateManualCycles($loanAccount, $count);
+
+            if ($created <= 0) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'No new cycles were generated. Please check loan balance or status.',
+                ], 400);
+            }
+
+            // Keep balances and totals in sync
+            $paymentService = app(\App\Services\LoanPaymentService::class);
+            $paymentService->syncEmiBalances($loanAccount->id);
+            $paymentService->syncLoanTotals($loanAccount->id);
+
+            $frequency = $cycleService->frequencyFor($loanAccount);
+            $unitLabel = match ($frequency) {
+                'daily' => 'day(s)',
+                'weekly' => 'week(s)',
+                default => 'month(s)',
+            };
+
+            return response()->json([
+                'success' => true,
+                'message' => "Successfully generated {$created} interest cycle(s) ({$count} {$unitLabel}).",
+                'created_count' => $created,
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $ve) {
+            return response()->json([
+                'success' => false,
+                'message' => collect($ve->errors())->flatten()->first() ?? 'Invalid cycle count provided.',
+            ], 422);
+        } catch (\Exception $e) {
+            \Log::error('Failed to generate open loan cycles: ' . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to generate cycles: ' . $e->getMessage(),
+            ], 500);
+        }
     }
 }

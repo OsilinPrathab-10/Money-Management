@@ -14,31 +14,36 @@ class LoanApplicationResource extends JsonResource
      */
     public function toArray(Request $request): array
     {
+        $rawStatus = (string) ($this->status ?? 'pending');
+        $displayStatus = strtolower($rawStatus) === 'applied' ? 'pending' : $rawStatus;
+
         return [
             'id' => $this->id,
             'loan_code' => $this->loan_code,
-            'loan_name' => $this->product->loan_name,
+            'loan_name' => optional($this->product)->loan_name,
             'application_number' => $this->application_number,
-            'status' => $this->status,
+            'status' => $displayStatus,
+            'status_label' => $this->status_label,
+            'status_badge' => $this->status_badge,
             'remarks' => $this->remarks,
             'loan_amount_min' => $this->loan_amount_min,
             'loan_amount' => $this->loan_amount,
             'interest_rate' => $this->interest_rate,
             'tenure_min' => $this->tenure_min,
             'tenure_max' => $this->tenure_max,
-            'terms&condition' => $this->product->description,
-            'processing_fee' => $this->product->processing_fee,
-            'applied_date' => $this->created_at->toDateString(),
+            'terms&condition' => optional($this->product)->description,
+            'processing_fee' => optional($this->product)->processing_fee,
+            'applied_date' => optional($this->applied_at ?? $this->created_at)?->toDateString(),
 
             'disbursed' => [
-                'date' => $this->loanAccount->disbursed_at ?? null,
-                'amount' => $this->loanAccount->disbursed_amount ?? null,
-                'ifsc_code' => $this->client->kycDetail->ifsc_code ?? null,
-                'account_number' => $this->client->kycDetail->account_number ?? null,
-                'transaction_id' => $this->loanAccount->transaction_id ?? null,
-                'processing_fee' => $this->product->processing_fee ?? null,
-                'document_charges' => $this->product->document_charges ?? null,
-                'other_charges' => $this->product->other_charges ?? null,
+                'date' => optional($this->loanAccount)->disbursed_at,
+                'amount' => optional($this->loanAccount)->disbursed_amount,
+                'ifsc_code' => optional(optional($this->client)->kycDetail)->ifsc_code,
+                'account_number' => optional(optional($this->client)->kycDetail)->account_number,
+                'transaction_id' => optional($this->loanAccount)->transaction_id,
+                'processing_fee' => optional($this->product)->processing_fee,
+                'document_charges' => optional($this->product)->document_charges,
+                'other_charges' => optional($this->product)->other_charges,
             ]
         ];
     }

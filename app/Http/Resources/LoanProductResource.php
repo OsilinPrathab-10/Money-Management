@@ -14,16 +14,25 @@ class LoanProductResource extends JsonResource
      */
     public function toArray(Request $request): array
     {
+        $loanModes = [
+            ['value' => 'emi', 'label' => 'EMI', 'name' => 'Standard EMI', 'description' => 'Standard EMI (Principal + Interest)'],
+            ['value' => 'interest_only', 'label' => 'Open Loan', 'name' => 'Open Loan', 'description' => 'Open Loan / Kandhuvatti (Monthly Interest Only)'],
+        ];
+
         if ($request->query('view') === 'summary') {
             return [
                 'id' => $this->id,
                 'loan_name' => $this->loan_name,
+                'loan_code' => $this->loan_code,
+                'loan_type_id' => $this->loan_type_id,
                 'credit_limit' => $this->loan_amount_max,
                 'loan_type' => $this->loanType->name ?? null,
                 'interest_rate' => $this->interest_rate,
                 'loan_type_icon' => $this->loan_type_icon_url,
                 'loan_type_image' => $this->loan_type_image_url,
                 'loan_type_banner' => $this->loan_type_banner_url,
+                'supported_loan_modes' => $loanModes,
+                'loan_modes' => $loanModes,
             ];
         }
 
@@ -31,7 +40,9 @@ class LoanProductResource extends JsonResource
         return [
             'id' => $this->id,
             'loan_name' => $this->loan_name,
+            'loan_type_id' => $this->loan_type_id,
             'loan_type' => [
+                'id' => $this->loan_type_id,
                 'name' => $this->loanType->name ?? null,
                 'icon' => $this->loan_type_icon_url,   
                 'image' => $this->loan_type_image_url,
@@ -39,6 +50,8 @@ class LoanProductResource extends JsonResource
             ],
             'loan_code' => $this->loan_code,
             'credit_limit' => $this->loan_amount_max,
+            'loan_amount_min' => (float) $this->loan_amount_min,
+            'loan_amount_max' => (float) $this->loan_amount_max,
             'interest_rate' => $this->interest_rate,
             'interest_type' => $this->interest_type,
             'term_unit' => $this->term_unit,
@@ -49,6 +62,8 @@ class LoanProductResource extends JsonResource
             'default_term' => $this->default_term,
             'description' => $this->description,
             'status' => $this->status,
+            'supported_loan_modes' => $loanModes,
+            'loan_modes' => $loanModes,
             'created_at' => $this->created_at?->format('Y-m-d H:i:s'),
             'updated_at' => $this->updated_at?->format('Y-m-d H:i:s'),
         ];

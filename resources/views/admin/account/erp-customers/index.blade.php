@@ -3,7 +3,7 @@
 @section('title', __('ERP customers'))
 
 @section('content')
-<div class="container-xxl flex-grow-1 container-p-y">
+<div class="account-module">
   <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-4">
     <div>
       <h4 class="mb-1">{{ __('ERP customers') }}</h4>

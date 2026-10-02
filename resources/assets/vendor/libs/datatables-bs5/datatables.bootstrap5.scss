@@ -171,6 +171,13 @@ div.dt-container {
 
   div.dt-length select {
     margin-inline: .5rem;
+    min-inline-size: 4.5rem;
+    width: auto;
+  }
+
+  div.dt-length .select2-container {
+    min-inline-size: 4.5rem !important;
+    width: auto !important;
   }
 
   /* common style for light / dark */

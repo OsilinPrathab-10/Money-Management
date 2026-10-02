@@ -27,6 +27,7 @@ class LoanProduct extends Model
         'processing_fee',
         'document_charges',
         'other_charges',
+        'banking_charges',
         'penalty_rate',
         'grace_period_days',
         'require_collateral',
@@ -46,6 +47,11 @@ class LoanProduct extends Model
         return $this->hasMany(LoanApplication::class);
     }
 
+    public function loanAccounts()
+    {
+        return $this->hasMany(LoanAccount::class, 'loan_code', 'loan_code');
+    }
+
     public function loanType()
     {
         return $this->belongsTo(LoanType::class, 'loan_type_id');
@@ -53,22 +59,16 @@ class LoanProduct extends Model
 
     public function getLoanTypeIconUrlAttribute()
     {
-        return $this->loanType && $this->loanType->loan_type_icon
-            ? asset('storage/' . $this->loanType->loan_type_icon)
-            : null;
+        return $this->loanType ? $this->loanType->loan_type_icon_url : null;
     }
 
     public function getLoanTypeImageUrlAttribute()
     {
-        return $this->loanType && $this->loanType->loan_type_image
-            ? asset('storage/' . $this->loanType->loan_type_image)
-            : null;
+        return $this->loanType ? $this->loanType->loan_type_image_url : null;
     }
 
     public function getLoanTypeBannerUrlAttribute()
     {
-        return $this->loanType && $this->loanType->loan_type_banner
-            ? asset('storage/' . $this->loanType->loan_type_banner)
-            : null;
+        return $this->loanType ? $this->loanType->loan_type_banner_url : null;
     }
 }

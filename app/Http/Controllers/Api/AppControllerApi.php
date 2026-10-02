@@ -27,7 +27,7 @@ class AppControllerApi extends Controller
 
     public function getLocations()
     {
-        $locations = \App\Models\Location::select('id', 'name', 'city', 'state')
+        $locations = \App\Models\Location::select('id', 'name', 'city', 'state', 'pincode')
             ->orderBy('name')
             ->get();
 

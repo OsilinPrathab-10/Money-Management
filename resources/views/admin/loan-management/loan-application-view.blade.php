@@ -63,6 +63,7 @@
 @php
 $statusColors = [
     'pending' => 'warning',
+    'applied' => 'warning',
     'approved' => 'success',
     'process' => 'primary',
     'in_progress' => 'primary',
@@ -77,6 +78,7 @@ $loanAmountValue = $application->loan_amount ?? 0;
 $appliedProcessingFee = 0;
 $appliedDocumentCharges = 0;
 $appliedOtherCharges = 0;
+$appliedBankingCharges = 0;
 
 if ($application->applicationDetail) {
     $details = $application->applicationDetail->details ?? [];
@@ -87,22 +89,62 @@ if ($application->applicationDetail) {
     $appliedProcessingFee = (float)($details['applied_processing_fee'] ?? 0);
     $appliedDocumentCharges = (float)($details['applied_document_charges'] ?? 0);
     $appliedOtherCharges = (float)($details['applied_other_charges'] ?? 0);
+    $appliedBankingCharges = (float)($details['applied_banking_charges'] ?? 0);
 }
 
 // Fallback to product defaults if no charges are recorded in details (usually for non-disbursed preview)
-if ($application->status !== 'disbursed' && $appliedProcessingFee == 0 && $appliedDocumentCharges == 0 && $appliedOtherCharges == 0) {
+if ($application->status !== 'disbursed' && $appliedProcessingFee == 0 && $appliedDocumentCharges == 0 && $appliedOtherCharges == 0 && ($appliedBankingCharges ?? 0) == 0) {
     $appliedProcessingFee = (float)(optional($application->product)->processing_fee ?? 0);
     $appliedDocumentCharges = (float)(optional($application->product)->document_charges ?? 0);
     $appliedOtherCharges = (float)(optional($application->product)->other_charges ?? 0);
+    $appliedBankingCharges = (float)(optional($application->product)->banking_charges ?? 0);
 }
 
+// Banking charges are company bank cost — do not reduce client handover.
 $totalCharges = $appliedProcessingFee + $appliedDocumentCharges + $appliedOtherCharges;
 $netDisbursedAmount = optional($application->loanAccount)->disbursed_amount ?? max($loanAmountValue - $totalCharges, 0);
 
 $interestRate = (float)($application->interest_rate ?? (optional($application->product)->interest_rate ?? 0));
 $isKandhuvatti = ($application->loan_mode ?? 'emi') === 'interest_only';
-$totalInterest = $loanAmountValue * ($interestRate / 100);
-$totalPayable = $loanAmountValue + $totalInterest;
+
+// Total payable must match loan account / EMI schedule (not principal × rate once)
+$totalInterest = 0.0;
+$totalPayable = (float) $loanAmountValue;
+
+if ($application->loanAccount && in_array($application->status, ['disbursed'], true)) {
+    // After disbursement: loan account is the source of truth (same as Loan Summary)
+    $totalPayable = (float) ($application->loanAccount->total_payable ?? $loanAmountValue);
+    if ($isKandhuvatti) {
+        $totalInterest = $loanAmountValue * ($interestRate / 100);
+    } else {
+        $totalInterest = max(0, $totalPayable - (float) $loanAmountValue);
+    }
+} elseif ($isKandhuvatti) {
+    $totalInterest = $loanAmountValue * ($interestRate / 100);
+    $totalPayable = (float) $loanAmountValue;
+} else {
+    $tenure = (int) ($application->tenure ?? 0);
+    $interestType = optional($application->product)->interest_type ?? 'flat';
+    $termUnitRaw = strtolower((string) ($application->term_unit ?: (optional($application->product)->term_unit ?? 'months')));
+    $calcFrequency = 'monthly';
+    if (in_array($termUnitRaw, ['week', 'weeks', 'weekly'], true)) {
+        $calcFrequency = 'weekly';
+    } elseif (in_array($termUnitRaw, ['day', 'days', 'daily'], true)) {
+        $calcFrequency = 'daily';
+    }
+
+    if ($loanAmountValue > 0 && $interestRate > 0 && $tenure > 0) {
+        $schedulePreview = app(\App\Services\EmiCalculator::class)->generateSchedule(
+            principal: (float) $loanAmountValue,
+            annualRate: $interestRate,
+            term: $tenure,
+            frequency: $calcFrequency,
+            interestType: $interestType
+        );
+        $totalPayable = (float) ($schedulePreview['total_payment'] ?? $loanAmountValue);
+        $totalInterest = (float) ($schedulePreview['total_interest'] ?? max(0, $totalPayable - $loanAmountValue));
+    }
+}
 
 $displayUnit = $application->term_unit ?: optional($application->product)->term_unit ?: 'months';
 $displayUnit = in_array(strtolower($displayUnit), ['days', 'day', 'daily']) ? 'Days' : (in_array(strtolower($displayUnit), ['weeks', 'week', 'weekly']) ? 'Weeks' : 'Months');
@@ -115,9 +157,11 @@ if (in_array($displayUnitVal, ['weeks', 'week', 'weekly'])) {
     $defaultOffset = '+1 day';
 }
 
-$defaultStart = $application->emi_start_year ? 
-    \Carbon\Carbon::create($application->emi_start_year, $application->emi_start_month, $application->emi_start_day)->format('d-m-Y') : 
-    date('d-m-Y', strtotime($defaultOffset));
+$defaultStart = $application->emi_start_date ? 
+    \Carbon\Carbon::parse($application->emi_start_date)->format('d-m-Y') : 
+    ($application->emi_start_year ? 
+        \Carbon\Carbon::create($application->emi_start_year, $application->emi_start_month, $application->emi_start_day)->format('d-m-Y') : 
+        date('d-m-Y', strtotime($defaultOffset)));
 
 $frequency = 'monthly';
 if (in_array($displayUnitVal, ['week', 'weeks', 'weekly'], true)) {
@@ -164,7 +208,7 @@ if (in_array($displayUnitVal, ['week', 'weeks', 'weekly'], true)) {
           <div class="avatar me-2 flex-shrink-0">
             <span class="avatar-initial rounded bg-label-info"><i class="ri-calendar-line ri-20px"></i></span>
           </div>
-          <h4 class="ms-1 mb-0 text-truncate w-100">{{ $application->created_at->format('d-m-Y') }}</h4>
+          <h4 class="ms-1 mb-0 text-truncate w-100">{{ optional($application->applied_date)->format('d-m-Y') ?? 'N/A' }}</h4>
         </div>
         <p class="mb-0 text-muted small text-uppercase fw-medium">Applied On</p>
       </div>
@@ -194,7 +238,7 @@ if (in_array($displayUnitVal, ['week', 'weeks', 'weekly'], true)) {
 </div>
 
 <!-- Main Details Card -->
-@if(!auth()->user()->hasRole('Agent') || $application->status == 'disbursed')
+@if(!auth()->user()->hasRole('Agent') || auth()->user()->hasAnyRole(['Admin', 'Staff', 'Super Admin', 'admin', 'staff']) || $application->status == 'disbursed')
 <div class="card shadow-sm mb-6">
   <div class="card-header border-bottom py-4 px-5">
     <div class="d-flex justify-content-between align-items-center">
@@ -203,7 +247,7 @@ if (in_array($displayUnitVal, ['week', 'weeks', 'weekly'], true)) {
             <small class="text-muted">Detailed breakdown of client and product request</small>
         </div>
         <span class="badge bg-label-{{ $statusColor }} fs-6 px-3 py-2">
-            <i class="ri-checkbox-circle-line me-1"></i> {{ in_array($application->status, ['process','in_progress']) ? 'IN PROGRESS' : ucfirst($application->status) }}
+            <i class="ri-checkbox-circle-line me-1"></i> {{ in_array($application->status, ['process','in_progress']) ? 'IN PROGRESS' : (in_array($application->status, ['pending', 'applied']) ? 'PENDING APPROVAL' : ucfirst($application->status)) }}
         </span>
     </div>
   </div>
@@ -268,7 +312,13 @@ if (in_array($displayUnitVal, ['week', 'weeks', 'weekly'], true)) {
         </div>
         <div class="col-md-3 col-6">
           <small class="text-muted text-uppercase d-block mb-1">Interest Rate</small>
-          <h6 class="mb-0">{{ optional($application->product)->interest_rate ?? 0 }}% p.a.</h6>
+          <h6 class="mb-0">
+            @if($interestRate === 0.0 && ($application->loan_mode ?? 'emi') !== 'interest_only')
+              <span class="badge bg-label-success">Free Loan · 0%</span>
+            @else
+              {{ optional($application->product)->interest_rate ?? 0 }}% p.a.
+            @endif
+          </h6>
         </div>
         <div class="col-md-3 col-6">
           <small class="text-muted text-uppercase d-block mb-1">Approved Amount</small>
@@ -363,7 +413,7 @@ if (in_array($displayUnitVal, ['week', 'weeks', 'weekly'], true)) {
 
 
 <!-- CASE: APPROVED/PENDING STATUS (Dual Webcam Module) -->
-@if(auth()->user()->hasRole('Admin') && ($application->status == 'approved' || $application->status == 'pending'))
+@if(auth()->user()->hasAnyRole(['Admin', 'Staff', 'Super Admin', 'admin', 'staff']) && ($application->status == 'approved' || $application->status == 'pending'))
 <div class="card shadow-sm mb-6 border-success">
   <div class="card-header bg-label-success py-3 d-flex justify-content-between align-items-center">
     <h5 class="mb-0 fw-bold"><i class="ri-shield-user-line me-2"></i>Step 1: Processing, Safety Verification & Final Terms</h5>
@@ -377,23 +427,49 @@ if (in_array($displayUnitVal, ['week', 'weeks', 'weekly'], true)) {
       <div class="row g-5">
         <!-- Loan Terms Confirmation -->
         <div class="col-lg-5">
-            <h6 class="text-uppercase fw-bold text-muted mb-4 border-bottom pb-2">1. Finalize Disbursal Terms</h6>
-            <div class="bg-light p-4 rounded-3 border">
+            <div class="d-flex justify-content-between align-items-center mb-4 border-bottom pb-2">
+                <h6 class="text-uppercase fw-bold text-muted mb-0">1. Finalize Disbursal Terms</h6>
+                <div class="d-flex align-items-center gap-2">
+                    <span class="badge bg-label-warning d-none" id="editingTermsBadge"><i class="ri-edit-line me-1"></i>Edit Mode Active</span>
+                    <button type="button" class="btn btn-xs btn-outline-primary" id="btnToggleEditTerms">
+                        <i class="ri-edit-line me-1" id="iconEditTerms"></i><span id="labelEditTerms">Edit Terms</span>
+                    </button>
+                    <button type="button" class="btn btn-xs btn-link text-muted p-0 d-none" id="btnResetTerms" title="Reset to initial values">
+                        <i class="ri-refresh-line"></i> Reset
+                    </button>
+                </div>
+            </div>
+            <div class="bg-light p-4 rounded-3 border" id="disbursalTermsCard"
+                 data-total-charges="{{ (float) $totalCharges }}"
+                 data-interest-type="{{ optional($application->product)->interest_type ?? 'flat' }}"
+                 data-term-unit="{{ strtolower($application->term_unit ?: optional($application->product)->term_unit ?: 'months') }}"
+                 data-is-kandhuvatti="{{ $isKandhuvatti ? '1' : '0' }}"
+                 data-orig-amount="{{ $application->loan_amount }}"
+                 data-orig-rate="{{ $application->interest_rate ?? (optional($application->product)->interest_rate ?? 0) }}"
+                 data-orig-tenure="{{ $application->tenure ?? ($application->tenure_max ?? (optional($application->product)->min_tenture ?? 12)) }}"
+                 data-orig-emi-day="{{ $application->emi_day ?? 1 }}"
+                 data-orig-emi-start="{{ $defaultStart }}">
                 <div class="mb-4">
-                    <label class="form-label fw-bold">Approved Loan Amount <span class="text-danger">*</span></label>
+                    <div class="d-flex justify-content-between align-items-center mb-1">
+                        <label class="form-label fw-bold mb-0">Approved Loan Amount <span class="text-danger">*</span></label>
+                        <small class="text-muted d-none edit-hint" id="hint-loan-amount">Max: ₹{{ number_format(optional($application->product)->loan_amount_max ?? 9999999) }}</small>
+                    </div>
                     <div class="input-group input-group-lg">
                         <span class="input-group-text">₹</span>
-                        <input type="number" class="form-control bg-light" name="approved_amount" value="{{ $application->loan_amount }}" readonly required min="1" max="{{ optional($application->product)->loan_amount_max ?? 9999999 }}">
+                        <input type="number" class="form-control bg-light disbursal-term-field" id="input_approved_amount" name="approved_amount" value="{{ $application->loan_amount }}" readonly required min="1" max="{{ optional($application->product)->loan_amount_max ?? 9999999 }}">
                     </div>
                 </div>
                 <div class="mb-4">
-                    <label class="form-label fw-bold">Interest Rate (%) <span class="text-danger">*</span></label>
-                    <input type="number" step="0.01" name="interest_rate" class="form-control form-control-lg bg-light" value="{{ $application->interest_rate ?? (optional($application->product)->interest_rate ?? 0) }}" readonly required>
+                    <div class="d-flex justify-content-between align-items-center mb-1">
+                        <label class="form-label fw-bold mb-0">Interest Rate (%) <span class="text-danger">*</span></label>
+                        <small class="text-muted d-none edit-hint" id="hint-interest-rate">{{ ucfirst(optional($application->product)->interest_type ?? 'Flat') }} Rate</small>
+                    </div>
+                    <input type="number" step="0.01" name="interest_rate" id="input_interest_rate" class="form-control form-control-lg bg-light disbursal-term-field" value="{{ $application->interest_rate ?? (optional($application->product)->interest_rate ?? 0) }}" readonly required min="0" max="100">
                 </div>
                 <div class="row g-3 mb-4">
                     <div class="col-6">
                         <label class="form-label fw-semibold">Tenure ({{ $displayUnit }}) <span class="text-danger">*</span></label>
-                        <input type="number" name="tenure" class="form-control form-control-lg bg-light" value="{{ $application->tenure ?? ($application->tenure_max ?? (optional($application->product)->min_tenture ?? 12)) }}" readonly required>
+                        <input type="number" name="tenure" id="input_tenure" class="form-control form-control-lg bg-light disbursal-term-field" value="{{ $application->tenure ?? ($application->tenure_max ?? (optional($application->product)->min_tenture ?? 12)) }}" readonly required min="1">
                     </div>
                     <div class="col-6">
                         @php
@@ -413,20 +489,20 @@ if (in_array($displayUnitVal, ['week', 'weeks', 'weekly'], true)) {
                         </label>
                         @if($isDaily)
                           <input type="text" class="form-control form-control-lg bg-light" value="Everyday" readonly disabled>
-                          <input type="hidden" name="emi_day" value="1">
+                          <input type="hidden" name="emi_day" id="input_emi_day" value="1">
                         @elseif($isWeekly)
                           @php
                             $dayMap = ['Monday' => 1, 'Tuesday' => 2, 'Wednesday' => 3, 'Thursday' => 4, 'Friday' => 5, 'Saturday' => 6, 'Sunday' => 7];
                             $selectedDay = $application->emi_day ?? ($dayMap[optional($application->client)->collection_day] ?? 1);
                           @endphp
-                          <select class="form-select form-select-lg bg-light" disabled>
+                          <select class="form-select form-select-lg bg-light disbursal-term-field" id="select_weekly_emi_day" disabled>
                             @foreach([1 => 'Monday', 2 => 'Tuesday', 3 => 'Wednesday', 4 => 'Thursday', 5 => 'Friday', 6 => 'Saturday', 7 => 'Sunday'] as $val => $name)
                               <option value="{{ $val }}" {{ $selectedDay == $val ? 'selected' : '' }}>{{ $name }}</option>
                             @endforeach
                           </select>
-                          <input type="hidden" name="emi_day" value="{{ $selectedDay }}">
+                          <input type="hidden" name="emi_day" id="input_emi_day" value="{{ $selectedDay }}">
                         @else
-                          <input type="number" name="emi_day" class="form-control form-control-lg bg-light" value="{{ $application->emi_day ?? 1 }}" readonly min="1" max="31" required placeholder="e.g. 5">
+                          <input type="number" name="emi_day" id="input_emi_day" class="form-control form-control-lg bg-light disbursal-term-field" value="{{ $application->emi_day ?? 1 }}" readonly min="1" max="31" required placeholder="e.g. 5">
                         @endif
                     </div>
                 </div>
@@ -440,22 +516,13 @@ if (in_array($displayUnitVal, ['week', 'weeks', 'weekly'], true)) {
                         Weekday: {{ \Carbon\Carbon::parse($defaultStart)->format('l') }}
                     </div>
                 </div>
-                <div class="mb-0">
-                    <label class="form-label fw-semibold">Payment Method <span class="text-danger">*</span></label>
-                    <select class="form-select form-select-lg bg-light" >
-                        <option value="" >Select Payment Method</option>
-                        <option value="manual" selected>Manual (Cash/Offline)</option>
-                    </select>
-                    <input type="hidden" name="payment_method" value="manual">
-                </div>
-                
                 <!-- Financial Payout Preview -->
                 <div class="mt-4 pt-4 border-top">
                     <h6 class="text-uppercase fw-bold text-muted mb-3 small"><i class="ri-calculator-line me-1"></i> Payout Preview</h6>
                     @if($isKandhuvatti)
                       <div class="d-flex justify-content-between mb-2">
-                          <span class="text-muted small">Interest / Cycle ({{ $application->interest_rate }}%):</span>
-                          <span class="fw-bold text-warning small">₹{{ number_format(($application->loan_amount * $application->interest_rate / 100), 2) }}</span>
+                          <span class="text-muted small">Interest / Cycle (<span id="preview-rate-label">{{ $application->interest_rate }}</span>%):</span>
+                          <span class="fw-bold text-warning small" id="preview-interest-cycle">₹{{ number_format(($application->loan_amount * $application->interest_rate / 100), 2) }}</span>
                       </div>
                       <div class="d-flex justify-content-between mb-2">
                           <span class="text-muted small">Loan Structure:</span>
@@ -464,16 +531,16 @@ if (in_array($displayUnitVal, ['week', 'weeks', 'weekly'], true)) {
                     @else
                       <div class="d-flex justify-content-between mb-2">
                           <span class="text-muted small">Total Interest:</span>
-                          <span class="fw-bold text-warning small">₹{{ number_format($totalInterest, 2) }}</span>
+                          <span class="fw-bold text-warning small" id="preview-total-interest">₹{{ number_format($totalInterest, 2) }}</span>
                       </div>
                       <div class="d-flex justify-content-between mb-2">
                           <span class="text-muted small">Total Payable:</span>
-                          <span class="fw-bold text-info small">₹{{ number_format($totalPayable, 2) }}</span>
+                          <span class="fw-bold text-info small" id="preview-total-payable">₹{{ number_format($totalPayable, 2) }}</span>
                       </div>
                     @endif
                     <div class="d-flex justify-content-between align-items-center mt-3 bg-label-success p-2 rounded">
                         <span class="fw-bold text-success">NET PAYOUT:</span>
-                        <span class="fw-bold text-success fs-5">₹{{ number_format($netDisbursedAmount, 2) }}</span>
+                        <span class="fw-bold text-success fs-5" id="preview-net-payout">₹{{ number_format($netDisbursedAmount, 2) }}</span>
                     </div>
                     <small class="text-muted d-block mt-2" style="font-size: 10px;">* Includes deductions for processing fees and charges.</small>
                 </div>
@@ -559,7 +626,7 @@ if (in_array($displayUnitVal, ['week', 'weeks', 'weekly'], true)) {
 @endif
 
 <!-- CASE: PROCESS STATUS (Simplified Manual Disbursal) -->
-@if(auth()->user()->hasRole('Admin') && in_array($application->status, ['process', 'in_progress']))
+@if(auth()->user()->hasAnyRole(['Admin', 'Staff', 'Super Admin', 'admin', 'staff']) && in_array($application->status, ['process', 'in_progress']))
 <!-- Disbursement Actions (Final Step) -->
 <div class="card mb-6 border-success shadow-none">
   <div class="card-header border-bottom py-3 d-flex align-items-center">
@@ -626,6 +693,10 @@ if (in_array($displayUnitVal, ['week', 'weeks', 'weekly'], true)) {
                               <td class="ps-3 py-2 text-danger small">Other Deductions (-)</td>
                               <td class="pe-3 py-2 text-end text-danger small" id="summary_other_charges">₹{{ number_format($appliedOtherCharges, 2) }}</td>
                           </tr>
+                          <tr>
+                              <td class="ps-3 py-2 text-muted small">Bank Transfer Charges (company)</td>
+                              <td class="pe-3 py-2 text-end text-muted small" id="summary_banking_charges">₹{{ number_format($appliedBankingCharges, 2) }}</td>
+                          </tr>
                           <tr class="border-top border-success bg-label-success">
                               <td class="ps-3 py-3 fw-bold text-success fs-6">NET PAYOUT (HANDOVER)</td>
                               <td class="pe-3 py-3 text-end fw-bold text-success fs-5" id="summary_net_payout">₹{{ number_format($netDisbursedAmount, 2) }}</td>
@@ -639,7 +710,7 @@ if (in_array($displayUnitVal, ['week', 'weeks', 'weekly'], true)) {
               <div class="p-3 border rounded-3 bg-white h-100">
                   <div class="d-flex justify-content-between mb-3 border-bottom pb-2">
                       <span class="text-muted">{{ $isKandhuvatti ? 'First Interest Date' : 'First EMI Date' }}:</span>
-                      <span class="fw-bold text-primary">{{ $application->emi_start_year ? Carbon\Carbon::create($application->emi_start_year, $application->emi_start_month, $application->emi_start_day)->format('d-m-Y') : 'Not Set' }}</span>
+                      <span class="fw-bold text-primary">{{ $application->emi_start_year ? \Carbon\Carbon::create($application->emi_start_year, $application->emi_start_month, $application->emi_start_day)->format('d-m-Y') : 'Not Set' }}</span>
                   </div>
                   <div class="d-flex justify-content-between mb-3 border-bottom pb-2">
                       <span class="text-muted">Repayment Cycle:</span>
@@ -698,6 +769,8 @@ if (in_array($displayUnitVal, ['week', 'weeks', 'weekly'], true)) {
         </div>
     </div>
 
+
+
     <!-- Disbursement Date Selection -->
     <div class="row g-4 mb-4">
         <div class="col-md-6">
@@ -720,6 +793,26 @@ if (in_array($displayUnitVal, ['week', 'weeks', 'weekly'], true)) {
             <small class="text-muted">First EMI repayment date.</small>
         </div>
     </div>
+
+    <!-- Internal Bank Account Selection for Disbursement -->
+    <div class="row g-4 mb-4">
+        <div class="col-md-12">
+            <label for="internal_bank_account_id" class="form-label fw-bold">Disburse From (Internal Bank Account) <span class="text-danger">*</span></label>
+            <div class="input-group input-group-lg">
+                <span class="input-group-text bg-label-info border-info text-info"><i class="ri-bank-line"></i></span>
+                <select id="internal_bank_account_id" class="form-select border-info" required>
+                    <option value="">-- Select Internal Bank Account --</option>
+                    @foreach(\App\Models\Account\BankAccount::where('is_active', true)->get() as $ba)
+                        <option value="{{ $ba->id }}">
+                            {{ $ba->bank_name }} - {{ $ba->account_name }} ({{ $ba->account_number }}) - Bal: ₹{{ number_format($ba->current_balance, 2) }}
+                        </option>
+                    @endforeach
+                </select>
+            </div>
+            <small class="text-muted">Select the bank account to disburse this loan from. Available balance will be verified.</small>
+        </div>
+    </div>
+
     <div class="row g-4 mb-4">
         <div class="col-md-12" id="transactionDetailsContainer" style="{{ $application->payment_method == 'manual' ? 'display: none;' : '' }}">
             <label class="form-label fw-bold">Processing Reference / Transaction ID <span class="text-danger">*</span></label>
@@ -745,7 +838,7 @@ if (in_array($displayUnitVal, ['week', 'weeks', 'weekly'], true)) {
         </button>
     </div>
     <div class="row g-4 mb-5 p-4 bg-label-secondary rounded-3 border">
-        <div class="col-md-4">
+        <div class="col-md-3">
             <label class="form-label small fw-bold">Processing Fee (₹)</label>
             <div class="input-group">
                 <span class="input-group-text bg-white border-primary border-end-0 text-primary">₹</span>
@@ -753,24 +846,54 @@ if (in_array($displayUnitVal, ['week', 'weeks', 'weekly'], true)) {
 
             </div>
         </div>
-        <div class="col-md-4">
+        <div class="col-md-3">
             <label class="form-label small fw-bold">Doc Charges (₹)</label>
             <div class="input-group">
                 <span class="input-group-text bg-white border-primary border-end-0 text-primary">₹</span>
                 <input type="number" id="input_document_charges" class="form-control charge-input border-primary border-start-0 ps-0" value="{{ number_format($appliedDocumentCharges, 2, '.', '') }}" step="0.01" data-default="{{ $appliedDocumentCharges }}" placeholder="0.00">
             </div>
         </div>
-        <div class="col-md-4">
+        <div class="col-md-3">
             <label class="form-label small fw-bold">Other Charges (₹)</label>
             <div class="input-group">
                 <span class="input-group-text bg-white border-primary border-end-0 text-primary">₹</span>
                 <input type="number" id="input_other_charges" class="form-control charge-input border-primary border-start-0 ps-0" value="{{ number_format($appliedOtherCharges, 2, '.', '') }}" step="0.01" data-default="{{ $appliedOtherCharges }}" placeholder="0.00">
             </div>
         </div>
+        <div class="col-md-3">
+            <label class="form-label small fw-bold">Bank Transfer Charges (₹)</label>
+            <div class="input-group">
+                <span class="input-group-text bg-white border-primary border-end-0 text-primary">₹</span>
+                <input type="number" id="input_banking_charges" class="form-control charge-input border-primary border-start-0 ps-0" value="{{ number_format($appliedBankingCharges, 2, '.', '') }}" step="0.01" data-default="{{ $appliedBankingCharges }}" placeholder="0.00">
+            </div>
+            <small class="text-muted">Company bank debit only — not deducted from client.</small>
+        </div>
+    </div>
+
+    <!-- Collateral & Loan Files (Optional) -->
+    <div class="mb-5 p-4 border rounded-3 bg-light">
+        <div class="d-flex align-items-center justify-content-between mb-3 border-bottom pb-2">
+            <h6 class="fw-bold mb-0 text-uppercase small text-muted">
+                <i class="ri-folder-open-line me-1 text-primary"></i> Collateral & Additional Loan Documents (Optional)
+            </h6>
+            <span class="badge bg-label-info">Non-Mandatory / Optional</span>
+        </div>
+        <div class="row g-4">
+            <div class="col-md-6">
+                <label for="input_collateral_document" class="form-label small fw-bold">Collateral / Vehicle RC Book / Property File</label>
+                <input type="file" id="input_collateral_document" class="form-control" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx">
+                <small class="text-muted">Optional: Upload vehicle RC book, property document, or agreement</small>
+            </div>
+            <div class="col-md-6">
+                <label for="input_other_document" class="form-label small fw-bold">Other Document</label>
+                <input type="file" id="input_other_document" class="form-control" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx">
+                <small class="text-muted">Optional: Upload any other supporting or verification document</small>
+            </div>
+        </div>
     </div>
    
     <div class="d-flex gap-3 border-top pt-4">
-      <button type="button" class="btn btn-success btn-lg px-5 shadow" id="disburseBtn">
+      <button type="button" class="btn btn-success btn-lg px-5 shadow" id="disburseBtn" data-single-click>
         <i class="ri-check-double-line me-2"></i> Confirm & Disburse Loan
       </button>
       <button type="button" class="btn btn-outline-danger btn-lg px-4" data-bs-toggle="modal" data-bs-target="#rejectModal">
@@ -791,14 +914,9 @@ if (in_array($displayUnitVal, ['week', 'weeks', 'weekly'], true)) {
                 <small class="text-muted d-block mb-1 text-uppercase small">Approved Amount</small>
                 <h5 class="mb-0 fw-semibold">₹{{ number_format($loanAmountValue, 0) }}</h5>
             </div>
-            @php
-                $interestRate = $application->interest_rate ?? 0;
-                $totalInterest = $loanAmountValue * ($interestRate / 100);
-                $totalPayable = $loanAmountValue + $totalInterest;
-            @endphp
             <div class="col-md-3 col-6">
-                <small class="text-muted d-block mb-1 text-uppercase small">Total Payable</small>
-                <h4 class="mb-0 fw-bold text-info">₹{{ number_format($totalPayable, 2) }}</h4>
+                <small class="text-muted d-block mb-1 text-uppercase small">{{ $isKandhuvatti ? 'Loan Structure' : 'Total Payable' }}</small>
+                <h4 class="mb-0 fw-bold text-info">{{ $isKandhuvatti ? 'Open Loan' : '₹' . number_format($totalPayable, 2) }}</h4>
             </div>
             <div class="col-md-2 col-6">
                 <small class="text-muted d-block mb-1 text-uppercase small">Total Charges</small>
@@ -894,18 +1012,13 @@ if (in_array($displayUnitVal, ['week', 'weeks', 'weekly'], true)) {
                 <td class="ps-4">Principal (Gross Loan Amount)</td>
                 <td class="text-end pe-4 fw-bold">₹{{ number_format($loanAmountValue, 2) }}</td>
               </tr>
-              @php
-                $interestRate = $application->interest_rate ?? 0;
-                $totalInterest = $loanAmountValue * ($interestRate / 100);
-                $totalPayable = $loanAmountValue + $totalInterest;
-              @endphp
               <tr>
-                <td class="ps-4">Total Interest (Flat)</td>
+                <td class="ps-4">{{ $isKandhuvatti ? 'Interest / Cycle' : 'Total Interest' }}</td>
                 <td class="text-end pe-4 text-primary">+ ₹{{ number_format($totalInterest, 2) }}</td>
               </tr>
               <tr class="table-info fw-bold">
-                <td class="ps-4">Total Payable (Repayment Amount)</td>
-                <td class="text-end pe-4 text-info">₹{{ number_format($totalPayable, 2) }}</td>
+                <td class="ps-4">{{ $isKandhuvatti ? 'Loan Structure' : 'Total Payable (Repayment Amount)' }}</td>
+                <td class="text-end pe-4 text-info">{{ $isKandhuvatti ? 'Open Loan' : '₹' . number_format($totalPayable, 2) }}</td>
               </tr>
               <tr>
                 <td class="ps-4">Processing Fee</td>
@@ -916,8 +1029,12 @@ if (in_array($displayUnitVal, ['week', 'weeks', 'weekly'], true)) {
                 <td class="text-end pe-4 text-danger">- ₹<span id="breakdown_document_charges">{{ number_format($appliedDocumentCharges, 2) }}</span></td>
               </tr>
               <tr>
-                <td class="ps-4 border-bottom-0">Other Charges</td>
-                <td class="text-end pe-4 text-danger border-bottom-0">- ₹<span id="breakdown_other_charges">{{ number_format($appliedOtherCharges, 2) }}</span></td>
+                <td class="ps-4">Other Charges</td>
+                <td class="text-end pe-4 text-danger">- ₹<span id="breakdown_other_charges">{{ number_format($appliedOtherCharges, 2) }}</span></td>
+              </tr>
+              <tr>
+                <td class="ps-4 border-bottom-0 text-muted">Bank Transfer Charges (company)</td>
+                <td class="text-end pe-4 text-muted border-bottom-0">₹<span id="breakdown_banking_charges">{{ number_format($appliedBankingCharges, 2) }}</span></td>
               </tr>
               <tr class="table-success fw-bold">
                 <td class="ps-4">Net Disbursed Amount</td>
@@ -1141,7 +1258,160 @@ if (in_array($displayUnitVal, ['week', 'weeks', 'weekly'], true)) {
             canvasId: 'cash-captured-photo', placeholderId: 'cash-webcam-placeholder', inputStoreId: 'cash_photo_input'
         });
 
-        // 2. Admin Proceed (Step 2) logic
+        // 2. Disbursal Terms Edit & Dynamic Payout Recalculation
+        const disbursalTermsCard = document.getElementById('disbursalTermsCard');
+        const btnToggleEditTerms = document.getElementById('btnToggleEditTerms');
+        const btnResetTerms = document.getElementById('btnResetTerms');
+        const editingTermsBadge = document.getElementById('editingTermsBadge');
+        const labelEditTerms = document.getElementById('labelEditTerms');
+        const iconEditTerms = document.getElementById('iconEditTerms');
+        const inputApprovedAmount = document.getElementById('input_approved_amount');
+        const inputInterestRate = document.getElementById('input_interest_rate');
+        const inputTenure = document.getElementById('input_tenure');
+        const inputEmiDay = document.getElementById('input_emi_day');
+        const selectWeeklyEmiDay = document.getElementById('select_weekly_emi_day');
+
+        let isEditingDisbursalTerms = false;
+
+        function formatInr(num) {
+            return new Intl.NumberFormat('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(num || 0);
+        }
+
+        function recalculatePayoutPreview() {
+            if (!disbursalTermsCard) return;
+
+            const principal = parseFloat(inputApprovedAmount ? inputApprovedAmount.value : 0) || 0;
+            const rate = parseFloat(inputInterestRate ? inputInterestRate.value : 0) || 0;
+            const tenure = parseInt(inputTenure ? inputTenure.value : 0, 10) || 0;
+            const totalCharges = parseFloat(disbursalTermsCard.dataset.totalCharges || 0) || 0;
+            const isKandhuvatti = disbursalTermsCard.dataset.isKandhuvatti === '1';
+            const interestType = disbursalTermsCard.dataset.interestType || 'flat';
+            const termUnit = disbursalTermsCard.dataset.termUnit || 'months';
+
+            const netPayout = Math.max(0, principal - totalCharges);
+            const netPayoutEl = document.getElementById('preview-net-payout');
+            if (netPayoutEl) netPayoutEl.textContent = '₹' + formatInr(netPayout);
+
+            if (isKandhuvatti) {
+                const interestCycle = (principal * rate) / 100;
+                const cycleEl = document.getElementById('preview-interest-cycle');
+                const rateLabelEl = document.getElementById('preview-rate-label');
+                if (cycleEl) cycleEl.textContent = '₹' + formatInr(interestCycle);
+                if (rateLabelEl) rateLabelEl.textContent = rate.toFixed(2);
+            } else {
+                let totalInterest = 0;
+                let totalPayable = principal;
+
+                if (principal > 0 && rate > 0 && tenure > 0) {
+                    if (interestType === 'reducing' || interestType === 'declining_balance') {
+                        let ratePerPeriod = 0;
+                        if (['days', 'day', 'daily'].includes(termUnit)) {
+                            ratePerPeriod = (rate / 100) / 365;
+                        } else if (['weeks', 'week', 'weekly'].includes(termUnit)) {
+                            ratePerPeriod = (rate / 100) / 52;
+                        } else {
+                            ratePerPeriod = (rate / 100) / 12;
+                        }
+
+                        if (ratePerPeriod > 0) {
+                            const pow = Math.pow(1 + ratePerPeriod, tenure);
+                            const emi = Math.round(principal * (ratePerPeriod * pow) / (pow - 1));
+                            totalPayable = emi * tenure;
+                            totalInterest = Math.max(0, totalPayable - principal);
+                        }
+                    } else {
+                        // Flat interest
+                        totalInterest = Math.ceil(principal * (rate / 100));
+                        totalPayable = principal + totalInterest;
+                    }
+                }
+
+                const totalInterestEl = document.getElementById('preview-total-interest');
+                const totalPayableEl = document.getElementById('preview-total-payable');
+                if (totalInterestEl) totalInterestEl.textContent = '₹' + formatInr(totalInterest);
+                if (totalPayableEl) totalPayableEl.textContent = '₹' + formatInr(totalPayable);
+            }
+        }
+
+        if (btnToggleEditTerms) {
+            btnToggleEditTerms.addEventListener('click', function () {
+                isEditingDisbursalTerms = !isEditingDisbursalTerms;
+                const editableFields = document.querySelectorAll('.disbursal-term-field');
+
+                if (isEditingDisbursalTerms) {
+                    editableFields.forEach(el => {
+                        el.removeAttribute('readonly');
+                        el.classList.remove('bg-light');
+                        el.classList.add('bg-white', 'border-primary');
+                    });
+                    if (selectWeeklyEmiDay) {
+                        selectWeeklyEmiDay.removeAttribute('disabled');
+                    }
+                    if (editingTermsBadge) editingTermsBadge.classList.remove('d-none');
+                    if (btnResetTerms) btnResetTerms.classList.remove('d-none');
+                    document.querySelectorAll('.edit-hint').forEach(el => el.classList.remove('d-none'));
+
+                    labelEditTerms.textContent = 'Lock Terms';
+                    iconEditTerms.className = 'ri-lock-line me-1';
+                    btnToggleEditTerms.className = 'btn btn-xs btn-outline-success';
+
+                    if (inputApprovedAmount) inputApprovedAmount.focus();
+                } else {
+                    editableFields.forEach(el => {
+                        el.setAttribute('readonly', 'readonly');
+                        el.classList.add('bg-light');
+                        el.classList.remove('bg-white', 'border-primary');
+                    });
+                    if (selectWeeklyEmiDay) {
+                        selectWeeklyEmiDay.setAttribute('disabled', 'disabled');
+                    }
+                    if (editingTermsBadge) editingTermsBadge.classList.add('d-none');
+                    if (btnResetTerms) btnResetTerms.classList.add('d-none');
+                    document.querySelectorAll('.edit-hint').forEach(el => el.classList.add('d-none'));
+
+                    labelEditTerms.textContent = 'Edit Terms';
+                    iconEditTerms.className = 'ri-edit-line me-1';
+                    btnToggleEditTerms.className = 'btn btn-xs btn-outline-primary';
+                }
+            });
+        }
+
+        if (btnResetTerms) {
+            btnResetTerms.addEventListener('click', function () {
+                if (!disbursalTermsCard) return;
+                if (inputApprovedAmount) inputApprovedAmount.value = disbursalTermsCard.dataset.origAmount || '';
+                if (inputInterestRate) inputInterestRate.value = disbursalTermsCard.dataset.origRate || '';
+                if (inputTenure) inputTenure.value = disbursalTermsCard.dataset.origTenure || '';
+                if (inputEmiDay) inputEmiDay.value = disbursalTermsCard.dataset.origEmiDay || '';
+                if (selectWeeklyEmiDay) selectWeeklyEmiDay.value = disbursalTermsCard.dataset.origEmiDay || '1';
+
+                const emiStartEl = document.getElementById('emi_start_date_step2');
+                if (emiStartEl && disbursalTermsCard.dataset.origEmiStart) {
+                    if (emiStartEl._flatpickr) {
+                        emiStartEl._flatpickr.setDate(disbursalTermsCard.dataset.origEmiStart, true);
+                    } else {
+                        emiStartEl.value = disbursalTermsCard.dataset.origEmiStart;
+                    }
+                }
+
+                recalculatePayoutPreview();
+            });
+        }
+
+        if (selectWeeklyEmiDay && inputEmiDay) {
+            selectWeeklyEmiDay.addEventListener('change', function () {
+                inputEmiDay.value = this.value;
+            });
+        }
+
+        [inputApprovedAmount, inputInterestRate, inputTenure].forEach(input => {
+            if (input) {
+                input.addEventListener('input', recalculatePayoutPreview);
+                input.addEventListener('change', recalculatePayoutPreview);
+            }
+        });
+
+        // 3. Admin Proceed Form Submission
         const adminProceedForm = document.getElementById('adminProceedForm');
         if (adminProceedForm) {
             adminProceedForm.addEventListener('submit', async (e) => {
@@ -1149,6 +1419,11 @@ if (in_array($displayUnitVal, ['week', 'weeks', 'weekly'], true)) {
                 const btn = document.getElementById('proceed-btn');
                 btn.disabled = true;
                 btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span> Processing...';
+
+                // Sync weekly emi_day if select exists
+                if (selectWeeklyEmiDay && inputEmiDay) {
+                    inputEmiDay.value = selectWeeklyEmiDay.value;
+                }
                 
                 try {
                     const response = await fetch("{{ route('loan-applications.admin-proceed', $application) }}", {
@@ -1173,6 +1448,10 @@ if (in_array($displayUnitVal, ['week', 'weeks', 'weekly'], true)) {
         const confirmRejectBtn = document.getElementById('confirmRejectBtn');
         if (confirmRejectBtn) {
             confirmRejectBtn.addEventListener('click', async () => {
+                if (confirmRejectBtn.dataset.busy === '1') {
+                    return;
+                }
+                confirmRejectBtn.dataset.busy = '1';
                 const reason = document.getElementById('loanRejectReason').value;
                 confirmRejectBtn.disabled = true;
                 try {
@@ -1187,6 +1466,7 @@ if (in_array($displayUnitVal, ['week', 'weeks', 'weekly'], true)) {
                     } else { throw new Error(res.message); }
                 } catch (err) {
                     Swal.fire('Error', err.message, 'error');
+                    confirmRejectBtn.dataset.busy = '0';
                     confirmRejectBtn.disabled = false;
                 }
             });
@@ -1215,7 +1495,8 @@ if (in_array($displayUnitVal, ['week', 'weeks', 'weekly'], true)) {
                 const processingFee = parseFloat(document.getElementById('input_processing_fee').value) || 0;
                 const documentCharges = parseFloat(document.getElementById('input_document_charges').value) || 0;
                 const otherCharges = parseFloat(document.getElementById('input_other_charges').value) || 0;
-                
+                const bankingCharges = parseFloat(document.getElementById('input_banking_charges')?.value) || 0;
+                // Banking charges are company bank cost — not deducted from client handover.
                 const totalCharges = processingFee + documentCharges + otherCharges;
                 const netAmount = Math.max(loanAmount - totalCharges, 0);
                 
@@ -1231,22 +1512,26 @@ if (in_array($displayUnitVal, ['week', 'weeks', 'weekly'], true)) {
                 const sumProcessing = document.getElementById('summary_processing_fee');
                 const sumDocument = document.getElementById('summary_document_charges');
                 const sumOther = document.getElementById('summary_other_charges');
+                const sumBanking = document.getElementById('summary_banking_charges');
                 const sumNet = document.getElementById('summary_net_payout');
                 
                 if (sumProcessing) sumProcessing.textContent = '₹' + processingFee.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
                 if (sumDocument) sumDocument.textContent = '₹' + documentCharges.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
                 if (sumOther) sumOther.textContent = '₹' + otherCharges.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                if (sumBanking) sumBanking.textContent = '₹' + bankingCharges.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
                 if (sumNet) sumNet.textContent = '₹' + netAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
                 
                 // Update Breakdown Modal (if exists)
                 const bdProcessing = document.getElementById('breakdown_processing_fee');
                 const bdDocument = document.getElementById('breakdown_document_charges');
                 const bdOther = document.getElementById('breakdown_other_charges');
+                const bdBanking = document.getElementById('breakdown_banking_charges');
                 const bdNet = document.getElementById('breakdown_net_amount');
                 
                 if (bdProcessing) bdProcessing.textContent = processingFee.toLocaleString('en-IN', { minimumFractionDigits: 2 });
                 if (bdDocument) bdDocument.textContent = documentCharges.toLocaleString('en-IN', { minimumFractionDigits: 2 });
                 if (bdOther) bdOther.textContent = otherCharges.toLocaleString('en-IN', { minimumFractionDigits: 2 });
+                if (bdBanking) bdBanking.textContent = bankingCharges.toLocaleString('en-IN', { minimumFractionDigits: 2 });
                 if (bdNet) bdNet.textContent = netAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 });
             };
 
@@ -1272,6 +1557,12 @@ if (in_array($displayUnitVal, ['week', 'weeks', 'weekly'], true)) {
             updateNet(); // Initial sync
 
             disburseBtn.addEventListener('click', async () => {
+                if (disburseBtn.dataset.busy === '1') {
+                    return;
+                }
+                disburseBtn.dataset.busy = '1';
+                disburseBtn.disabled = true;
+
                 const { isConfirmed } = await safeSwal({ 
                     title: 'Disburse Loan?', 
                     text: 'Confirm final disbursement and EMI generation?', 
@@ -1280,39 +1571,58 @@ if (in_array($displayUnitVal, ['week', 'weeks', 'weekly'], true)) {
                     confirmButtonText: 'Yes, Disburse Now'
                 });
                 
+                if (!isConfirmed) {
+                    disburseBtn.dataset.busy = '0';
+                    disburseBtn.disabled = false;
+                    return;
+                }
+
                 if (isConfirmed) {
-                    disburseBtn.disabled = true;
                     disburseBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span> Disbursing...';
 
                     try {
+                        const internalBankAccId = document.getElementById('internal_bank_account_id')?.value;
+                        if (!internalBankAccId) {
+                            throw new Error('Please select an internal bank account for disbursement.');
+                        }
+
                         const paymentMethod = "{{ $application->payment_method }}";
-                        const payload = {
-                            disbursement_reference: document.getElementById('disbursementReference')?.value,
-                            processing_fee: document.getElementById('input_processing_fee')?.value,
-                            document_charges: document.getElementById('input_document_charges')?.value,
-                            other_charges: document.getElementById('input_other_charges')?.value,
-                            // New Bank fields
-                            bank_name: document.getElementById('bankName')?.value,
-                            account_number: document.getElementById('accountNumber')?.value,
-                            holder_name: document.getElementById('holderName')?.value,
-                            account_type: document.getElementById('accountType')?.value,
-                            ifsc_code: document.getElementById('ifscCode')?.value,
-                            utr_number: document.getElementById('utrNumber')?.value,
-                            disbursed_at: document.getElementById('disbursedAt')?.value,
-                            emi_start_date: document.getElementById('emiStartDate')?.value
-                        };
+                        const formData = new FormData();
+                        formData.append('internal_bank_account_id', internalBankAccId);
+                        formData.append('disbursement_reference', document.getElementById('disbursementReference')?.value || '');
+                        formData.append('processing_fee', document.getElementById('input_processing_fee')?.value || 0);
+                        formData.append('document_charges', document.getElementById('input_document_charges')?.value || 0);
+                        formData.append('other_charges', document.getElementById('input_other_charges')?.value || 0);
+                        formData.append('banking_charges', document.getElementById('input_banking_charges')?.value || 0);
+                        formData.append('bank_name', document.getElementById('bankName')?.value || '');
+                        formData.append('account_number', document.getElementById('accountNumber')?.value || '');
+                        formData.append('holder_name', document.getElementById('holderName')?.value || '');
+                        formData.append('account_type', document.getElementById('accountType')?.value || '');
+                        formData.append('ifsc_code', document.getElementById('ifscCode')?.value || '');
+                        formData.append('utr_number', document.getElementById('utrNumber')?.value || '');
+                        formData.append('disbursed_at', document.getElementById('disbursedAt')?.value || '');
+                        formData.append('emi_start_date', document.getElementById('emiStartDate')?.value || '');
+
+                        const collateralFile = document.getElementById('input_collateral_document')?.files[0];
+                        if (collateralFile) {
+                            formData.append('collateral_document', collateralFile);
+                        }
+                        const otherFile = document.getElementById('input_other_document')?.files[0];
+                        if (otherFile) {
+                            formData.append('other_document', otherFile);
+                        }
 
                         // Basic validation for non-manual payments
                         if (paymentMethod !== 'manual') {
-                            if (!payload.bank_name || !payload.account_number || !payload.ifsc_code || !payload.disbursement_reference || !payload.utr_number) {
+                            if (!document.getElementById('bankName')?.value || !document.getElementById('accountNumber')?.value || !document.getElementById('ifscCode')?.value || !document.getElementById('disbursementReference')?.value || !document.getElementById('utrNumber')?.value) {
                                 throw new Error('Please fill in all bank and transaction details for electronic disbursement.');
                             }
                         }
 
                         const response = await fetch("{{ route('loan-applications.disburse', $application) }}", {
                             method: 'POST',
-                            headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': '{{ csrf_token() }}' },
-                            body: JSON.stringify(payload)
+                            headers: { 'X-CSRF-TOKEN': '{{ csrf_token() }}' },
+                            body: formData
                         });
                         const res = await response.json();
                         if (res.success) {
@@ -1325,6 +1635,7 @@ if (in_array($displayUnitVal, ['week', 'weeks', 'weekly'], true)) {
                         } else { throw new Error(res.message); }
                     } catch (err) {
                         safeSwal({ title: 'Error', text: err.message, icon: 'error' });
+                        disburseBtn.dataset.busy = '0';
                         disburseBtn.disabled = false;
                         disburseBtn.innerHTML = '<i class="ri-check-double-line me-2"></i> Confirm & Disburse Loan';
                     }

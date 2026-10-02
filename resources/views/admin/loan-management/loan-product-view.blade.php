@@ -106,7 +106,13 @@
                 </div>
                 <div class="mb-3">
                   <label class="form-label fw-medium text-heading">Interest Rate</label>
-                  <p class="mb-0">{{ $loanProduct->interest_rate }}% per annum</p>
+                  <p class="mb-0">
+                    @if((float) $loanProduct->interest_rate === 0.0)
+                      <span class="badge bg-label-success">Free Loan · 0% Interest</span>
+                    @else
+                      {{ $loanProduct->interest_rate }}% per annum
+                    @endif
+                  </p>
                 </div>
                 <div class="mb-3">
                   <label class="form-label fw-medium text-heading">Interest Type</label>
@@ -163,6 +169,10 @@
                 <div class="mb-3">
                   <label class="form-label fw-medium text-heading">Other Charges</label>
                   <p class="mb-0">₹{{ number_format($loanProduct->other_charges ?? 0, 2) }}</p>
+                </div>
+                <div class="mb-3">
+                  <label class="form-label fw-medium text-heading">Bank Transfer Charges</label>
+                  <p class="mb-0">₹{{ number_format($loanProduct->banking_charges ?? 0, 2) }}</p>
                 </div>
                 <div class="mb-3">
                   <label class="form-label fw-medium text-heading">Penalty Amount</label>
@@ -334,6 +344,13 @@
             <div class="mb-5">
               <label class="form-label" for="editOtherCharges">Other Charges</label>
               <input type="number" id="editOtherCharges" class="form-control" placeholder="0.00" step="0.01" name="otherCharges" value="{{ $loanProduct->other_charges }}" />
+            </div>
+          </div>
+          <div class="col-md-6 form-control-validation">
+            <div class="mb-5">
+              <label class="form-label" for="editBankingCharges">Bank Transfer Charges</label>
+              <input type="number" id="editBankingCharges" class="form-control" placeholder="0.00" step="0.01" name="bankingCharges" value="{{ $loanProduct->banking_charges }}" />
+              <small class="text-muted">Company bank debit on disbursement — not deducted from client.</small>
             </div>
           </div>
           <div class="col-md-6 form-control-validation">

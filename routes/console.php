@@ -41,4 +41,13 @@ Artisan::command('inspire', function () {
 
 Schedule::command('penalties:apply')->everyMinute();
 Schedule::command('update-emi:status')->everyMinute();
+// Open loans gain one interest cycle as each due date arrives - never ahead of time.
+Schedule::command('loans:sync-open-cycles')
+    ->dailyAt('00:05')
+    ->description('Create open (interest-only) loan interest cycles that have fallen due');
+Schedule::command('fd:pay-monthly-interest')->dailyAt('06:00');
+Schedule::command('chit:complete-ended-groups')
+    ->daily()
+    ->at('00:15')
+    ->description('Mark chit groups completed after their end month');
 Schedule::command('logs:clear-old')->daily();

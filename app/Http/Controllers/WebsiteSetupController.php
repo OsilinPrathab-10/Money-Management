@@ -259,7 +259,17 @@ class WebsiteSetupController extends Controller
         
         return response()->json([
             'success' => true,
-            'message' => 'Appearance settings updated successfully!'
-        ]);
+            'message' => 'Appearance settings updated successfully!',
+            'primary_color' => $appearance->primary_color,
+            'secondary_color' => $appearance->secondary_color,
+        ])->cookie(
+            'admin-primaryColor',
+            $appearance->primary_color,
+            60 * 24 * 365,
+            '/',
+            null,
+            false,
+            false
+        );
     }
 }

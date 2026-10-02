@@ -304,7 +304,8 @@ class SystemController extends Controller
             throw new \Exception('Cannot open file for writing: ' . $filepath);
         }
 
-        fwrite($handle, "-- Shanmuga Finance Database Backup\n");
+        $companyName = \App\Models\CompanyDetail::first()->company_name ?? 'Codepluse Gen PVT Ltd';
+        fwrite($handle, "-- {$companyName} Database Backup\n");
         fwrite($handle, "-- Generated: " . date('Y-m-d H:i:s') . "\n\n");
         fwrite($handle, "SET NAMES utf8mb4;\n");
         fwrite($handle, "SET FOREIGN_KEY_CHECKS=0;\n\n");
@@ -382,10 +383,127 @@ class SystemController extends Controller
     }
 
     /**
+     * Sync missing EmiCollection records from the last 30 days into CollectionLog
+     */
+    private function syncMissingCollectionLogs()
+    {
+        try {
+            $thirtyDaysAgo = now()->subDays(30);
+
+            // Reconstruct missing EmiCollection records for paid/partial EMIs in the last 30 days
+            try {
+                $emisWithMissingCollections = \App\Models\Emi::where(function($q) use ($thirtyDaysAgo) {
+                        $q->where('paid_date', '>=', $thirtyDaysAgo)
+                          ->orWhere('updated_at', '>=', $thirtyDaysAgo);
+                    })
+                    ->where('paid_amount', '>', 0)
+                    ->whereIn('status', ['paid', 'partial'])
+                    ->get();
+
+                foreach ($emisWithMissingCollections as $emi) {
+                    $hasColl = \App\Models\EmiCollection::where('emi_id', $emi->id)->exists();
+                    if (!$hasColl) {
+                        $auditLog = DB::table('payment_audit_logs')
+                            ->where('emi_id', $emi->id)
+                            ->first();
+                        
+                        $method = $auditLog->payment_mode ?? 'upi';
+                        $amount = $emi->paid_amount;
+                        $ref = $auditLog->receipt_number ?? null;
+                        
+                        \App\Models\EmiCollection::create([
+                            'emi_id' => $emi->id,
+                            'amount' => $amount,
+                            'payment_method' => $method,
+                            'payment_type' => ($emi->status === 'paid') ? 'full' : 'partial',
+                            'payment_reference' => $ref,
+                            'status' => 'verified',
+                            'collected_at' => $emi->paid_date ?: $emi->updated_at,
+                            'verified_at' => $emi->updated_at,
+                            'remarks' => 'Auto-restored collection history record',
+                        ]);
+                    }
+                }
+            } catch (\Exception $ex) {
+                Log::error('Failed to reconstruct missing EmiCollections: ' . $ex->getMessage());
+            }
+
+            $emiCollections = \App\Models\EmiCollection::where('collected_at', '>=', $thirtyDaysAgo)
+                ->orWhere('created_at', '>=', $thirtyDaysAgo)
+                ->with(['emi.loanAccount.client', 'agent', 'verifiedBy'])
+                ->get();
+
+            foreach ($emiCollections as $col) {
+                $clientName = $col->emi?->loanAccount?->client?->client_name ?? 'Unknown';
+                $loanNumber = $col->emi?->loanAccount?->customer_loan_account_number ?? $col->emi?->loanAccount?->account_number ?? 'N/A';
+                $emiNumber = $col->emi?->instalment_number ?? 'N/A';
+                $amount = $col->amount ?? 0;
+                $paymentMode = $col->payment_method ?? 'direct';
+                $collectedAt = $col->collected_at ?: $col->created_at;
+
+                $collectedBy = 'System';
+                if ($col->agent) {
+                    $collectedBy = $col->agent->agent_name;
+                } elseif ($col->verifiedBy) {
+                    $collectedBy = $col->verifiedBy->name;
+                }
+
+                $createdAtFormatted = $col->created_at ? \Carbon\Carbon::parse($col->created_at)->format('Y-m-d H:i:s') : null;
+
+                // Match existing log within a 5-second window of EmiCollection's created_at time
+                $existingLog = CollectionLog::where('loan_number', $loanNumber)
+                    ->where('emi_number', (string)$emiNumber)
+                    ->where(function($q) use ($createdAtFormatted) {
+                        if ($createdAtFormatted) {
+                            $q->whereRaw("ABS(TIMESTAMPDIFF(SECOND, created_at, ?)) <= 5", [$createdAtFormatted]);
+                        }
+                    })
+                    ->first();
+
+                if ($existingLog) {
+                    $needsUpdate = false;
+                    if ($existingLog->collected_at != $collectedAt ||
+                        (float)$existingLog->collected_amount != (float)$amount ||
+                        $existingLog->payment_mode != $paymentMode ||
+                        $existingLog->collected_by_name != $collectedBy ||
+                        $existingLog->client_name != $clientName) {
+                        $needsUpdate = true;
+                    }
+
+                    if ($needsUpdate) {
+                        $existingLog->update([
+                            'client_name' => $clientName,
+                            'collected_amount' => $amount,
+                            'payment_mode' => $paymentMode,
+                            'collected_by_name' => $collectedBy,
+                            'collected_at' => $collectedAt,
+                        ]);
+                    }
+                } else {
+                    CollectionLog::create([
+                        'client_name' => $clientName,
+                        'loan_number' => $loanNumber,
+                        'emi_number' => $emiNumber,
+                        'collected_amount' => $amount,
+                        'payment_mode' => $paymentMode,
+                        'collected_by_name' => $collectedBy,
+                        'ip_address' => '127.0.0.1',
+                        'collected_at' => $collectedAt,
+                    ]);
+                }
+            }
+        } catch (\Exception $e) {
+            Log::error('Failed to sync collection logs: ' . $e->getMessage());
+        }
+    }
+
+    /**
      * Display collection logs for the last 30 days
      */
     public function collectionLog(Request $request)
     {
+        $this->syncMissingCollectionLogs();
+
         $search = trim((string) $request->input('search'));
 
         $logs = CollectionLog::where('created_at', '>=', now()->subDays(30))
@@ -425,6 +543,8 @@ class SystemController extends Controller
      */
     public function exportCollectionLog(Request $request)
     {
+        $this->syncMissingCollectionLogs();
+
         $search = trim((string) $request->input('search'));
 
         $logs = CollectionLog::where('created_at', '>=', now()->subDays(30))

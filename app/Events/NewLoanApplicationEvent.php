@@ -13,8 +13,11 @@ class NewLoanApplicationEvent
 
     public $loanApplication;
 
-    public function __construct(LoanApplication $loanApplication)
+    public string $source;
+
+    public function __construct(LoanApplication $loanApplication, string $source = 'admin')
     {
         $this->loanApplication = $loanApplication;
+        $this->source = $source;
     }
 }

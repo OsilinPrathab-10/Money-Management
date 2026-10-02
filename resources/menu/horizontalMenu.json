@@ -1082,7 +1082,21 @@
       "name": "Accounting",
       "icon": "menu-icon icon-base ri ri-book-2-line",
       "slug": [
-        "account"
+        "account.index",
+        "account.bank-accounts",
+        "account.bank-transfers",
+        "account.bank-transactions",
+        "account.revenues",
+        "account.expenses",
+        "account.reports",
+        "account.day-book",
+        "account.ledger",
+        "account.profit-loss",
+        "account.account-types",
+        "account.account-categories",
+        "account.revenue-categories",
+        "account.expense-categories",
+        "account.configuration.gst"
       ],
       "roles": [
         "Admin"
@@ -1098,24 +1112,6 @@
           ]
         },
         {
-          "url": "account/loan-accounts",
-          "name": "Loan accounts",
-          "icon": "menu-icon icon-base ri ri-bank-card-line",
-          "slug": "account.loan-accounts",
-          "roles": [
-            "Admin"
-          ]
-        },
-        {
-          "url": "account/emis",
-          "name": "EMI schedule",
-          "icon": "menu-icon icon-base ri ri-calendar-check-line",
-          "slug": "account.emis",
-          "roles": [
-            "Admin"
-          ]
-        },
-        {
           "url": "account/bank-accounts",
           "name": "Bank accounts",
           "icon": "menu-icon icon-base ri ri-bank-line",
@@ -1125,10 +1121,19 @@
           ]
         },
         {
-          "url": "account/chart-of-accounts",
-          "name": "Chart of accounts",
-          "icon": "menu-icon icon-base ri ri-node-tree",
-          "slug": "account.chart-of-accounts",
+          "url": "account/bank-transfers",
+          "name": "Bank transfers",
+          "icon": "menu-icon icon-base ri ri-arrow-left-right-line",
+          "slug": "account.bank-transfers",
+          "roles": [
+            "Admin"
+          ]
+        },
+        {
+          "url": "account/bank-transactions",
+          "name": "Bank transactions",
+          "icon": "menu-icon icon-base ri ri-exchange-line",
+          "slug": "account.bank-transactions",
           "roles": [
             "Admin"
           ]
@@ -1188,64 +1193,19 @@
           ]
         },
         {
-          "url": "account/bank-transactions",
-          "name": "Bank transactions",
-          "icon": "menu-icon icon-base ri ri-exchange-line",
-          "slug": "account.bank-transactions",
-          "roles": [
-            "Admin"
-          ]
-        },
-        {
-          "url": "account/bank-transfers",
-          "name": "Bank transfers",
-          "icon": "menu-icon icon-base ri ri-arrow-left-right-line",
-          "slug": "account.bank-transfers",
-          "roles": [
-            "Admin"
-          ]
-        },
-        {
-          "url": "account/customers",
-          "name": "Customers",
-          "icon": "menu-icon icon-base ri ri-user-follow-line",
-          "slug": "account.customers",
-          "roles": [
-            "Admin"
-          ]
-        },
-        {
-          "url": "account/customer-payments",
-          "name": "Customer payments",
-          "icon": "menu-icon icon-base ri ri-money-dollar-circle-line",
-          "slug": "account.customer-payments",
-          "roles": [
-            "Admin"
-          ]
-        },
-        {
-          "url": "account/debit-notes",
-          "name": "Debit notes",
-          "icon": "menu-icon icon-base ri ri-file-list-3-line",
-          "slug": "account.debit-notes",
-          "roles": [
-            "Admin"
-          ]
-        },
-        {
-          "url": "account/credit-notes",
-          "name": "Credit notes",
-          "icon": "menu-icon icon-base ri ri-file-list-3-line",
-          "slug": "account.credit-notes",
-          "roles": [
-            "Admin"
-          ]
-        },
-        {
           "url": "account/account-types",
           "name": "Account types",
           "icon": "menu-icon icon-base ri ri-shapes-line",
           "slug": "account.account-types",
+          "roles": [
+            "Admin"
+          ]
+        },
+        {
+          "url": "account/account-categories",
+          "name": "Account categories",
+          "icon": "menu-icon icon-base ri ri-folder-2-line",
+          "slug": "account.account-categories",
           "roles": [
             "Admin"
           ]
@@ -1267,7 +1227,31 @@
           "roles": [
             "Admin"
           ]
+        },
+        {
+          "url": "account/configuration/gst",
+          "name": "GST Configuration",
+          "icon": "menu-icon icon-base ri ri-percent-line",
+          "slug": "account.configuration.gst",
+          "roles": [
+            "Admin"
+          ]
         }
+      ]
+    },
+    {
+      "url": "support/tickets",
+      "icon": "menu-icon icon-base ri ri-customer-service-2-line",
+      "name": "Support Tickets",
+      "roles": [
+        "Admin",
+        "Staff"
+      ],
+      "slug": [
+        "support-tickets",
+        "support-tickets-data",
+        "support-tickets-show",
+        "support-tickets-reply"
       ]
     }
   ]

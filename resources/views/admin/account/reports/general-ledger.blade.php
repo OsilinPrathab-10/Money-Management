@@ -19,7 +19,7 @@
 @endphp
 
 @section('content')
-<div class="container-xxl flex-grow-1 container-p-y">
+<div class="account-module">
   <div class="d-flex flex-wrap justify-content-between align-items-center mb-4">
     <h4 class="fw-bold mb-0">
       <i class="ri-file-paper-2-line text-warning me-2"></i>{{ $pageTitle ?? __('General Ledger Report') }}
@@ -44,13 +44,19 @@
             @endforeach
           </select>
         </div>
-        <div class="col-md-3">
-          <label class="form-label fw-bold small text-muted text-uppercase">{{ __('Start Date') }}</label>
-          <input type="date" name="start_date" class="form-control" value="{{ $startDate }}" onchange="this.form.submit()">
-        </div>
-        <div class="col-md-3">
-          <label class="form-label fw-bold small text-muted text-uppercase">{{ __('End Date') }}</label>
-          <input type="date" name="end_date" class="form-control" value="{{ $endDate }}" onchange="this.form.submit()">
+        <div class="col-12 col-lg">
+          @include('partials.date-range-filter', [
+            'fromId' => 'accReportGlStart',
+            'toId' => 'accReportGlEnd',
+            'presetId' => 'accReportGlPreset',
+            'fromName' => 'start_date',
+            'toName' => 'end_date',
+            'fromValue' => $startDate,
+            'toValue' => $endDate,
+            'presetValue' => request('date_preset', 'all'),
+            'autoSubmit' => true,
+            'size' => 'sm',
+          ])
         </div>
         <div class="col-md-3 text-md-end">
           <div class="text-muted small mb-1">{{ __('Active Accounts') }}</div>

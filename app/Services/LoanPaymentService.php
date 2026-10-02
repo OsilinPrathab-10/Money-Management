@@ -10,10 +10,23 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Auth;
 use App\Models\LoanApplication;
 use App\Models\Payment;
+use App\Services\Account\AccountingTags;
+use App\Services\Account\ChitAccountingService;
+use App\Services\FixedDeposit\WalletService;
 use Carbon\Carbon;
+use Illuminate\Validation\ValidationException;
 
 class LoanPaymentService
 {
+    /**
+     * When true, processPayment does not fire PaymentReceivedEvent (use for bulk verify).
+     */
+    public static bool $suppressPaymentNotifications = false;
+
+    /**
+     * When true, skip opening/closing EMI+loan balance sync inside processPayment.
+     */
+    public static bool $suppressBalanceSync = false;
     /**
      * Calculate foreclosure principal, interest, charges and total (rounded to nearest rupee).
      */
@@ -63,13 +76,29 @@ class LoanPaymentService
             $extraChargeAmount = round(($outstandingAmount * $extraChargePercent) / 100);
         }
 
+        // A settlement discount is a concession on interest only: it lowers what
+        // the client pays and lowers the interest booked to revenue by the same
+        // amount. It can never exceed the interest being charged.
+        $discountPercentage = (float) ($options['discount_percentage'] ?? 0);
+        $discountAmount = (float) ($options['discount_amount'] ?? 0);
+
+        if ($discountPercentage > 0) {
+            $discountAmount = round(($interestOutstanding * $discountPercentage) / 100);
+        }
+
+        $discountAmount = min(round(max(0, $discountAmount)), $interestOutstanding);
+        $netInterest = round(max(0, $interestOutstanding - $discountAmount));
+
         $totalAmount = round(
-            $outstandingAmount + $interestOutstanding + $foreclosureCharges + $extraChargeAmount
+            $outstandingAmount + $netInterest + $foreclosureCharges + $extraChargeAmount
         );
 
         return [
             'outstanding_amount' => $outstandingAmount,
             'interest_outstanding' => $interestOutstanding,
+            'discount_percentage' => $discountPercentage,
+            'discount_amount' => $discountAmount,
+            'net_interest' => $netInterest,
             'foreclosure_charges' => $foreclosureCharges,
             'extra_charge_percent' => $extraChargePercent,
             'extra_charge_amount' => $extraChargeAmount,
@@ -182,6 +211,212 @@ class LoanPaymentService
     }
 
     /**
+     * Unpaid open-loan cycle whose due date falls in the current day/week/month.
+     */
+    protected function resolveCurrentCycleEmi(LoanAccount $loanAccount): ?Emi
+    {
+        $unpaid = $loanAccount->emis()
+            ->whereNotIn('status', ['paid', 'closed', 'carried_forward'])
+            ->orderBy('instalment_number')
+            ->get();
+
+        return $unpaid->first(
+            fn (Emi $emi) => $this->foreclosureIncludesCurrentCycleInterest($loanAccount, $emi)
+        );
+    }
+
+    /**
+     * Open loan: only the current day/week/month cycle is paid.
+     * Overdue and other unpaid cycles are closed (not paid).
+     */
+    protected function settleEmisOnForeclosure(
+        LoanAccount $loanAccount,
+        ?Emi $ongoingEmi,
+        float $interestOutstanding,
+        $now,
+        ?string $paymentReference = null
+    ): void {
+        $isOpenLoan = ($loanAccount->loan_mode ?? 'emi') === 'interest_only';
+        $currentCycleEmi = $isOpenLoan
+            ? $this->resolveCurrentCycleEmi($loanAccount)
+            : $ongoingEmi;
+
+        $loanAccount->emis()
+            ->whereNotIn('status', ['paid', 'closed'])
+            ->get()
+            ->each(function ($emi) use ($now, $currentCycleEmi, $interestOutstanding, $isOpenLoan, $paymentReference) {
+                $isCurrent = $currentCycleEmi && (int) $emi->id === (int) $currentCycleEmi->id;
+
+                if ($isOpenLoan && ! $isCurrent) {
+                    $emi->update([
+                        'status' => 'closed',
+                        'pending_amount' => 0,
+                        'paid_date' => null,
+                        'remarks' => trim(($emi->remarks ?? '') . ' [Foreclosed - closed]'),
+                    ]);
+
+                    return;
+                }
+
+                $payload = [
+                    'status' => 'paid',
+                    'paid_amount' => $emi->total_due,
+                    'pending_amount' => 0,
+                    'paid_date' => $now,
+                    'remarks' => trim(($emi->remarks ?? '') . ' [Foreclosed settlement]'),
+                ];
+
+                if ($isCurrent && $interestOutstanding > 0) {
+                    $payload['interest_amount'] = $interestOutstanding;
+                } elseif (! $isOpenLoan && ! $isCurrent) {
+                    $payload['interest_amount'] = 0;
+                }
+
+                if ($paymentReference) {
+                    $payload['payment_reference'] = $paymentReference;
+                }
+
+                $emi->update($payload);
+            });
+    }
+
+    /**
+     * Normalize open-loan repayment frequency.
+     */
+    protected function resolveOpenLoanTermUnit(LoanAccount $loanAccount): string
+    {
+        $loanAccount->loadMissing('loanApplication');
+        $termUnit = strtolower((string) (
+            $loanAccount->loanApplication->term_unit
+            ?? $loanAccount->term_unit
+            ?? 'monthly'
+        ));
+
+        if (in_array($termUnit, ['week', 'weeks', 'weekly'], true)) {
+            return 'weekly';
+        }
+        if (in_array($termUnit, ['day', 'days', 'daily'], true)) {
+            return 'daily';
+        }
+
+        return 'monthly';
+    }
+
+    protected function openLoanDaysInCycle(string $termUnit): int
+    {
+        return match ($termUnit) {
+            'weekly' => 7,
+            'daily' => 1,
+            default => 30,
+        };
+    }
+
+    /**
+     * Start of the current interest cycle (previous due date or disbursement).
+     */
+    protected function openLoanCycleStartDate(LoanAccount $loanAccount, Emi $emi): Carbon
+    {
+        $prev = Emi::where('loan_account_id', $loanAccount->id)
+            ->where('instalment_number', '<', $emi->instalment_number)
+            ->orderByDesc('instalment_number')
+            ->first();
+
+        if ($prev && $prev->due_date) {
+            return Carbon::parse($prev->due_date)->startOfDay();
+        }
+
+        if ($loanAccount->disbursed_at) {
+            return Carbon::parse($loanAccount->disbursed_at)->startOfDay();
+        }
+
+        if ($emi->due_date) {
+            $days = $this->openLoanDaysInCycle($this->resolveOpenLoanTermUnit($loanAccount));
+
+            return Carbon::parse($emi->due_date)->subDays($days)->startOfDay();
+        }
+
+        return now()->startOfDay();
+    }
+
+    /**
+     * Full-cycle interest for an open-loan EMI (max charge for the period).
+     */
+    protected function openLoanFullCycleInterest(LoanAccount $loanAccount, Emi $emi): float
+    {
+        $stored = (float) ($emi->interest_amount ?? 0);
+        if ($stored > 0.009 && ($emi->status === 'paid' || abs($stored - round($stored)) < 0.001)) {
+            return (float) \App\Support\RupeeRound::one($stored);
+        }
+
+        $priorPrincipalPaid = Emi::where('loan_account_id', $loanAccount->id)
+            ->where('instalment_number', '<', $emi->instalment_number)
+            ->sum('principal_amount');
+        $priorOutstanding = max(0, (float) $loanAccount->loan_amount - (float) $priorPrincipalPaid);
+
+        return (float) \App\Support\RupeeRound::one($priorOutstanding * ((float) $loanAccount->interest_rate / 100));
+    }
+
+    /**
+     * Accrued open-loan interest as of a date.
+     * Monthly / weekly: only crossed days (before due). Daily: full cycle (not prorated).
+     */
+    protected function calculateOpenLoanAccruedInterest(
+        LoanAccount $loanAccount,
+        Emi $emi,
+        $asOfDate,
+        ?float $fullCycleInterest = null
+    ): float {
+        $full = $fullCycleInterest ?? $this->openLoanFullCycleInterest($loanAccount, $emi);
+        if ($full <= 0.009) {
+            return 0.0;
+        }
+
+        $termUnit = $this->resolveOpenLoanTermUnit($loanAccount);
+
+        // Daily open loan: full cycle interest always (no early-day proration).
+        if ($termUnit === 'daily') {
+            return round($full, 2);
+        }
+
+        $asOf = Carbon::parse($asOfDate)->startOfDay();
+        $due = $emi->due_date ? Carbon::parse($emi->due_date)->startOfDay() : null;
+
+        // On or after due date → full cycle interest.
+        if ($due && $asOf->gte($due)) {
+            return round($full, 2);
+        }
+
+        $cycleStart = $this->openLoanCycleStartDate($loanAccount, $emi);
+        if ($asOf->lt($cycleStart)) {
+            return 0.0;
+        }
+
+        $daysInCycle = $this->openLoanDaysInCycle($termUnit);
+        $daysElapsed = min($daysInCycle, max(0, (int) $cycleStart->diffInDays($asOf)));
+
+        if ($daysElapsed <= 0) {
+            return 0.0;
+        }
+
+        return round(min($full, ($full / $daysInCycle) * $daysElapsed), 2);
+    }
+
+    /**
+     * Interest still payable on an open-loan cycle as of a date (accrued − already paid interest).
+     */
+    protected function openLoanInterestDue(LoanAccount $loanAccount, Emi $emi, $asOfDate): float
+    {
+        $full = $this->openLoanFullCycleInterest($loanAccount, $emi);
+        $accrued = $this->calculateOpenLoanAccruedInterest($loanAccount, $emi, $asOfDate, $full);
+        $paidAmount = (float) ($emi->paid_amount ?? 0);
+        $principalPaid = (float) ($emi->principal_amount ?? 0);
+        $interestPaid = max(0, $paidAmount - $principalPaid);
+        $penalty = (float) ($emi->penalty_amount ?? 0);
+
+        return round(max(0, ($accrued + $penalty) - $interestPaid), 2);
+    }
+
+    /**
      * Foreclose a loan account
      *
      * @param int $loanAccountId
@@ -257,7 +492,12 @@ class LoanPaymentService
         ]));
 
         $outstandingAmount = $amounts['outstanding_amount'];
-        $interestOutstanding = $amounts['interest_outstanding'];
+        $grossInterest = $amounts['interest_outstanding'];
+        $discountAmount = $amounts['discount_amount'];
+        $discountPercentage = $amounts['discount_percentage'];
+        // Everything downstream - what the client pays, what is booked to
+        // revenue and what is stamped on the EMI - uses interest after discount.
+        $interestOutstanding = $amounts['net_interest'];
         $foreclosureCharges = $amounts['foreclosure_charges'];
         $extraChargeAmount = $amounts['extra_charge_amount'];
         $totalForeclosureAmount = $amounts['total_amount'];
@@ -265,6 +505,18 @@ class LoanPaymentService
         $extraChargePercent = $amounts['extra_charge_percent'];
 
         $notes = $options['foreclosure_notes'] ?? null;
+        if ($discountAmount > 0) {
+            $discountNote = $discountPercentage > 0
+                ? "Interest discount {$discountPercentage}% (₹{$discountAmount}) applied on ₹{$grossInterest} interest."
+                : "Interest discount ₹{$discountAmount} applied on ₹{$grossInterest} interest.";
+            $notes = trim(($notes ? $notes . ' ' : '') . $discountNote);
+        }
+        $paymentMethod = strtolower(trim((string) ($options['payment_method'] ?? 'in_hand')));
+        if ($paymentMethod === 'cash') {
+            $paymentMethod = 'in_hand';
+        }
+        $requestedBankId = (int) ($options['internal_bank_account_id'] ?? $options['bank_account_id'] ?? 0);
+        $paymentReference = trim((string) ($options['payment_reference'] ?? ''));
 
         $oldTenure = (int) ($loanAccount->tenure ?? 0);
         $oldPrincipal = (float) $outstandingAmount;
@@ -272,20 +524,52 @@ class LoanPaymentService
         DB::beginTransaction();
         try {
             $now = now();
+            $chitAccounting = app(ChitAccountingService::class);
+            $resolvedBankId = $chitAccounting->resolveCollectionBankAccountId($paymentMethod, $requestedBankId);
 
-            // Mark every non-paid EMI as paid with current timestamp
-            $loanAccount->emis()
-                ->where('status', '!=', 'paid')
-                ->get()
-                ->each(function ($emi) use ($now) {
-                    $emi->update([
-                        'status' => 'paid',
-                        'paid_amount' => $emi->total_due ?: $emi->total_amount,
-                        'pending_amount' => 0,
-                        'paid_date' => $now,
-                        'remarks' => trim(($emi->remarks ?? '') . ' [Foreclosed settlement]')
-                    ]);
-                });
+            $chargesPosted = round($foreclosureCharges + $extraChargeAmount);
+
+            $loanAccount->loadMissing('client');
+            $accountNumber = $loanAccount->customer_loan_account_number
+                ?? $loanAccount->account_number
+                ?? 'N/A';
+            $clientName = $loanAccount->client?->client_name ?? 'Client';
+            $cashbookRef = $paymentReference !== ''
+                ? $paymentReference
+                : ('LOAN-FC-' . $loanAccount->id . '-' . $now->format('YmdHis'));
+
+            $this->recordLoanCollectionInCashbook(
+                $resolvedBankId,
+                $paymentMethod,
+                (float) $totalForeclosureAmount,
+                $cashbookRef,
+                AccountingTags::loanForeclosureDescription(
+                    (string) $accountNumber,
+                    (string) $clientName,
+                    Auth::id()
+                ),
+                $now,
+                AccountingTags::ENTRY_FORECLOSE,
+                true
+            );
+
+            $this->postForeclosureRevenues(
+                $loanAccount,
+                (float) $interestOutstanding,
+                $chargesPosted,
+                (int) $resolvedBankId,
+                $cashbookRef,
+                $now->toDateString(),
+                (string) $accountNumber,
+                (string) $clientName
+            );
+
+            $this->settleEmisOnForeclosure(
+                $loanAccount,
+                $ongoingEmi,
+                (float) $interestOutstanding,
+                $now
+            );
 
             $emiIds = $loanAccount->emis()->pluck('id');
             \App\Models\EmiAgentAssignment::whereIn('emi_id', $emiIds)
@@ -308,6 +592,13 @@ class LoanPaymentService
                 'pending_amount' => 0,
                 'paid_amount' => $loanAccount->total_payable,
                 'foreclosure_amount' => $totalForeclosureAmount,
+                'foreclosure_interest_amount' => $interestOutstanding,
+                'foreclosure_charges_amount' => $chargesPosted,
+                'foreclosure_charges_percentage' => $chargesPercentage,
+                'foreclosure_discount_percentage' => $discountPercentage,
+                'foreclosure_discount_amount' => $discountAmount,
+                'foreclosure_payment_method' => $paymentMethod,
+                'foreclosure_bank_account_id' => $resolvedBankId,
                 'foreclosure_notes' => $notes,
                 'foreclosure_processed_by' => Auth::id(),
             ]);
@@ -378,6 +669,10 @@ class LoanPaymentService
                 'data' => [
                     'loan_id' => $loanAccount->id,
                     'outstanding_amount' => $outstandingAmount,
+                    'gross_interest' => $grossInterest,
+                    'discount_percentage' => $discountPercentage,
+                    'discount_amount' => $discountAmount,
+                    'interest_charged' => $interestOutstanding,
                     'foreclosure_charges' => $foreclosureCharges,
                     'extra_charge_percent' => $extraChargePercent,
                     'extra_charge_amount' => $extraChargeAmount,
@@ -385,6 +680,14 @@ class LoanPaymentService
                 ]
             ];
 
+        } catch (ValidationException $e) {
+            DB::rollBack();
+            $message = collect($e->errors())->flatten()->first() ?: 'Please select a collection bank account.';
+
+            return [
+                'success' => false,
+                'message' => $message,
+            ];
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('Foreclosure failed', [
@@ -412,22 +715,25 @@ class LoanPaymentService
      * @param bool $bypassPriorCheck
      * @return array
      */
-    public function processPayment($emiId, $amount, $date, $method, $reference = null, $remarks = null, $skipHistory = false, $principalAmount = 0, $bypassPriorCheck = false)
+    public function processPayment($emiId, $amount, $date, $method, $reference = null, $remarks = null, $skipHistory = false, $principalAmount = 0, $bypassPriorCheck = false, $bankAccountId = null, ?int $agentId = null, bool $skipCashbook = false)
     {
         $emi = Emi::with('loanAccount')->findOrFail($emiId);
         
         // Redirect to Interest-Only logic if mode is Kandhuvatti
         if ($emi->loanAccount && $emi->loanAccount->loan_mode === 'interest_only') {
-            return $this->processInterestOnlyPayment($emi->loanAccount, $amount, $date, $method, $reference, $remarks, $skipHistory, $principalAmount);
+            return $this->processInterestOnlyPayment($emi->loanAccount, $amount, $date, $method, $reference, $remarks, $skipHistory, $principalAmount, $bankAccountId, $emi, $skipCashbook);
         }
         
         // Ensure the loan's EMIs are synchronized with the latest non-cumulative logic before processing
-        $this->syncEmiBalances($emi->loan_account_id);
+        if (! self::$suppressBalanceSync) {
+            $this->syncEmiBalances($emi->loan_account_id);
+        }
         
         // Apply dynamic penalty if overdue and grace period crossed
         $this->applyDynamicPenaltyIfNeeded($emi, $date);
         
         $emi->refresh(); // Refresh to get the updated total_due and status
+        $loanAccount = $emi->loanAccount->fresh();
 
         // Check for unpaid EMIs prior to this one (ignoring those fully covered by pending collections)
         $lastEmi = Emi::where('loan_account_id', $emi->loan_account_id)
@@ -453,159 +759,250 @@ class LoanPaymentService
         }
 
 
+        $electronicMethods = ['upi', 'bank_transfer', 'gpay', 'google_pay', 'phonepe', 'phone_pe', 'qr', 'qr_code'];
+        if (in_array($method, $electronicMethods, true) && !$bankAccountId && ! $skipHistory) {
+            return [
+                'success' => false,
+                'message' => 'Collection Bank Account is mandatory when paying via UPI / GPay / QR or Bank Transfer.'
+            ];
+        }
+
+        // Resolve once so cash → Cash in Hand id is stored on collections (undo must not guess).
+        // Wallet stays outside the company cashbook.
+        if ($method !== 'wallet') {
+            try {
+                $bankAccountId = app(\App\Services\Account\ChitAccountingService::class)
+                    ->resolveCollectionBankAccountId((string) $method, (int) ($bankAccountId ?? 0));
+            } catch (\Illuminate\Validation\ValidationException $e) {
+                return [
+                    'success' => false,
+                    'message' => collect($e->errors())->flatten()->first() ?: 'Invalid collection bank account.',
+                ];
+            }
+        }
+
         // Calculate potential new total paid
-        $currentPaid = $emi->paid_amount ?? 0;
-        $totalDue = $emi->total_due;
-        $newTotalPaid = $currentPaid + $amount;
+        if ($amount <= 0) {
+            return [
+                'success' => false,
+                'message' => 'Payment amount must be greater than zero.'
+            ];
+        }
 
-        $remainingDue = $totalDue - $newTotalPaid;
+        $remainingOutstanding = round((float) ($loanAccount->outstanding_amount ?? 0), 2);
+        if ($amount > ($remainingOutstanding + 0.01)) {
+            return [
+                'success' => false,
+                'message' => 'Payment amount cannot exceed the remaining loan outstanding of ₹' . number_format($remainingOutstanding, 2) . '.'
+            ];
+        }
 
-        $isFullPayment = $newTotalPaid >= ($totalDue - 0.01);
+        $pendingEmis = Emi::where('loan_account_id', $emi->loan_account_id)
+            ->where('instalment_number', '>=', $emi->instalment_number)
+            ->whereIn('status', ['pending', 'partial', 'overdue'])
+            ->orderBy('instalment_number')
+            ->get();
+
+        $allocatableOutstanding = round((float) $pendingEmis->sum(function ($pendingEmi) {
+            return max(0, (float) ($pendingEmi->pending_amount ?? 0));
+        }), 2);
+
+        if ($amount > ($allocatableOutstanding + 0.01)) {
+            return [
+                'success' => false,
+                'message' => 'Payment amount cannot exceed the allocatable pending EMI balance of ₹' . number_format($allocatableOutstanding, 2) . '.'
+            ];
+        }
+
+        if ($method === 'wallet') {
+            $clientId = (int) ($loanAccount->client_id ?? 0);
+            if (!$clientId) {
+                return ['success' => false, 'message' => 'Unable to resolve customer for wallet payment.'];
+            }
+            $walletService = app(WalletService::class);
+            if ($walletService->balanceForClient($clientId) + 0.01 < $amount) {
+                return [
+                    'success' => false,
+                    'message' => 'Insufficient wallet balance. Available: ₹' . number_format($walletService->balanceForClient($clientId), 2),
+                ];
+            }
+        }
 
         DB::beginTransaction();
         try {
-            $remainingPayment = (float) $amount;
-            
-            // Get this and all subsequent EMIs for this loan
-            $targetAndFutureEmis = Emi::where('loan_account_id', $emi->loan_account_id)
-                ->where('instalment_number', '>=', $emi->instalment_number)
-                ->orderBy('instalment_number', 'asc')
-                ->get();
-                
-            $firstIteration = true;
+            if ($method === 'wallet') {
+                app(WalletService::class)->debit(
+                    (int) $loanAccount->client_id,
+                    round((float) $amount, 2),
+                    'Loan EMI Payment',
+                    'loan_emi',
+                    $emi->id,
+                    ['loan_account_id' => $loanAccount->id, 'instalment_number' => $emi->instalment_number]
+                );
+            }
+
+            $remainingPayment = round((float) $amount, 2);
             $updatedEmis = [];
-            
-            foreach ($targetAndFutureEmis as $currentEmi) {
-                if ($remainingPayment <= 0.001) {
+            $cashbookEmiNumbers = [];
+            $cashbookPostedTotal = 0.0;
+
+            foreach ($pendingEmis as $pendingEmi) {
+                if ($remainingPayment <= 0.01) {
                     break;
                 }
-                
-                $currentEmi->refresh();
-                $emiTotalDue = (float) $currentEmi->total_due;
-                $emiPaidAmount = (float) ($currentEmi->paid_amount ?? 0);
-                $emiPending = max(0.00, $emiTotalDue - $emiPaidAmount);
-                
-                // If this is a future EMI and it's already paid, skip it
-                if (!$firstIteration && $emiPending <= 0.001) {
+
+                $pendingForThisEmi = round((float) ($pendingEmi->pending_amount ?? 0), 2);
+                if ($pendingForThisEmi <= 0.01) {
                     continue;
                 }
-                
-                // Determine how much to apply to this EMI
-                $appliedAmount = min($remainingPayment, $emiPending);
-                
-                // If it is the first iteration, and remainingPayment is larger than emiPending,
-                // we apply only the portion that covers this EMI, and the rest goes to future EMIs.
-                // If there are no future EMIs, we apply the entire remaining payment to this EMI.
-                if ($firstIteration && $remainingPayment > $emiPending && $targetAndFutureEmis->count() > 1) {
-                    $appliedAmount = $emiPending;
-                } else if ($firstIteration && $targetAndFutureEmis->count() == 1) {
-                    // Only one EMI exists, so apply all remaining
-                    $appliedAmount = $remainingPayment;
+
+                $paymentForThisEmi = round(min($remainingPayment, $pendingForThisEmi), 2);
+                $currentPaid = round((float) ($pendingEmi->paid_amount ?? 0), 2);
+                $newTotalPaid = round($currentPaid + $paymentForThisEmi, 2);
+                $remainingDue = round(max(0, $pendingForThisEmi - $paymentForThisEmi), 2);
+                // Snap paisa residuals so ₹4000 never becomes ₹4000.01
+                if ($remainingDue <= 0.009) {
+                    $remainingDue = 0.0;
                 }
-                
-                // For last EMI in the list, if there is still excess payment, apply it all (overpayment)
-                if ($currentEmi->id === $targetAndFutureEmis->last()->id) {
-                    $appliedAmount = $remainingPayment;
-                }
-                
-                $newPaidAmount = $emiPaidAmount + $appliedAmount;
-                $newPendingAmount = max(0.00, $emiTotalDue - $newPaidAmount);
-                
-                $isEmiFull = $newPendingAmount <= 0.01;
-                
+                $isFullPayment = $remainingDue <= 0.009;
+
                 $updateData = [
-                    'paid_amount' => $newPaidAmount,
+                    'paid_amount' => $newTotalPaid,
                     'payment_method' => $method,
                     'payment_reference' => $reference,
-                    'remarks' => $remarks ? trim(($currentEmi->remarks ?? '') . "\n" . $remarks) : $currentEmi->remarks,
+                    'remarks' => $remarks ? trim(($pendingEmi->remarks ?? '') . "\n" . $remarks) : $pendingEmi->remarks,
                     'paid_date' => $date,
-                    'pending_amount' => $newPendingAmount,
+                    'pending_amount' => $remainingDue,
                 ];
-                
-                if ($isEmiFull) {
+
+                if ($isFullPayment) {
                     $updateData['status'] = 'paid';
+                    $updateData['pending_amount'] = 0;
                     $updateData['is_partial_paid'] = false;
                     $updateData['partial_paid_date'] = null;
                     $updateData['partial_paid_amount'] = 0;
                 } else {
                     $updateData['status'] = 'partial';
                     $updateData['is_partial_paid'] = true;
-                    $updateData['partial_paid_amount'] = $newPaidAmount;
                     $updateData['partial_paid_date'] = $date;
+                    $updateData['partial_paid_amount'] = $newTotalPaid;
                 }
-                
-                $currentEmi->update($updateData);
-                $updatedEmis[] = [
-                    'emi' => $currentEmi,
-                    'applied' => $appliedAmount,
-                    'is_full' => $isEmiFull
-                ];
-                
-                // Record this payment in history (Audit Trail)
+
+                $pendingEmi->update($updateData);
+
                 if (!$skipHistory) {
                     try {
+                        // Only attribute to an agent when an Agent user actually collected.
+                        // Never fall back to the client's assigned agent — that mislabels Admin/Staff collections.
+                        $effectiveAgentId = $agentId;
+                        if (!$effectiveAgentId && Auth::check()) {
+                            $user = Auth::user();
+                            if ($user->hasRole('Agent') && ! $user->hasAnyRole(['Admin', 'Staff', 'Super Admin'])) {
+                                $effectiveAgentId = optional($user->agent)->id;
+                            }
+                        }
+
                         \App\Models\EmiCollection::create([
-                            'emi_id' => $currentEmi->id,
-                            'amount' => $appliedAmount,
+                            'agent_id' => $effectiveAgentId,
+                            'emi_id' => $pendingEmi->id,
+                            'amount' => $paymentForThisEmi,
                             'payment_method' => $method,
-                            'payment_type' => $isEmiFull ? 'full' : 'partial',
+                            'payment_type' => $isFullPayment ? 'full' : 'partial',
                             'payment_reference' => $reference,
                             'status' => 'verified',
                             'collected_at' => $date,
                             'verified_by' => Auth::id(),
                             'verified_at' => now(),
-                            'remarks' => $remarks ?: ($isEmiFull ? 'Full EMI payment processed' : 'Partial EMI payment processed')
+                            'remarks' => $remarks ?: ($isFullPayment ? 'EMI payment processed' : 'Partial EMI payment processed'),
+                            'bank_account_id' => $bankAccountId,
                         ]);
                     } catch (\Exception $e) {
                         Log::error('EmiCollection creation error in processPayment: ' . $e->getMessage());
                     }
-                    
-                    // Record this specific payment in AgentActivity for history popup
-                    try {
-                        $activityAgentId = Auth::user()->agent?->id ?? \App\Models\Agent::where('user_id', Auth::id())->value('id');
-                        if ($activityAgentId) {
-                            \App\Models\AgentActivity::create([
-                                'emi_id' => $currentEmi->id,
-                                'agent_id' => $activityAgentId,
-                                'type' => 'payment',
-                                'description' => "₹" . number_format($appliedAmount, 2),
-                                'method' => strtoupper(str_replace('_', ' ', $method)),
-                                'reference' => $reference,
-                                'remarks' => $remarks,
-                                'action_at' => $date,
-                            ]);
-                        }
-                    } catch (\Exception $e) {
-                        Log::error('AgentActivity creation error in processPayment: ' . $e->getMessage());
-                    }
                 }
-                
-                $remainingPayment -= $appliedAmount;
-                $firstIteration = false;
+
+                $cashbookEmiNumbers[] = (int) $pendingEmi->instalment_number;
+                $cashbookPostedTotal = round($cashbookPostedTotal + $paymentForThisEmi, 2);
+
+                $updatedEmis[] = [
+                    'emi_id' => $pendingEmi->id,
+                    'instalment_number' => $pendingEmi->instalment_number,
+                    'paid_amount' => $paymentForThisEmi,
+                    'status' => $updateData['status'],
+                    'balance' => $remainingDue,
+                ];
+
+                $remainingPayment = round($remainingPayment - $paymentForThisEmi, 2);
             }
-            
-            // Fire events for all updated EMIs
-            foreach ($updatedEmis as $item) {
-                event(new \App\Events\PaymentReceivedEvent($item['emi'], $item['applied']));
+
+            // One bank transaction for the whole payment (covers 1..N EMIs).
+            if (! $skipCashbook && $cashbookPostedTotal > 0.009) {
+                $loanAccount->loadMissing('client');
+                $accountNumber = $loanAccount->customer_loan_account_number
+                    ?? $loanAccount->account_number
+                    ?? 'N/A';
+                $clientName = $loanAccount->client?->client_name ?? 'Client';
+                $this->recordLoanCollectionInCashbook(
+                    $bankAccountId,
+                    (string) $method,
+                    (float) $cashbookPostedTotal,
+                    $reference ?: ('COLL-' . time()),
+                    \App\Services\Account\AccountingTags::loanIcDescription(
+                        (string) $accountNumber,
+                        (string) $clientName,
+                        $cashbookEmiNumbers,
+                        Auth::id()
+                    ),
+                    $date
+                );
             }
-            
+
+            if (!$skipHistory) {
+                try {
+                    $activityAgentId = Auth::user()->agent?->id ?? \App\Models\Agent::where('user_id', Auth::id())->value('id');
+                    if ($activityAgentId) {
+                        \App\Models\AgentActivity::create([
+                            'emi_id' => $emi->id,
+                            'agent_id' => $activityAgentId,
+                            'type' => 'payment',
+                            'description' => "₹" . number_format($amount, 2),
+                            'method' => strtoupper(str_replace('_', ' ', $method)),
+                            'reference' => $reference,
+                            'remarks' => $remarks,
+                            'action_at' => $date,
+                        ]);
+                    }
+                } catch (\Exception $e) {
+                    Log::error('AgentActivity creation error in processPayment: ' . $e->getMessage());
+                }
+            }
+
+            if (! self::$suppressPaymentNotifications) {
+                event(new \App\Events\PaymentReceivedEvent($emi, $amount));
+            }
+
             // Update loan account totals
-            $this->syncLoanTotals($emi->loan_account_id);
-            
-            // Sync EMI balances to carry forward pending amounts
-            $this->syncEmiBalances($emi->loan_account_id);
-            
+            if (! self::$suppressBalanceSync) {
+                $this->syncLoanTotals($emi->loan_account_id);
+                $this->syncEmiBalances($emi->loan_account_id);
+            }
+
             DB::commit();
-            
-            $emi->refresh();
+
+            $updatedCount = count($updatedEmis);
+            $latestState = Emi::find($emiId);
+
             return [
                 'success' => true,
-                'message' => $emi->status === 'paid' ? 'EMI fully paid.' : 'Partial payment recorded.',
+                'message' => $updatedCount > 1
+                    ? 'Payment recorded and applied across ' . $updatedCount . ' EMIs.'
+                    : (($latestState && $latestState->status === 'paid') ? 'EMI fully paid.' : 'Partial payment recorded.'),
                 'data' => [
                     'emi_id' => $emi->id,
-                    'paid_amount' => $emi->paid_amount,
-                    'due_amount' => $emi->pending_amount,
-                    'status' => $emi->status
+                    'paid_amount' => $amount,
+                    'due_amount' => $latestState ? max(0, (float) $latestState->pending_amount) : 0,
+                    'status' => $latestState?->status,
+                    'applied_emis' => $updatedEmis,
                 ]
             ];
 
@@ -753,8 +1150,9 @@ class LoanPaymentService
             $lastPaidInstalment = $loanAccount->emis()->whereIn('status', ['paid', 'partial'])->max('instalment_number') ?? 0;
             $carryForwardBalance = $loanAccount->emis()->whereIn('status', ['partial', 'overdue'])->sum('pending_amount');
 
-            // Delete Future EMIs
-            $loanAccount->emis()->where('instalment_number', '>', $lastPaidInstalment)->delete();
+            // Delete Future EMIs. These rows are replaced by the regenerated schedule below,
+            // so remove them outright rather than leaving soft deleted duplicates behind.
+            $loanAccount->emis()->where('instalment_number', '>', $lastPaidInstalment)->forceDelete();
 
             // Reschedule
             if ($newRemainingTenure > 0) {
@@ -792,11 +1190,13 @@ class LoanPaymentService
             $totalFutureEmisAmount = DB::table('emis')
                 ->where('loan_account_id', $loanAccount->id)
                 ->where('instalment_number', '>', $lastPaidInstalment)
+                ->whereNull('deleted_at')
                 ->sum('total_amount');
 
             $totalPastPaid = DB::table('emis')
                 ->where('loan_account_id', $loanAccount->id)
                 ->where('instalment_number', '<=', $lastPaidInstalment)
+                ->whereNull('deleted_at')
                 ->sum('paid_amount');
 
             $newTotalPayable = $totalPastPaid + $prepaymentAmount + $totalFutureEmisAmount;
@@ -974,13 +1374,13 @@ class LoanPaymentService
      * @param bool $skipHistory
      * @return array
      */
-    public function processPartialPayment($loanAccountId, $paymentAmount, $paymentDate, $paymentMethod, $paymentReference = null, $remarks = null, $skipHistory = false)
+    public function processPartialPayment($loanAccountId, $paymentAmount, $paymentDate, $paymentMethod, $paymentReference = null, $remarks = null, $skipHistory = false, $bankAccountId = null)
     {
         $loanAccount = LoanAccount::findOrFail($loanAccountId);
 
         // Redirect to Interest-Only logic if mode is Kandhuvatti
         if ($loanAccount->loan_mode === 'interest_only') {
-            return $this->processInterestOnlyPayment($loanAccount, $paymentAmount, $paymentDate, $paymentMethod, $paymentReference, $remarks, $skipHistory);
+            return $this->processInterestOnlyPayment($loanAccount, $paymentAmount, $paymentDate, $paymentMethod, $paymentReference, $remarks, $skipHistory, 0, $bankAccountId);
         }
 
         $loanAccount->load('emis');
@@ -992,6 +1392,34 @@ class LoanPaymentService
             return [
                 'success' => false,
                 'message' => 'Payment amount must be greater than zero'
+            ];
+        }
+
+        if (in_array($paymentMethod, ['upi', 'bank_transfer'], true) && ! $bankAccountId) {
+            return [
+                'success' => false,
+                'message' => 'Collection Bank Account is mandatory when paying via UPI / GPay / QR or Bank Transfer.',
+            ];
+        }
+
+        if ($paymentMethod !== 'wallet') {
+            try {
+                $bankAccountId = app(\App\Services\Account\ChitAccountingService::class)
+                    ->resolveCollectionBankAccountId((string) $paymentMethod, (int) ($bankAccountId ?? 0));
+            } catch (\Illuminate\Validation\ValidationException $e) {
+                return [
+                    'success' => false,
+                    'message' => collect($e->errors())->flatten()->first() ?: 'Invalid collection bank account.',
+                ];
+            }
+        }
+
+        $loanAccount->refresh();
+        $remainingOutstanding = round((float) ($loanAccount->outstanding_amount ?? 0), 2);
+        if ($paymentAmount > ($remainingOutstanding + 0.01)) {
+            return [
+                'success' => false,
+                'message' => 'Payment amount cannot exceed the remaining loan outstanding of ₹' . number_format($remainingOutstanding, 2) . '.'
             ];
         }
 
@@ -1025,6 +1453,8 @@ class LoanPaymentService
             $remainingPayment = $paymentAmount;
             $emisUpdated = [];
             $lastUpdatedEmi = null;
+            $cashbookEmiNumbers = [];
+            $cashbookPostedTotal = 0.0;
 
              $pendingEmis = Emi::where('loan_account_id', $loanAccountId)
                  ->whereIn('status', ['pending', 'partial', 'overdue'])
@@ -1091,12 +1521,16 @@ class LoanPaymentService
                                 'collected_at' => $paymentDate,
                                 'verified_by' => Auth::id(),
                                 'verified_at' => now(),
-                                'remarks' => $remarks ?: 'Partial payment processed via service'
+                                'remarks' => $remarks ?: 'Partial payment processed via service',
+                                'bank_account_id' => $bankAccountId,
                             ]);
                         } catch (\Exception $e) {
                             Log::error('EmiCollection creation error in LoanPaymentService: ' . $e->getMessage());
                         }
                     }
+
+                    $cashbookEmiNumbers[] = (int) $emi->instalment_number;
+                    $cashbookPostedTotal = round($cashbookPostedTotal + $paymentForThisEmi, 2);
 
                     $emisUpdated[] = [
                         'month' => $emi->instalment_number,
@@ -1107,6 +1541,25 @@ class LoanPaymentService
 
                     $lastUpdatedEmi = $emi;
                 }
+            }
+
+            if ($cashbookPostedTotal > 0.009) {
+                $loanAccount->loadMissing('client');
+                $accountNumber = $loanAccount->customer_loan_account_number ?? $loanAccount->account_number ?? 'N/A';
+                $clientName = $loanAccount->client?->client_name ?? 'Client';
+                $this->recordLoanCollectionInCashbook(
+                    $bankAccountId,
+                    (string) $paymentMethod,
+                    (float) $cashbookPostedTotal,
+                    $paymentReference ?: ('COLL-' . time()),
+                    \App\Services\Account\AccountingTags::loanIcDescription(
+                        (string) $accountNumber,
+                        (string) $clientName,
+                        $cashbookEmiNumbers,
+                        Auth::id()
+                    ),
+                    $paymentDate
+                );
             }
 
             // Log transaction
@@ -1170,15 +1623,12 @@ class LoanPaymentService
 
         DB::beginTransaction();
         try {
-            $loan->emis()->where('status', '!=', 'paid')->get()->each(function ($emi) use ($payment) {
-                $emi->update([
-                    'status' => 'paid',
-                    'paid_amount' => $emi->total_due,
-                    'pending_amount' => 0,
-                    'paid_date' => now(),
-                    'payment_reference' => $payment->payment_id,
-                ]);
-            });
+            $ongoingEmi = $loan->emis()
+                ->whereNotIn('status', ['paid', 'closed', 'carried_forward'])
+                ->orderBy('instalment_number')
+                ->first();
+
+            $this->settleEmisOnForeclosure($loan, $ongoingEmi, 0.0, now(), $payment->payment_id);
 
             $loan->update([
                 'status' => 'closed',
@@ -1191,7 +1641,7 @@ class LoanPaymentService
 
             DB::commit();
 
-            $this->syncLoanTotals($loanAccount->id);
+            $this->syncLoanTotals($loan->id);
 
         } catch (\Exception $e) {
             DB::rollBack();
@@ -1207,15 +1657,16 @@ class LoanPaymentService
 
         $totalPaid = $loan->emis()->sum('paid_amount');
         $totalPaid += ($loan->prepayment_amount ?? 0);
-        
-        if ($loan->loan_mode !== 'interest_only') {
-            $totalPaid = min($totalPaid, (float) $loan->total_payable);
-        }
         $loan->paid_amount = $totalPaid;
 
         $isReducing = $loan->loanApplication && $loan->loanApplication->product && in_array($loan->loanApplication->product->interest_type, ['reducing', 'declining_balance']);
 
-        if ($loan->loan_mode === 'interest_only') {
+        if ($loan->isSettled()) {
+            // Foreclosure/closure settles the whole account. Without this the
+            // interest-only branch below would recompute the full principal,
+            // because open-loan cycles never carry a principal amount.
+            $loan->outstanding_amount = 0;
+        } elseif ($loan->loan_mode === 'interest_only') {
             // For Kandhuvatti, outstanding is ONLY reduced by the principal portion paid
             $principalPaid = $loan->emis()->sum('principal_amount');
             $loan->outstanding_amount = max(0, (float)$loan->loan_amount - $principalPaid);
@@ -1236,26 +1687,142 @@ class LoanPaymentService
             );
         }
 
-        $pendingEmisCount = $loan->emis()->whereIn('status', ['pending', 'partial', 'overdue'])->count();
-        
+        $pendingInterestEmis = $loan->emis()->whereIn('status', ['pending', 'partial', 'overdue'])->count();
         $shouldClose = false;
-        if ($loan->loan_mode === 'interest_only') {
-            if ($loan->outstanding_amount <= 0.05 && $pendingEmisCount <= 0) {
+
+        if ($loan->isOpenLoan()) {
+            $remainingPrincipal = $loan->openLoanRemainingPrincipal();
+            $loan->outstanding_amount = $remainingPrincipal;
+            if ($remainingPrincipal <= 0.05 && $pendingInterestEmis <= 0) {
                 $shouldClose = true;
+            } elseif (! $loan->is_foreclosed && $remainingPrincipal > 0.05 && $loan->status === 'closed') {
+                $loan->status = 'active';
+                $loan->closed_at = null;
             }
         } else {
-            if ($loan->outstanding_amount <= 0.05 || $pendingEmisCount <= 0) {
+            if ($loan->outstanding_amount <= 0.05 || $pendingInterestEmis <= 0) {
                 $shouldClose = true;
             }
         }
 
-        if ($shouldClose && $loan->status === 'active') {
+        if ($shouldClose && $loan->status !== 'closed') {
             $loan->status = 'closed';
             $loan->closed_at = $loan->closed_at ?? now();
         }
 
         $loan->save();
     }
+
+    /**
+     * Calculate loan closing & settlement summary (collected, loan amount, interest, balance)
+     *
+     * @param LoanAccount $loanAccount
+     * @return array
+     */
+    public function calculateLoanClosingSummary(LoanAccount $loanAccount): array
+    {
+        $loanAccount->loadMissing('emis');
+        $isInterestOnly = ($loanAccount->loan_mode === 'interest_only');
+
+        $totalCollected = (float) $loanAccount->emis()->sum('paid_amount') + (float) ($loanAccount->prepayment_amount ?? 0);
+        $totalLoanAmount = (float) $loanAccount->loan_amount;
+
+        if ($isInterestOnly) {
+            $principalPaid = (float) $loanAccount->emis()->sum('principal_amount');
+            $interestPaid = max(0, $totalCollected - $principalPaid);
+            $totalInterestRequired = (float) $loanAccount->emis()->sum('interest_amount');
+            $outstandingBalance = max(0, $totalLoanAmount - $principalPaid);
+            $pendingEmisCount = $loanAccount->emis()->whereIn('status', ['pending', 'partial', 'overdue'])->count();
+            $isEligibleForClose = ($outstandingBalance <= 0.05 && $pendingEmisCount <= 0);
+
+            return [
+                'loan_account_id'      => $loanAccount->id,
+                'loan_mode'            => 'interest_only',
+                'total_loan_amount'    => $totalLoanAmount,
+                'principal_paid'       => $principalPaid,
+                'interest_paid'        => $interestPaid,
+                'total_collected'      => $totalCollected,
+                'total_interest_req'   => $totalInterestRequired,
+                'outstanding_balance'  => $outstandingBalance,
+                'pending_emis_count'   => $pendingEmisCount,
+                'is_eligible_for_close'=> $isEligibleForClose,
+                'status'               => $loanAccount->status,
+            ];
+        } else {
+            $totalPayable = (float) ($loanAccount->total_payable ?: ($totalLoanAmount + (float) $loanAccount->emis()->sum('interest_amount')));
+            $totalInterest = max(0, $totalPayable - $totalLoanAmount);
+            $outstandingBalance = max(0, $totalPayable - $totalCollected);
+            $pendingEmisCount = $loanAccount->emis()->whereIn('status', ['pending', 'partial', 'overdue'])->count();
+            $isEligibleForClose = ($outstandingBalance <= 0.05 || $pendingEmisCount <= 0);
+
+            return [
+                'loan_account_id'      => $loanAccount->id,
+                'loan_mode'            => $loanAccount->loan_mode ?? 'emi',
+                'total_loan_amount'    => $totalLoanAmount,
+                'total_interest'       => $totalInterest,
+                'total_payable'        => $totalPayable,
+                'total_collected'      => $totalCollected,
+                'outstanding_balance'  => $outstandingBalance,
+                'pending_emis_count'   => $pendingEmisCount,
+                'is_eligible_for_close'=> $isEligibleForClose,
+                'status'               => $loanAccount->status,
+            ];
+        }
+    }
+
+    /**
+     * Settle and close a loan account cleanly
+     *
+     * @param LoanAccount $loanAccount
+     * @param array $options
+     * @return array
+     */
+    public function closeLoanAccount(LoanAccount $loanAccount, array $options = []): array
+    {
+        $summary = $this->calculateLoanClosingSummary($loanAccount);
+        $remarks = $options['remarks'] ?? 'Loan account settled and closed.';
+
+        DB::beginTransaction();
+        try {
+            // Mark all non-paid EMIs as paid/satisfied
+            $now = now();
+            $loanAccount->emis()
+                ->where('status', '!=', 'paid')
+                ->get()
+                ->each(function ($emi) use ($now, $remarks) {
+                    $emi->update([
+                        'status'         => 'paid',
+                        'pending_amount' => 0,
+                        'paid_date'      => $now,
+                        'remarks'        => trim(($emi->remarks ?? '') . ' [' . $remarks . ']'),
+                    ]);
+                });
+
+            $loanAccount->update([
+                'status'             => 'closed',
+                'closed_at'          => $now,
+                'outstanding_amount' => 0,
+                'pending_amount'     => 0,
+            ]);
+
+            DB::commit();
+
+            return [
+                'success' => true,
+                'message' => 'Loan account closed successfully.',
+                'summary' => $summary,
+            ];
+        } catch (\Throwable $e) {
+            DB::rollBack();
+            Log::error('closeLoanAccount error: ' . $e->getMessage());
+
+            return [
+                'success' => false,
+                'message' => 'Failed to close loan account: ' . $e->getMessage(),
+            ];
+        }
+    }
+
 
     /**
      * Synchronize EMI balances across the schedule
@@ -1276,6 +1843,10 @@ class LoanPaymentService
         $carriedForwardBalance = 0;
 
         foreach ($emis as $index => $emi) {
+            if ($emi->status === 'closed') {
+                continue;
+            }
+
             // ONLY carry forward negative balances (overpayments/credits)
             // Do NOT carry forward positive arrears (let them stay on the original EMI row)
             $emi->previous_balance = ($carriedForwardBalance < 0) ? $carriedForwardBalance : 0;
@@ -1285,48 +1856,69 @@ class LoanPaymentService
 
             if ($loan->loan_mode === 'interest_only') {
                 if ($emi->status !== 'paid') {
-                    // Recalculate interest for this unpaid cycle based on principal paid in PRIOR cycles!
-                    $priorPrincipalPaid = Emi::where('loan_account_id', $loan->id)
-                        ->where('instalment_number', '<', $emi->instalment_number)
-                        ->sum('principal_amount');
-                    $priorOutstanding = max(0, (float)$loan->loan_amount - $priorPrincipalPaid);
-                    $newInterest = round($priorOutstanding * ($loan->interest_rate / 100));
-                    
+                    // Recalculate full-cycle interest for this unpaid cycle based on principal paid in PRIOR cycles.
+                    $newInterest = $this->openLoanFullCycleInterest($loan, $emi);
                     $emi->interest_amount = $newInterest;
                     $emi->total_amount = $newInterest;
                 }
 
-                // For Kandhuvatti EMIs, the obligation is the interest amount for the cycle.
-                // total_amount may be 0 or equal to interest_amount depending on how EMIs were generated;
-                // always use interest_amount as the authoritative cycle obligation.
-                $cycleAmount = (float) ($emi->interest_amount ?? $emi->total_amount ?? 0);
-                $emi->total_due = (float) round(max(0, $cycleAmount + $emi->previous_balance + $penaltyAmount));
+                $fullCycle = (float) ($emi->interest_amount ?? $emi->total_amount ?? 0);
+                $penaltyAmount = (float) ($emi->penalty_amount ?? 0);
+                $paidAmount = round((float) ($emi->paid_amount ?? 0), 2);
+                $emi->paid_amount = $paidAmount;
+                $principalPaid = round((float) ($emi->principal_amount ?? 0), 2);
+                $interestPaid = max(0, round($paidAmount - $principalPaid, 2));
 
-                // Recalculate pending: interest paid = paid_amount minus any principal repayment
-                $paidAmount    = (float) ($emi->paid_amount ?? 0);
-                $principalPaid = (float) ($emi->principal_amount ?? 0);
-                $interestPaid  = max(0, $paidAmount - $principalPaid);
-                $emi->pending_amount = (float) round(max(0, $emi->total_due - $interestPaid));
+                // Monthly/weekly before due: obligation = crossed-days accrued (+ penalty).
+                // Daily / on-or-after due: full cycle.
+                $accrued = $this->calculateOpenLoanAccruedInterest($loan, $emi, now(), $fullCycle);
+                $cycleObligation = round($accrued + $emi->previous_balance + $penaltyAmount, 2);
+                // Never show less obligation than interest already collected on this cycle.
+                $cycleObligation = max($cycleObligation, round($interestPaid + $emi->previous_balance, 2));
+
+                // For Open Loans (interest_only), total_due and total_amount represent cycle interest only (plus penalty).
+                // Principal repayment is tracked separately in principal_amount and does not inflate the cycle interest due.
+                $emi->total_due = (float) round(max(0, $cycleObligation), 2);
+                $emi->total_amount = (float) round(max(0, $fullCycle), 2);
+                $emi->pending_amount = (float) round(max(0, $emi->total_due - $interestPaid), 2);
+                if ($emi->pending_amount <= 0.009) {
+                    $emi->pending_amount = 0;
+                }
             } else {
                 $totalAmount = (float) $emi->total_amount;
                 // For display and internal logic, total_due now only represents the current month's obligation + penalties - overpayment credit
-                $emi->total_due = max(0, $totalAmount + $emi->previous_balance + $penaltyAmount);
+                $emi->total_due = round(max(0, $totalAmount + $emi->previous_balance + $penaltyAmount), 2);
 
                 // Recalculate pending amount for this specific installment
-                $paidAmount = (float) ($emi->paid_amount ?? 0);
-                $emi->pending_amount = $emi->total_due - $paidAmount;
+                $paidAmount = round((float) ($emi->paid_amount ?? 0), 2);
+                $emi->paid_amount = $paidAmount;
+                $emi->pending_amount = round($emi->total_due - $paidAmount, 2);
+                if (abs((float) $emi->pending_amount) <= 0.009) {
+                    $emi->pending_amount = 0;
+                }
             }
             
             // Update status based on pending amount and payments made
             if ($emi->pending_amount <= 0.01) {
                 if ($emi->status !== 'paid') {
-                    $emi->status = 'paid';
-                    if (!$emi->paid_date) {
-                        $emi->paid_date = now();
+                    $hasCollected = ((float) ($paidAmount ?? 0)) > 0.01;
+                    // Open loan day-0 (no crossed days yet): keep cycle pending with ₹0 accrued — do not auto-close.
+                    if (
+                        $loan->loan_mode === 'interest_only'
+                        && ! $hasCollected
+                        && $emi->due_date
+                        && Carbon::parse($emi->due_date)->startOfDay()->gt(now()->startOfDay())
+                    ) {
+                        $emi->status = 'pending';
+                    } else {
+                        $emi->status = 'paid';
+                        if (!$emi->paid_date) {
+                            $emi->paid_date = now();
+                        }
                     }
                 }
             } else {
-                if ($paidAmount > 0) {
+                if (($paidAmount ?? 0) > 0) {
                     $emi->status = 'partial';
                 } else {
                     $emi->status = ($emi->due_date && $emi->due_date->isPast()) ? 'overdue' : 'pending';
@@ -1344,7 +1936,7 @@ class LoanPaymentService
     /**
      * Process payment for Interest-Only (Kandhuvatti) loans
      */
-    private function processInterestOnlyPayment($loanAccount, $paymentAmount, $paymentDate, $paymentMethod, $paymentReference = null, $remarks = null, $skipHistory = false, $explicitPrincipal = 0)
+    private function processInterestOnlyPayment($loanAccount, $paymentAmount, $paymentDate, $paymentMethod, $paymentReference = null, $remarks = null, $skipHistory = false, $explicitPrincipal = 0, $bankAccountId = null, $targetEmi = null, bool $skipCashbook = false)
     {
         // Validate loan status
         // Allow payment if:
@@ -1362,8 +1954,52 @@ class LoanPaymentService
             ];
         }
 
+        if (in_array($paymentMethod, ['upi', 'bank_transfer'], true) && !$bankAccountId) {
+            return [
+                'success' => false,
+                'message' => 'Collection Bank Account is mandatory when paying via UPI / GPay / QR or Bank Transfer.'
+            ];
+        }
+
+        if ($paymentMethod !== 'wallet') {
+            try {
+                $bankAccountId = app(\App\Services\Account\ChitAccountingService::class)
+                    ->resolveCollectionBankAccountId((string) $paymentMethod, (int) ($bankAccountId ?? 0));
+            } catch (\Illuminate\Validation\ValidationException $e) {
+                return [
+                    'success' => false,
+                    'message' => collect($e->errors())->flatten()->first() ?: 'Invalid collection bank account.',
+                ];
+            }
+        }
+
+        if ($paymentMethod === 'wallet') {
+            $clientId = (int) ($loanAccount->client_id ?? 0);
+            if (!$clientId) {
+                return ['success' => false, 'message' => 'Unable to resolve customer for wallet payment.'];
+            }
+            $walletService = app(WalletService::class);
+            if ($walletService->balanceForClient($clientId) + 0.01 < (float) $paymentAmount) {
+                return [
+                    'success' => false,
+                    'message' => 'Insufficient wallet balance. Available: ₹' . number_format($walletService->balanceForClient($clientId), 2),
+                ];
+            }
+        }
+
         DB::beginTransaction();
         try {
+            if ($paymentMethod === 'wallet') {
+                app(WalletService::class)->debit(
+                    (int) $loanAccount->client_id,
+                    round((float) $paymentAmount, 2),
+                    'Loan EMI Payment',
+                    'loan_emi',
+                    $loanAccount->id,
+                    ['loan_account_id' => $loanAccount->id, 'mode' => 'interest_only']
+                );
+            }
+
             $totalPayment = (float) $paymentAmount;
             if ($explicitPrincipal > 0 && $totalPayment <= 0.001) {
                 $totalPayment = (float)$explicitPrincipal;
@@ -1373,20 +2009,72 @@ class LoanPaymentService
             // If explicitPrincipal is provided, we use that first, otherwise we use excess logic
             $principalPaid = (float)$explicitPrincipal;
             
-            $emi = Emi::where('loan_account_id', $loanAccount->id)
-                ->whereIn('status', ['pending', 'partial', 'overdue'])
-                ->orderBy('instalment_number', 'asc')
-                ->first();
+            // When a specific interest cycle was chosen (e.g. bulk paying several months),
+            // settle that cycle instead of always falling back to the earliest unpaid one.
+            // Principal-only collections may land on a cycle that is already paid.
+            $emi = null;
+            $allowPaidTarget = $explicitPrincipal > 0.01;
+            if ($targetEmi && (int) $targetEmi->loan_account_id === (int) $loanAccount->id) {
+                if (in_array($targetEmi->status, ['pending', 'partial', 'overdue'], true)
+                    || ($allowPaidTarget && in_array($targetEmi->status, ['paid', 'closed'], true))) {
+                    $emi = $targetEmi->fresh();
+                }
+            }
 
             if (!$emi) {
-                // If no pending EMI but they want to pay principal, we might need to handle that.
-                // For now, let's assume there's always at least one EMI in the 12-cycle buffer.
+                $emi = Emi::where('loan_account_id', $loanAccount->id)
+                    ->whereIn('status', ['pending', 'partial', 'overdue'])
+                    ->orderBy('instalment_number', 'asc')
+                    ->first();
+            }
+
+            if (!$emi && $allowPaidTarget) {
+                $emi = $targetEmi?->fresh()
+                    ?? Emi::where('loan_account_id', $loanAccount->id)
+                        ->orderByDesc('instalment_number')
+                        ->first();
+            }
+
+            if (!$emi) {
                 throw new \Exception('No active interest cycle found for this loan.');
             }
 
+            $isPrincipalOnlyOnSettledCycle = $explicitPrincipal > 0.01
+                && in_array($emi->status, ['paid', 'closed'], true);
+
+            if ($isPrincipalOnlyOnSettledCycle) {
+                $maxPrincipal = max(0, (float) ($loanAccount->outstanding_amount ?? $loanAccount->loan_amount));
+                $principalPaid = min((float) $explicitPrincipal, $maxPrincipal);
+                if ($principalPaid <= 0.01) {
+                    throw new \Exception('No outstanding principal remaining.');
+                }
+
+                $emi->principal_amount = (float) ($emi->principal_amount ?? 0) + $principalPaid;
+                $emi->paid_amount = (float) ($emi->paid_amount ?? 0) + $principalPaid;
+                $emi->save();
+                $interestToPay = 0;
+            } else {
             // Apply dynamic penalty if overdue and grace period crossed
             $this->applyDynamicPenaltyIfNeeded($emi, $paymentDate);
             $emi->refresh();
+
+            // Full-cycle max interest for this period (based on outstanding principal)
+            $fullCycleInterest = $this->openLoanFullCycleInterest($loanAccount, $emi);
+            if ($emi->status !== 'paid' && abs((float) $emi->interest_amount - $fullCycleInterest) > 0.009) {
+                $emi->interest_amount = $fullCycleInterest;
+                $emi->total_amount = $fullCycleInterest;
+            }
+
+            // Monthly/weekly early or mid-cycle: charge only crossed-days accrued interest.
+            // Daily: full cycle (proration not applicable).
+            $termUnit = $this->resolveOpenLoanTermUnit($loanAccount);
+            $accruedInterest = $this->calculateOpenLoanAccruedInterest(
+                $loanAccount,
+                $emi,
+                $paymentDate,
+                $fullCycleInterest
+            );
+            $interestDueNow = $this->openLoanInterestDue($loanAccount, $emi, $paymentDate);
 
             // 1. Calculate and Apply Interest Payment
             // If explicitPrincipal was provided, interest is (Total - Principal)
@@ -1394,22 +2082,51 @@ class LoanPaymentService
             
             if ($explicitPrincipal > 0) {
                 $interestToPay = max(0, $totalPayment - $explicitPrincipal);
-                $principalPaid = min($explicitPrincipal, $totalPayment); // Safety check
+                // Cap interest portion at accrued/due for monthly & weekly early pays
+                if ($termUnit !== 'daily') {
+                    $interestToPay = min($interestToPay, $interestDueNow);
+                    $principalPaid = min($explicitPrincipal, max(0, $totalPayment - $interestToPay));
+                } else {
+                    $principalPaid = min($explicitPrincipal, $totalPayment);
+                }
             } else {
-                $interestDue = (float) $emi->pending_amount;
-                $interestToPay = min($remainingPayment, $interestDue);
-                $principalPaid = max(0, $remainingPayment - $interestToPay);
+                // When paying an interest cycle without explicit principal,
+                // the entire payment applies to interest up to the cycle/pending amount.
+                // Principal MUST NEVER be reduced when collecting interest only!
+                $targetInterest = max($interestDueNow, (float)$emi->interest_amount, (float)$emi->pending_amount, $fullCycleInterest);
+                $interestToPay = min($remainingPayment, $targetInterest);
+                $principalPaid = 0.0;
             }
 
-            $emi->paid_amount += ($interestToPay + $principalPaid);
-            $emi->principal_amount = ($emi->principal_amount ?? 0) + $principalPaid;
-            $emi->pending_amount = max(0, ($emi->interest_amount - ($emi->paid_amount - $emi->principal_amount)));
-            
-            // Update EMI totals strictly to represent the interest cycle amount
-            $emi->total_amount = $emi->interest_amount;
-            $emi->total_due = $emi->interest_amount; 
+            $emi->paid_amount = (float) ($emi->paid_amount ?? 0) + ($interestToPay + $principalPaid);
+            $emi->principal_amount = (float) ($emi->principal_amount ?? 0) + $principalPaid;
+
+            $interestPaidTotal = max(0, (float) $emi->paid_amount - (float) ($emi->principal_amount ?? 0));
+            $asOf = Carbon::parse($paymentDate)->startOfDay();
+            $dueDate = $emi->due_date ? Carbon::parse($emi->due_date)->startOfDay() : null;
+            $isEarlyOrMidCycle = $termUnit !== 'daily' && $dueDate && $asOf->lt($dueDate);
+
+            // Effective interest obligation after this payment
+            $effectiveInterest = $isEarlyOrMidCycle
+                ? max($accruedInterest, $interestPaidTotal)
+                : $fullCycleInterest;
+
+            $penalty = (float) ($emi->penalty_amount ?? 0);
+            $emi->total_due = round(max(0, $effectiveInterest + $penalty), 2);
+            $emi->pending_amount = round(max(0, $emi->total_due - $interestPaidTotal), 2);
 
             if ($emi->pending_amount <= 0.01) {
+                // Closing the interest cycle — early pay writes down unearned interest to accrued days only
+                if ($isEarlyOrMidCycle) {
+                    $emi->interest_amount = round(max($accruedInterest, $interestPaidTotal), 2);
+                    $emi->total_amount = $emi->interest_amount;
+                    $emi->total_due = round($emi->total_amount + $penalty, 2);
+                } else {
+                    $emi->interest_amount = $fullCycleInterest;
+                    $emi->total_amount = $fullCycleInterest;
+                    $emi->total_due = round($fullCycleInterest + $penalty, 2);
+                }
+                $emi->pending_amount = 0;
                 $emi->status = 'paid';
                 $emi->paid_date = $paymentDate;
             } else {
@@ -1417,8 +2134,13 @@ class LoanPaymentService
                 $emi->is_partial_paid = true;
                 $emi->partial_paid_date = $paymentDate;
                 $emi->partial_paid_amount = $emi->paid_amount;
+                // Keep full-cycle ceiling so remaining days can still accrue until due date
+                $emi->interest_amount = $fullCycleInterest;
+                $emi->total_amount = $fullCycleInterest;
+                $emi->total_due = round($fullCycleInterest + $penalty, 2);
             }
             $emi->save();
+            }
 
             // 2. Update loan account principal and check for closure
             if ($principalPaid > 0) {
@@ -1472,74 +2194,39 @@ class LoanPaymentService
                     'collected_at'      => $paymentDate,
                     'verified_by'       => $currentUser ? $currentUser->id : null,
                     'verified_at'       => now(),
-                    'remarks'           => ($remarks ? $remarks . ' | ' : '') . 'Kandhuvatti payment. Interest: ₹' . number_format($interestToPay, 2) . ', Principal: ₹' . number_format($principalPaid, 2)
+                    'remarks'           => ($remarks ? $remarks . ' | ' : '') . 'Kandhuvatti payment. Interest: ₹' . number_format($interestToPay, 2) . ', Principal: ₹' . number_format($principalPaid, 2),
+                    'bank_account_id'   => $bankAccountId,
                 ]);
             }
 
-            // 5. Maintain 12-cycle buffer: Schedule the NEXT cycle at the end of the list
-            $totalPrincipalPaid = Emi::where('loan_account_id', $loanAccount->id)->sum('principal_amount');
-            $outstandingPrincipal = max(0, (float)$loanAccount->loan_amount - $totalPrincipalPaid);
-
-            if ($emi->status === 'paid' && $loanAccount->status === 'active' && $outstandingPrincipal > 0.01) {
-                // Find the latest instalment number currently scheduled
-                $lastEmi = Emi::where('loan_account_id', $loanAccount->id)
-                    ->orderBy('instalment_number', 'desc')
-                    ->first();
-                
-                $nextInstalmentNumber = ($lastEmi->instalment_number ?? $emi->instalment_number) + 1;
-                
-                // Calculate next interest based on remaining principal
-                $totalPrincipalPaid = Emi::where('loan_account_id', $loanAccount->id)->sum('principal_amount');
-                $outstandingPrincipal = max(0, (float)$loanAccount->loan_amount - $totalPrincipalPaid);
-                $nextInterest = round($outstandingPrincipal * ($loanAccount->interest_rate / 100));
-                
-                // Calculate next due date based on frequency from the LAST emi's date
-                $lastDate = \Carbon\Carbon::parse($lastEmi->due_date ?? $emi->due_date);
-                $application = $loanAccount->loanApplication;
-                $termUnit = strtolower((string)($application->term_unit ?? 'monthly'));
-                
-                if (in_array($termUnit, ['week', 'weeks', 'weekly'])) {
-                    $nextDueDate = $lastDate->addWeek();
-                } elseif (in_array($termUnit, ['day', 'days', 'daily'])) {
-                    $nextDueDate = $lastDate->addDay();
-                } else {
-                    $nextDueDate = $lastDate->addMonth();
-                }
-
-                $nextEmi = Emi::create([
-                    'loan_account_id'    => $loanAccount->id,
-                    'instalment_number'  => $nextInstalmentNumber,
-                    'principal_amount'   => 0,
-                    'interest_amount'    => $nextInterest,
-                    'total_amount'       => $nextInterest,
-                    'due_date'           => $nextDueDate->format('Y-m-d'),
-                    'previous_balance'   => 0,
-                    'total_due'          => $nextInterest,
-                    'pending_amount'     => $nextInterest,
-                    'paid_amount'        => 0,
-                    'status'             => 'pending',
-                ]);
-
-                // Auto-assign to agent if client has one
-                $client = $loanAccount->client;
-                if ($client && $client->assigned_to) {
-                    \App\Models\EmiAgentAssignment::updateOrCreate(
-                        ['emi_id' => $nextEmi->id],
-                        [
-                            'agent_id' => $client->assigned_to,
-                            'status' => 'assigned',
-                            'assigned_at' => now(),
-                            'remarks' => 'Auto-assigned next cycle for Kandhuvatti loan buffer (12-cycle plan)'
-                        ]
-                    );
-                }
+            if (! $skipCashbook) {
+                $accountNumber = $loanAccount->customer_loan_account_number ?: 'N/A';
+                $clientName = $loanAccount->client ? $loanAccount->client->client_name : 'Client';
+                $this->recordLoanCollectionInCashbook(
+                    $bankAccountId,
+                    (string) $paymentMethod,
+                    (float) $totalPayment,
+                    $paymentReference ?: 'COLL-' . time(),
+                    \App\Services\Account\AccountingTags::loanIcDescription(
+                        (string) $accountNumber,
+                        (string) $clientName,
+                        null,
+                        Auth::id()
+                    ),
+                    $paymentDate
+                );
             }
+
+            // 5. Top up the schedule with any cycle that has already fallen due.
+            // Cycles dated in the future are never created here.
+            app(OpenLoanCycleService::class)->syncDueCycles($loanAccount->fresh());
 
             $this->syncEmiBalances($loanAccount->id);
             $this->syncLoanTotals($loanAccount->id);
-            
-            // Fire PaymentReceivedEvent to trigger admin notification and play sound
-            event(new \App\Events\PaymentReceivedEvent($emi, $totalPayment));
+
+            if (! self::$suppressPaymentNotifications) {
+                event(new \App\Events\PaymentReceivedEvent($emi, $totalPayment));
+            }
 
             DB::commit();
             return [
@@ -1570,7 +2257,7 @@ class LoanPaymentService
     {
         $emi = Emi::with(['loanAccount', 'collections'])->findOrFail($emiId);
 
-        if (!in_array($emi->status, ['paid', 'partial', 'overdue'])) {
+        if (!in_array($emi->status, ['paid', 'partial', 'partially_paid', 'overdue'])) {
             return [
                 'success' => false,
                 'message' => 'Only paid or partially paid EMIs can be undone.'
@@ -1590,7 +2277,7 @@ class LoanPaymentService
         $latestPaidEmi = Emi::where('loan_account_id', $loanAccount->id)
             ->where(function($q) {
                 $q->where('paid_amount', '>', 0.001)
-                  ->orWhereIn('status', ['paid', 'partial']);
+                  ->orWhereIn('status', ['paid', 'partial', 'partially_paid']);
             })
             ->orderBy('instalment_number', 'desc')
             ->first();
@@ -1656,8 +2343,73 @@ class LoanPaymentService
                 'previous_payment_data' => $previousData
             ]);
 
+            // Remove associated bank transactions (original credit + any prior REV/UNDO debit).
+            // One payment may cover multiple EMIs in a single cashbook credit — remove/reduce by total.
+            $verifiedCollections = $emi->collections()->where('status', 'verified')->get();
+            $cashbookCollections = $verifiedCollections->filter(function ($col) {
+                $method = strtolower((string) ($col->payment_method ?? ''));
+
+                return $method !== 'wallet' && (float) $col->amount > 0.009;
+            });
+
+            if ($cashbookCollections->isNotEmpty()) {
+                try {
+                    $bankTxService = app(\App\Services\Account\BankTransactionsService::class);
+                    $chitAccounting = app(\App\Services\Account\ChitAccountingService::class);
+
+                    $primary = $cashbookCollections->sortByDesc('id')->first();
+                    $bankAccountId = $chitAccounting->resolveBankAccountIdForCollectionUndo(
+                        (string) ($primary->payment_method ?? $emi->payment_method ?? 'cash'),
+                        (int) ($primary->bank_account_id
+                            ?: ($cashbookCollections->first(fn ($c) => (int) ($c->bank_account_id ?? 0) > 0)?->bank_account_id ?? 0))
+                    );
+
+                    $accountNumber = $loanAccount->customer_loan_account_number ?? $loanAccount->account_number ?? 'N/A';
+                    $refs = [];
+                    foreach ($cashbookCollections as $col) {
+                        if (! empty($col->payment_reference)) {
+                            $refs[] = (string) $col->payment_reference;
+                            $refs[] = $col->payment_reference . '-' . $emi->instalment_number;
+                        }
+                        $refs[] = (string) $col->id;
+                        $refs[] = 'COLL-' . $col->id;
+                    }
+                    if (! empty($emi->payment_reference)) {
+                        $refs[] = (string) $emi->payment_reference;
+                    }
+
+                    $undoAmount = round((float) $cashbookCollections->sum('amount'), 2);
+                    $removed = $bankTxService->removeCollectionTransactions(
+                        $bankAccountId,
+                        $undoAmount,
+                        [
+                            'references' => array_values(array_unique(array_filter($refs))),
+                            'identity_contains' => array_values(array_filter([
+                                (string) $accountNumber,
+                            ])),
+                            'emi_numbers' => [(int) $emi->instalment_number],
+                            'module_tag' => \App\Services\Account\AccountingTags::MODULE_LOAN,
+                            'entry_tags' => [\App\Services\Account\AccountingTags::ENTRY_EMI],
+                            'allow_partial_reduce' => true,
+                        ]
+                    );
+
+                    if ($removed < 1) {
+                        Log::warning('EMI undo: no matching bank transaction removed', [
+                            'emi_id' => $emi->id,
+                            'amount' => $undoAmount,
+                            'account' => $accountNumber,
+                            'bank_account_id' => $bankAccountId,
+                        ]);
+                    }
+                } catch (\Exception $e) {
+                    Log::error('Bank transaction removal error in undoEmiPayment: ' . $e->getMessage());
+                    throw $e;
+                }
+            }
+
             // 3. Mark EmiCollections as undone or delete them
-            $emi->collections()->where('status', 'verified')->delete();
+            $emi->collections()->delete();
 
             // 4. Also delete any AgentActivity related to payment on this EMI
             \App\Models\AgentActivity::where('emi_id', $emi->id)->where('type', 'payment')->delete();
@@ -1676,23 +2428,22 @@ class LoanPaymentService
             $emi->status = 'pending';
             $emi->save();
 
-            // Restore assignment status to 'assigned' or assign to client's current agent
+            // Revert EmiAgentAssignment
             $assignment = \App\Models\EmiAgentAssignment::where('emi_id', $emi->id)->first();
             if ($assignment) {
                 $assignment->update([
                     'status' => 'assigned',
                     'resolved_at' => null,
-                    'remarks' => trim(($assignment->remarks ?? '') . "\n[Restored to assigned because payment was undone]")
                 ]);
             } else {
-                $client = $loanAccount->client ?? ($loanAccount->loanApplication ? $loanAccount->loanApplication->client : null);
+                $client = $loanAccount->client ?? optional($loanAccount->loanApplication)->client;
                 if ($client && $client->assigned_to) {
                     \App\Models\EmiAgentAssignment::create([
                         'emi_id' => $emi->id,
                         'agent_id' => $client->assigned_to,
                         'status' => 'assigned',
                         'assigned_at' => now(),
-                        'remarks' => 'Auto-assigned because payment was undone'
+                        'remarks' => 'Auto-assigned on payment undo'
                     ]);
                 }
             }
@@ -1719,9 +2470,19 @@ class LoanPaymentService
             }
 
             // 8. Re-sync balances & totals
-            $this->syncEmiBalances($loanAccount->id);
             $this->syncLoanTotals($loanAccount->id);
+            $this->syncEmiBalances($loanAccount->id);
             $this->ensureKandhuvattiBuffer($loanAccount->id);
+
+            // 9. Send Admin Notification for Undo Payment
+            \App\Models\AdminNotification::create([
+                'type' => 'undo_payment',
+                'title' => 'Payment Undone',
+                'message' => 'Payment of ₹' . number_format($emi->paid_amount, 2) . ' for Loan A/C ' . $loanAccount->account_number . ' (EMI #' . $emi->instalment_number . ') was undone.',
+                'link' => route('loan-account-view', $loanAccount->id),
+                'icon_class' => 'ri-arrow-go-back-line',
+                'badge_color' => 'warning'
+            ]);
 
             DB::commit();
             return [
@@ -1751,7 +2512,7 @@ class LoanPaymentService
         $latestPaidEmi = Emi::where('loan_account_id', $loanAccount->id)
             ->where(function($q) {
                 $q->where('paid_amount', '>', 0.001)
-                  ->orWhereIn('status', ['paid', 'partial']);
+                  ->orWhereIn('status', ['paid', 'partial', 'partially_paid']);
             })
             ->orderBy('instalment_number', 'desc')
             ->first();
@@ -1828,6 +2589,56 @@ class LoanPaymentService
                 $emi->principal_amount = max(0, $emi->principal_amount - $principalPaid);
             }
 
+            // Remove associated bank transaction (original credit + any REV/UNDO debit)
+            try {
+                $method = strtolower((string) ($collection->payment_method ?? $emi->payment_method ?? 'cash'));
+                if ($method !== 'wallet' && (float) $collection->amount > 0.009) {
+                    $bankTxService = app(\App\Services\Account\BankTransactionsService::class);
+                    $chitAccounting = app(\App\Services\Account\ChitAccountingService::class);
+                    $bankAccountId = $chitAccounting->resolveBankAccountIdForCollectionUndo(
+                        $method,
+                        (int) ($collection->bank_account_id ?: 0)
+                    );
+
+                    $accountNumber = $loanAccount->customer_loan_account_number ?? $loanAccount->account_number ?? 'N/A';
+                    $refs = array_values(array_filter([
+                        $collection->payment_reference,
+                        $collection->payment_reference
+                            ? $collection->payment_reference . '-' . $emi->instalment_number
+                            : null,
+                        (string) $collection->id,
+                        'COLL-' . $collection->id,
+                        $emi->payment_reference,
+                    ]));
+
+                    $removed = $bankTxService->removeCollectionTransactions(
+                        $bankAccountId,
+                        (float) $collection->amount,
+                        [
+                            'references' => $refs,
+                            'identity_contains' => array_values(array_filter([
+                                (string) $accountNumber,
+                            ])),
+                            'emi_numbers' => [(int) $emi->instalment_number],
+                            'module_tag' => \App\Services\Account\AccountingTags::MODULE_LOAN,
+                            'entry_tags' => [\App\Services\Account\AccountingTags::ENTRY_EMI],
+                            'allow_partial_reduce' => true,
+                        ]
+                    );
+
+                    if ($removed < 1) {
+                        Log::warning('EMI collection delete: no matching bank transaction removed', [
+                            'collection_id' => $collection->id,
+                            'emi_id' => $emi->id,
+                            'amount' => (float) $collection->amount,
+                        ]);
+                    }
+                }
+            } catch (\Exception $e) {
+                Log::error('Bank transaction removal error in deleteEmiCollection: ' . $e->getMessage());
+                throw $e;
+            }
+
             // 4. Delete the collection record
             $collection->delete();
 
@@ -1840,26 +2651,23 @@ class LoanPaymentService
             // 6. Save Emi changes
             $emi->save();
 
-            // Revert assignment status to 'assigned' if EMI is no longer fully paid
-            if ($emi->status !== 'paid') {
-                $assignment = \App\Models\EmiAgentAssignment::where('emi_id', $emi->id)->first();
-                if ($assignment) {
-                    $assignment->update([
+            // Revert EmiAgentAssignment
+            $assignment = \App\Models\EmiAgentAssignment::where('emi_id', $emi->id)->first();
+            if ($assignment) {
+                $assignment->update([
+                    'status' => 'assigned',
+                    'resolved_at' => null,
+                ]);
+            } else {
+                $client = $loanAccount->client ?? optional($loanAccount->loanApplication)->client;
+                if ($client && $client->assigned_to) {
+                    \App\Models\EmiAgentAssignment::create([
+                        'emi_id' => $emi->id,
+                        'agent_id' => $client->assigned_to,
                         'status' => 'assigned',
-                        'resolved_at' => null,
-                        'remarks' => trim(($assignment->remarks ?? '') . "\n[Restored to assigned because payment collection was deleted]")
+                        'assigned_at' => now(),
+                        'remarks' => 'Auto-assigned on payment collection deletion'
                     ]);
-                } else {
-                    $client = $loanAccount->client ?? ($loanAccount->loanApplication ? $loanAccount->loanApplication->client : null);
-                    if ($client && $client->assigned_to) {
-                        \App\Models\EmiAgentAssignment::create([
-                            'emi_id' => $emi->id,
-                            'agent_id' => $client->assigned_to,
-                            'status' => 'assigned',
-                            'assigned_at' => now(),
-                            'remarks' => 'Auto-assigned because payment collection was deleted'
-                        ]);
-                    }
                 }
             }
 
@@ -1871,8 +2679,8 @@ class LoanPaymentService
             }
 
             // 8. Re-sync balances & totals
-            $this->syncEmiBalances($loanAccount->id);
             $this->syncLoanTotals($loanAccount->id);
+            $this->syncEmiBalances($loanAccount->id);
             $this->ensureKandhuvattiBuffer($loanAccount->id);
 
             DB::commit();
@@ -1891,77 +2699,19 @@ class LoanPaymentService
     }
 
     /**
-     * Ensure a Kandhuvatti (interest-only) loan maintains a 12-cycle buffer if outstanding principal is positive.
+     * Restore any open-loan interest cycle that is due but missing, for example
+     * after a payment was undone or a collection deleted. Cycles dated in the
+     * future are never recreated.
      */
     public function ensureKandhuvattiBuffer(int $loanAccountId): void
     {
         $loanAccount = LoanAccount::with(['emis', 'loanApplication'])->findOrFail($loanAccountId);
-        if ($loanAccount->loan_mode !== 'interest_only') {
-            return;
-        }
 
-        $totalPrincipalPaid = $loanAccount->emis()->sum('principal_amount');
-        $outstandingPrincipal = max(0, (float)$loanAccount->loan_amount - $totalPrincipalPaid);
-
-        if ($outstandingPrincipal <= 0.01) {
-            return;
-        }
-
-        $emisCount = $loanAccount->emis()->count();
-        if ($emisCount < 12) {
-            $needed = 12 - $emisCount;
-            for ($i = 0; $i < $needed; $i++) {
-                $lastEmi = Emi::where('loan_account_id', $loanAccount->id)
-                    ->orderBy('instalment_number', 'desc')
-                    ->first();
-                $nextInstalmentNumber = ($lastEmi->instalment_number ?? 0) + 1;
-                $nextInterest = round($outstandingPrincipal * ($loanAccount->interest_rate / 100));
-                
-                $lastDate = $lastEmi ? Carbon::parse($lastEmi->due_date) : Carbon::parse($loanAccount->disbursed_at);
-                $application = $loanAccount->loanApplication;
-                $termUnit = strtolower((string)($application->term_unit ?? 'monthly'));
-                
-                if (in_array($termUnit, ['week', 'weeks', 'weekly'])) {
-                    $nextDueDate = $lastDate->addWeek();
-                } elseif (in_array($termUnit, ['day', 'days', 'daily'])) {
-                    $nextDueDate = $lastDate->addDay();
-                } else {
-                    $nextDueDate = $lastDate->addMonth();
-                }
-
-                $nextEmi = Emi::create([
-                    'loan_account_id'    => $loanAccount->id,
-                    'instalment_number'  => $nextInstalmentNumber,
-                    'principal_amount'   => 0,
-                    'interest_amount'    => $nextInterest,
-                    'total_amount'       => $nextInterest,
-                    'due_date'           => $nextDueDate->format('Y-m-d'),
-                    'previous_balance'   => 0,
-                    'total_due'          => $nextInterest,
-                    'pending_amount'     => $nextInterest,
-                    'paid_amount'        => 0,
-                    'status'             => 'pending',
-                ]);
-
-                // Auto-assign to agent if client has one
-                $client = $loanAccount->client;
-                if ($client && $client->assigned_to) {
-                    \App\Models\EmiAgentAssignment::updateOrCreate(
-                        ['emi_id' => $nextEmi->id],
-                        [
-                            'agent_id' => $client->assigned_to,
-                            'status' => 'assigned',
-                            'assigned_at' => now(),
-                            'remarks' => 'Auto-assigned next cycle for Kandhuvatti loan buffer (12-cycle plan)'
-                        ]
-                    );
-                }
-            }
-        }
+        app(OpenLoanCycleService::class)->syncDueCycles($loanAccount);
     }
 
     /**
-     * Dynamically apply fixed penalty if overdue past the grace period.
+     * Dynamically apply penalty (fixed or percentage) if overdue past the grace period.
      */
     public function applyDynamicPenaltyIfNeeded(Emi $emi, string $paymentDate)
     {
@@ -1985,18 +2735,11 @@ class LoanPaymentService
             return;
         }
 
-        // Resolve penalty settings: use global if set, otherwise fallback to loan account settings
-        $penaltyAmount = ($penaltyConfig->charge_value > 0) 
-            ? $penaltyConfig->charge_value 
-            : ($loanAccount->penalty ?? 0);
+        $penaltyChargeType = $penaltyConfig->penalty_charge_type ?? 'fixed';
 
         $graceDays = ($penaltyConfig->eligibility_days !== null)
             ? $penaltyConfig->eligibility_days
             : ($loanAccount->grace_period_days ?? 0);
-
-        if ($penaltyAmount <= 0) {
-            return;
-        }
 
         $dueDate = \Carbon\Carbon::parse($emi->due_date);
         $penaltyStartDate = $dueDate->copy()->addDays($graceDays);
@@ -2004,6 +2747,12 @@ class LoanPaymentService
 
         // If payment date is past the penalty start date, apply the penalty!
         if ($payDate->gt($penaltyStartDate)) {
+            $penaltyAmount = $penaltyConfig->calculatePenaltyForEmi($emi, $loanAccount);
+
+            if ($penaltyAmount <= 0) {
+                return;
+            }
+
             $emi->penalty_amount = $penaltyAmount;
             $emi->total_due += $penaltyAmount;
             $emi->pending_amount += $penaltyAmount;
@@ -2011,7 +2760,117 @@ class LoanPaymentService
             $emi->status = 'overdue';
             $emi->save();
 
-            \Illuminate\Support\Facades\Log::info("Dynamically applied fixed penalty of ₹{$penaltyAmount} to EMI #{$emi->instalment_number} for Loan Account {$loanAccount->account_number} during payment.");
+            $typeLabel = ($penaltyChargeType === 'percentage')
+                ? "{$penaltyConfig->charge_value}% of EMI principal"
+                : "₹{$penaltyAmount}";
+
+            \Illuminate\Support\Facades\Log::info("Dynamically applied {$typeLabel} penalty (₹{$penaltyAmount}) to EMI #{$emi->instalment_number} for Loan Account {$loanAccount->account_number} during payment.");
+        }
+    }
+
+    /**
+     * Credit company bank / Cash in Hand for a loan EMI collection.
+     * Always posts (including agent verify with skipHistory). Wallet is skipped.
+     */
+    public function recordLoanCollectionInCashbook(
+        $bankAccountId,
+        string $method,
+        float $amount,
+        string $reference,
+        string $description,
+        $date,
+        ?string $entryTag = null,
+        bool $throwOnFailure = false
+    ): void {
+        $amount = round(max(0, $amount), 2);
+        if ($amount <= 0.009) {
+            return;
+        }
+
+        $method = strtolower(trim($method));
+        if (in_array($method, ['wallet'], true)) {
+            return;
+        }
+
+        try {
+            $resolvedId = app(\App\Services\Account\ChitAccountingService::class)
+                ->resolveCollectionBankAccountId($method, (int) ($bankAccountId ?? 0));
+
+            if (! $resolvedId) {
+                if ($throwOnFailure) {
+                    throw new \RuntimeException('Collection bank account could not be resolved.');
+                }
+
+                return;
+            }
+
+            app(\App\Services\Account\BankTransactionsService::class)->createLoanCollectionTransaction(
+                $resolvedId,
+                $amount,
+                $reference,
+                $description,
+                $date,
+                AccountingTags::MODULE_LOAN,
+                $entryTag ?: AccountingTags::ENTRY_EMI
+            );
+        } catch (\Throwable $e) {
+            Log::error('Bank/cashbook recording error for loan collection: ' . $e->getMessage(), [
+                'method' => $method,
+                'amount' => $amount,
+                'bank_account_id' => $bankAccountId,
+            ]);
+            if ($throwOnFailure) {
+                throw $e;
+            }
+        }
+    }
+
+    protected function postForeclosureRevenues(
+        LoanAccount $loanAccount,
+        float $interestAmount,
+        float $chargesAmount,
+        int $bankAccountId,
+        string $reference,
+        string $date,
+        string $accountNumber,
+        string $clientName
+    ): void {
+        $chitAccounting = app(ChitAccountingService::class);
+        $lines = [
+            [
+                'amount' => round(max(0, $interestAmount), 2),
+                'name' => 'Loan Interest',
+                'code' => 'LOAN-INT',
+                'entry' => AccountingTags::ENTRY_INTEREST,
+                'description' => "Loan interest — {$accountNumber} — {$clientName} — foreclosure",
+                'suffix' => 'INT',
+            ],
+            [
+                'amount' => round(max(0, $chargesAmount), 2),
+                'name' => 'Loan Foreclosure Charges',
+                'code' => 'LOAN-FORECLOSE',
+                'entry' => AccountingTags::ENTRY_FORECLOSE,
+                'description' => "Loan foreclosure charges — {$accountNumber} — {$clientName}",
+                'suffix' => 'FC',
+            ],
+        ];
+
+        foreach ($lines as $line) {
+            if ($line['amount'] <= 0.009) {
+                continue;
+            }
+
+            $chitAccounting->postExternalRevenue(
+                $line['name'],
+                $line['code'],
+                $line['amount'],
+                $line['description'],
+                $reference . '-' . $line['suffix'],
+                $date,
+                $bankAccountId,
+                AccountingTags::MODULE_LOAN,
+                $line['entry']
+            );
         }
     }
 }

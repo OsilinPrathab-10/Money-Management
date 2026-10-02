@@ -201,10 +201,10 @@
           <!-- Interest Rate Slider -->
           <div class="slider-container">
             <div class="d-flex justify-content-between align-items-center mb-2">
-              <span class="slider-label">Rate of interest (p.a)</span>
+              <span class="slider-label">Rate of interest (p.a) <small class="text-muted">0% = Free Loan</small></span>
               <span class="slider-value" id="interestRateDisplay">5.5 %</span>
             </div>
-            <input type="range" class="form-range" id="interestRate" min="0.5" max="30" step="0.1" value="5.5">
+            <input type="range" class="form-range" id="interestRate" min="0" max="30" step="0.1" value="5.5">
           </div>
 
           <!-- Repayment Frequency -->

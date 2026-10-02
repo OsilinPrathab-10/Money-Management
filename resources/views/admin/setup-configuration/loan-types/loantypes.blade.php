@@ -263,7 +263,10 @@
         <div class="row g-3">
           <div class="col-12">
             <label class="form-label fw-semibold">Name</label>
-            <p class="mb-0" id="viewLoanTypeName">-</p>
+            <div class="d-flex align-items-center gap-3">
+              <img src="" alt="Icon" class="rounded-circle" style="width: 36px; height: 36px; object-fit: cover; display: none;" id="viewNameIcon">
+              <p class="mb-0 fw-bold fs-5" id="viewLoanTypeName">-</p>
+            </div>
           </div>
           <div class="col-12">
             <label class="form-label fw-semibold">Description</label>

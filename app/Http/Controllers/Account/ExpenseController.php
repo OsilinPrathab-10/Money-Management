@@ -16,7 +16,7 @@ use App\Models\Account\ChartOfAccount;
 use App\Services\Account\BankTransactionsService;
 use App\Services\Account\JournalService;
 use App\Services\Account\AccountExportService;
-use Carbon\Carbon;
+use App\Support\DateRangePreset;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
 use Illuminate\Support\Facades\Auth;
@@ -48,9 +48,11 @@ class ExpenseController extends Controller
                 });
 
             if ($request->search) {
-                $searchTerm = $request->search;
+                $searchTerm = trim((string) $request->search);
                 $query->where(function($q) use ($searchTerm) {
                     $q->where('expense_number', 'like', '%' . $searchTerm . '%')
+                      ->orWhere('reference_number', 'like', '%' . $searchTerm . '%')
+                      ->orWhere('description', 'like', '%' . $searchTerm . '%')
                       ->orWhereHas('category', function($subQ) use ($searchTerm) {
                           $subQ->where('category_name', 'like', '%' . $searchTerm . '%');
                       })
@@ -62,14 +64,20 @@ class ExpenseController extends Controller
             if ($request->category_id) {
                 $query->where('category_id', $request->category_id);
             }
+            if ($request->bank_account_id) {
+                $query->where('bank_account_id', $request->bank_account_id);
+            }
             if ($request->status) {
                 $query->where('status', $request->status);
             }
-            if ($request->date_from && $request->date_to) {
-                $query->whereBetween('expense_date', [$request->date_from, $request->date_to]);
+
+            [$dateFrom, $dateTo] = DateRangePreset::applyToRequest($request, 'date_from', 'date_to');
+
+            if ($dateFrom) {
+                $query->whereDate('expense_date', '>=', $dateFrom);
             }
-            if ($request->bank_account_id) {
-                $query->where('bank_account_id', $request->bank_account_id);
+            if ($dateTo) {
+                $query->whereDate('expense_date', '<=', $dateTo);
             }
 
             if ($request->sort) {
@@ -87,7 +95,7 @@ class ExpenseController extends Controller
 
             $bankAccounts = BankAccount::where('created_by', creatorId())
                 ->where('is_active', true)
-                ->select('id', 'account_name')
+                ->select('id', 'account_name', 'bank_name', 'account_number', 'branch_name', 'ifsc_code', 'upi_id', 'qr_code', 'current_balance')
                 ->get();
 
             $chartOfAccounts = ChartOfAccount::where('created_by', creatorId())
@@ -168,8 +176,12 @@ class ExpenseController extends Controller
         if (!empty($validated['status'])) {
             $query->where('status', $validated['status']);
         }
-        if (!empty($validated['date_from']) && !empty($validated['date_to'])) {
-            $query->whereBetween('expense_date', [$validated['date_from'], $validated['date_to']]);
+        [$dateFrom, $dateTo] = DateRangePreset::applyToRequest($request, 'date_from', 'date_to');
+        if ($dateFrom) {
+            $query->whereDate('expense_date', '>=', $dateFrom);
+        }
+        if ($dateTo) {
+            $query->whereDate('expense_date', '<=', $dateTo);
         }
         if (!empty($validated['bank_account_id'])) {
             $query->where('bank_account_id', (int) $validated['bank_account_id']);
@@ -314,7 +326,7 @@ class ExpenseController extends Controller
             $expense->expense_date = $validated['expense_date'];
             $expense->category_id = $validated['category_id'];
             $expense->bank_account_id = $validated['bank_account_id'];
-            $expense->chart_of_account_id = $validated['chart_of_account_id'];
+            $expense->chart_of_account_id = $validated['chart_of_account_id'] ?? null;
             $expense->amount = $validated['amount'];
             $expense->description = $validated['description'];
             $expense->reference_number = $validated['reference_number'];
@@ -344,7 +356,7 @@ class ExpenseController extends Controller
             $expense->expense_date = $validated['expense_date'];
             $expense->category_id = $validated['category_id'];
             $expense->bank_account_id = $validated['bank_account_id'];
-            $expense->chart_of_account_id = $validated['chart_of_account_id'];
+            $expense->chart_of_account_id = $validated['chart_of_account_id'] ?? null;
             $expense->amount = $validated['amount'];
             $expense->description = $validated['description'];
             $expense->reference_number = $validated['reference_number'];
@@ -427,7 +439,9 @@ class ExpenseController extends Controller
 
                     // Refresh model
                     $expense->refresh();
+                    $expense->load(['bankAccount.glAccount', 'chartOfAccount']);
 
+                    // GL journal is optional (skip when bank has no GL). Cashbook always posts.
                     $this->journalService->createExpenseEntryJournal($expense);
                     $this->bankTransactionsService->createExpensePayment($expense);
 

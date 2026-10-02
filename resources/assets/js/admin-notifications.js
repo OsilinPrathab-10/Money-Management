@@ -15,7 +15,21 @@
     // Configuration
     const NOTIFICATION_CHECK_INTERVAL = 5000; // 5 seconds
     const dataBaseUrl = document.documentElement.getAttribute('data-base-url');
-    const baseUrl = window.baseUrl || (dataBaseUrl ? dataBaseUrl.replace(/\/+$/, '') + '/' : '/');
+    let baseUrl = window.baseUrl || (dataBaseUrl ? dataBaseUrl.replace(/\/+$/, '') + '/' : '/');
+    if (!baseUrl.endsWith('/')) {
+        baseUrl += '/';
+    }
+    if (window.location.protocol === 'https:' && baseUrl.startsWith('http://')) {
+        baseUrl = baseUrl.replace(/^http:\/\//i, 'https://');
+    }
+    try {
+        if (/^https?:\/\//i.test(baseUrl)) {
+            const parsedBase = new URL(baseUrl, window.location.href);
+            if (parsedBase.protocol !== window.location.protocol || parsedBase.host !== window.location.host) {
+                baseUrl = parsedBase.pathname.endsWith('/') ? parsedBase.pathname : parsedBase.pathname + '/';
+            }
+        }
+    } catch (e) {}
     const NOTIFICATION_SOUND_PATH = baseUrl + 'assets/audio/notification-sound.mp3';
 
     // Global AJAX Setup for CSRF
@@ -28,6 +42,24 @@
     let lastNotificationCount = null;
     let notificationSound = null;
     let intervalId = null;
+    let notificationRefreshInterval = null;
+    let pollingStopped = false;
+
+    function stopNotificationPolling() {
+        pollingStopped = true;
+        if (intervalId) {
+            clearInterval(intervalId);
+            intervalId = null;
+        }
+        if (notificationRefreshInterval) {
+            clearInterval(notificationRefreshInterval);
+            notificationRefreshInterval = null;
+        }
+    }
+
+    function isAuthFailure(xhr) {
+        return xhr && (xhr.status === 401 || xhr.status === 419);
+    }
 
     // Initialize notification sound
     function initNotificationSound() {
@@ -64,6 +96,10 @@
 
     // Load latest notifications
     function loadNotifications() {
+        if (pollingStopped) {
+            return;
+        }
+
         $.ajax({
             url: baseUrl + 'admin/notifications/latest',
             type: 'GET',
@@ -72,16 +108,24 @@
                 if (response.success) {
                     updateNotificationUI(response.notifications, response.unread_count);
 
-                    // Play sound if new notifications arrived
+                    // Play sound / toast if new notifications arrived
                     if (lastNotificationCount !== null && response.unread_count > lastNotificationCount) {
                         playNotificationSound();
+                        const newest = (response.notifications || [])[0];
+                        if (newest && newest.title) {
+                            showToast('info', newest.title);
+                        }
                     }
 
                     lastNotificationCount = response.unread_count;
                 }
             },
-            error: function (xhr, status, error) {
-                console.error('Failed to load notifications:', error);
+            error: function (xhr) {
+                if (isAuthFailure(xhr)) {
+                    stopNotificationPolling();
+                    return;
+                }
+                console.error('Failed to load notifications');
             }
         });
     }
@@ -222,6 +266,12 @@
             'new_loan_application': 'New Loan Application',
             'new_user_registration': 'New Registration',
             'payment_received': 'Payment Received',
+            'broadcast': 'Custom Broadcast',
+            'interest_update': 'Loan Interest Update',
+            'loan_product': 'New Loan Product',
+            'offer': 'Offer / Promotion',
+            'disbursement': 'Application Disbursed',
+            'general': 'General Announcement',
         };
         var rawType = notification.type || '';
         var typeLabel = typeLabels[rawType] || (rawType ? rawType.replace(/_/g, ' ').replace(/\b\w/g, function(l) { return l.toUpperCase(); }) : 'Notification');
@@ -458,9 +508,11 @@
     // FULL PAGE NOTIFICATIONS FUNCTIONS
     // ==========================================
 
-    let notificationRefreshInterval = null;
-
     function initializeFullPageNotifications() {
+        if (pollingStopped) {
+            return;
+        }
+
         console.log('Initializing full page notifications...');
 
         // Load notifications immediately
@@ -482,6 +534,10 @@
 
     // Load all notifications for full page
     window.loadAllNotifications = function () {
+        if (pollingStopped) {
+            return;
+        }
+
         console.log('Loading all notifications...');
         $.ajax({
             url: baseUrl + 'admin/notifications/latest',
@@ -493,7 +549,11 @@
                     renderAllNotifications(response.notifications);
                 }
             },
-            error: function () {
+            error: function (xhr) {
+                if (isAuthFailure(xhr)) {
+                    stopNotificationPolling();
+                    return;
+                }
                 console.error('Failed to load notifications');
                 $('#allNotificationsList').html('<div class="text-center py-4 text-danger">Failed to load notifications</div>');
             }
@@ -660,5 +720,8 @@
         document.body.appendChild(container);
         return container;
     }
+
+    window.refreshAdminNotifications = loadNotifications;
+    window.showAdminNotificationToast = showToast;
 
 })();

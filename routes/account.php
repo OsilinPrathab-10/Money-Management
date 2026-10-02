@@ -1,5 +1,8 @@
 <?php
 
+use App\Http\Controllers\Account\AccountingConfigurationController;
+use App\Http\Controllers\Account\AccountCategoryController;
+use App\Http\Controllers\Account\YearEndClosingController;
 use App\Http\Controllers\Account\AccountTypeController;
 use App\Http\Controllers\Account\BankAccountController;
 use App\Http\Controllers\Account\BankTransactionController;
@@ -19,8 +22,6 @@ use App\Http\Controllers\Account\LedgerController;
 use App\Http\Controllers\Account\ProfitLossController;
 use App\Http\Controllers\Account\RevenueCategoriesController;
 use App\Http\Controllers\Account\RevenueController;
-use App\Http\Controllers\Account\VendorController;
-use App\Http\Controllers\Account\VendorPaymentController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -31,6 +32,8 @@ Route::middleware(['web', 'auth', 'admin'])->prefix('account')->group(function (
 
     Route::get('loan-accounts', [LoanPortfolioController::class, 'loanAccounts'])->name('account.loan-accounts.index');
     Route::get('loan-accounts/export', [LoanPortfolioController::class, 'loanAccountsExport'])->name('account.loan-accounts.export');
+    Route::get('chit-accounts', [LoanPortfolioController::class, 'chitAccounts'])->name('account.chit-accounts.index');
+    Route::get('fd-accounts', [LoanPortfolioController::class, 'fdAccounts'])->name('account.fd-accounts.index');
     Route::get('emis', [LoanPortfolioController::class, 'emis'])->name('account.emis.index');
     Route::get('emis/export', [LoanPortfolioController::class, 'emisExport'])->name('account.emis.export');
 
@@ -43,6 +46,7 @@ Route::middleware(['web', 'auth', 'admin'])->prefix('account')->group(function (
         Route::post('/', [BankAccountController::class, 'store'])->name('store');
         Route::get('/{bankaccount}/edit', [BankAccountController::class, 'edit'])->name('edit');
         Route::put('/{bankaccount}', [BankAccountController::class, 'update'])->name('update');
+        Route::post('/{bankaccount}/transaction', [BankAccountController::class, 'transaction'])->name('transaction');
         Route::delete('/{bankaccount}', [BankAccountController::class, 'destroy'])->name('destroy');
         Route::get('/api/list', [BankAccountController::class, 'bankAccounts'])->name('api.list');
     });
@@ -53,6 +57,14 @@ Route::middleware(['web', 'auth', 'admin'])->prefix('account')->group(function (
         Route::post('/', [AccountTypeController::class, 'store'])->name('store');
         Route::put('/{accounttype}', [AccountTypeController::class, 'update'])->name('update');
         Route::delete('/{accounttype}', [AccountTypeController::class, 'destroy'])->name('destroy');
+    });
+
+    Route::prefix('account-categories')->name('account.account-categories.')->group(function () {
+        Route::get('/', [AccountCategoryController::class, 'index'])->name('index');
+        Route::get('/export', [AccountCategoryController::class, 'export'])->name('export');
+        Route::post('/', [AccountCategoryController::class, 'store'])->name('store');
+        Route::put('/{accountcategory}', [AccountCategoryController::class, 'update'])->name('update');
+        Route::delete('/{accountcategory}', [AccountCategoryController::class, 'destroy'])->name('destroy');
     });
 
     Route::prefix('chart-of-accounts')->name('account.chart-of-accounts.')->group(function () {
@@ -155,17 +167,12 @@ Route::middleware(['web', 'auth', 'admin'])->prefix('account')->group(function (
         Route::get('/tax-summary/print', [ReportsController::class, 'printTaxSummary'])->name('tax-summary.print');
         Route::get('/customer-balance', [ReportsController::class, 'customerBalance'])->name('customer-balance');
         Route::get('/customer-balance/print', [ReportsController::class, 'printCustomerBalance'])->name('customer-balance.print');
-        Route::get('/vendor-balance', [ReportsController::class, 'vendorBalance'])->name('vendor-balance');
-        Route::get('/vendor-balance/print', [ReportsController::class, 'printVendorBalance'])->name('vendor-balance.print');
+        Route::get('/customer/{customer}', [ReportsController::class, 'customerDetail'])->name('customer-detail');
+        Route::get('/customer/{customer}/print', [ReportsController::class, 'printCustomerDetail'])->name('customer-detail.print');
         Route::get('/invoice-aging/export', [ReportsController::class, 'exportInvoiceAging'])->name('invoice-aging.export');
         Route::get('/bill-aging/export', [ReportsController::class, 'exportBillAging'])->name('bill-aging.export');
         Route::get('/tax-summary/export', [ReportsController::class, 'exportTaxSummary'])->name('tax-summary.export');
         Route::get('/customer-balance/export', [ReportsController::class, 'exportCustomerBalance'])->name('customer-balance.export');
-        Route::get('/vendor-balance/export', [ReportsController::class, 'exportVendorBalance'])->name('vendor-balance.export');
-        Route::get('/customer/{customer}', [ReportsController::class, 'customerDetail'])->name('customer-detail');
-        Route::get('/customer/{customer}/print', [ReportsController::class, 'printCustomerDetail'])->name('customer-detail.print');
-        Route::get('/vendor/{vendor}', [ReportsController::class, 'vendorDetail'])->name('vendor-detail');
-        Route::get('/vendor/{vendor}/print', [ReportsController::class, 'printVendorDetail'])->name('vendor-detail.print');
         
         // 15 New Report Placeholders
         Route::get('/trial-balance', [ReportsController::class, 'trialBalance'])->name('trial-balance');
@@ -204,4 +211,12 @@ Route::middleware(['web', 'auth', 'admin'])->prefix('account')->group(function (
         Route::get('/', [ProfitLossController::class, 'index'])->name('index');
         Route::get('/export', [ProfitLossController::class, 'export'])->name('export');
     });
+
+    Route::prefix('year-end-closing')->name('account.year-end-closing.')->group(function () {
+        Route::get('/', [YearEndClosingController::class, 'index'])->name('index');
+        Route::post('/close', [YearEndClosingController::class, 'close'])->name('close');
+    });
+
+    Route::get('configuration/gst', [AccountingConfigurationController::class, 'gst'])->name('account.configuration.gst');
+    Route::post('configuration/gst', [AccountingConfigurationController::class, 'updateGst'])->name('account.configuration.gst.update');
 });

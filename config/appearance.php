@@ -15,8 +15,8 @@ return array (
   ),
   'current' => 
   array (
-    'primary_color' => '#696cff',
-    'secondary_color' => '#8592a3',
+    'primary_color' => '#0d97ba',
+    'secondary_color' => '#c43bce',
     'theme_mode' => 'light',
     'title' => 'Loan App',
     'subtitle' => '',
@@ -24,6 +24,6 @@ return array (
     'logo_dark' => '',
     'favicon' => '',
     'footer_text' => '',
-    'loader_animation' => 'loader2',
+    'loader_animation' => 'loader_favicon',
   ),
 );

@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Auth\AuthenticatedSessionController;
 use App\Http\Controllers\Auth\ConfirmablePasswordController;
+use App\Http\Controllers\Auth\SessionLockController;
 use App\Http\Controllers\Auth\EmailVerificationNotificationController;
 use App\Http\Controllers\Auth\EmailVerificationPromptController;
 use App\Http\Controllers\Auth\NewPasswordController;
@@ -16,7 +17,9 @@ use Illuminate\Support\Facades\Route;
 
     // Route::post('register', [RegisteredUserController::class, 'store']);
 
-Route::get('/', [AuthenticatedSessionController::class, 'create'])
+Route::get('/', [AuthenticatedSessionController::class, 'create']);
+
+Route::get('login', [AuthenticatedSessionController::class, 'create'])
     ->name('login');
 
 Route::post('login', [AuthenticatedSessionController::class, 'store']);
@@ -51,6 +54,11 @@ Route::middleware('auth')->group(function () {
     Route::post('confirm-password', [ConfirmablePasswordController::class, 'store']);
 
     Route::put('password', [PasswordController::class, 'update'])->name('password.update');
+
+    Route::get('session/ping', [SessionLockController::class, 'ping'])->name('session.ping');
+    Route::post('session/unlock', [SessionLockController::class, 'unlock'])
+        ->middleware('throttle:8,1')
+        ->name('session.unlock');
 
     Route::post('logout', [AuthenticatedSessionController::class, 'destroy'])
         ->name('logout');

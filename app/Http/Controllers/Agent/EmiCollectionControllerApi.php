@@ -709,27 +709,26 @@ class EmiCollectionControllerApi extends Controller
             }
         } else {
             // Standard EMI validation
-            if ($request->payment_type === 'overdue') {
-                // For overdue, amount must equal total (EMI + penalty)
-                if ($request->amount != $totalDueWithPenalty) {
-                    return response()->json([
-                        'success' => false,
-                        'message' => "For overdue payment, amount must be ₹{$totalDueWithPenalty}",
-                        'total_due' => (float) $totalDueWithPenalty,
-                    ], 422);
-                }
+            $maxAllowable = max($totalDueWithPenalty, (float) ($loanAccount->outstanding_amount ?? 0));
+            if ($request->payment_type === 'overdue' && $request->amount < $totalDueWithPenalty) {
+                // If payment_type is overdue and amount is less than total overdue
+                return response()->json([
+                    'success' => false,
+                    'message' => "For overdue payment, amount must be at least ₹{$totalDueWithPenalty}",
+                    'total_due' => (float) $totalDueWithPenalty,
+                ], 422);
             } else {
                 $partialService = app(\App\Services\PartialPaymentConfigService::class);
 
                 if ($request->emi_id && isset($emi)) {
-                    if ($validationError = $partialService->validatePartialAmount($emi, (float) $request->amount, $emi->loanAccount)) {
+                    if ($request->amount < $totalDueWithPenalty && ($validationError = $partialService->validatePartialAmount($emi, (float) $request->amount, $emi->loanAccount))) {
                         return response()->json([
                             'success' => false,
                             'message' => $validationError,
                         ], 422);
                     }
                 } else {
-                    if (!$partialService->isActive()) {
+                    if ($request->amount < $totalDueWithPenalty && !$partialService->isActive()) {
                         return response()->json([
                             'success' => false,
                             'message' => 'Partial payments are disabled in loan configuration.',
@@ -748,11 +747,11 @@ class EmiCollectionControllerApi extends Controller
                 }
             }
 
-            // Validate amount doesn't exceed total
-            if ($request->amount > $totalDueWithPenalty) {
+            // Validate amount doesn't exceed total remaining loan balance
+            if ($request->amount > ($maxAllowable + 0.01)) {
                 return response()->json([
                     'success' => false,
-                    'message' => "Maximum payable amount is ₹{$totalDueWithPenalty}"
+                    'message' => "Maximum payable amount is ₹" . number_format($maxAllowable, 2)
                 ], 422);
             }
         }
@@ -821,47 +820,58 @@ class EmiCollectionControllerApi extends Controller
         }
 
         if ($request->emi_id) {
-            // Single EMI mode (backward compatible)
             $emi = Emi::with(['loanAccount.client'])
                 ->where('id', $request->emi_id)
                 ->where('loan_account_id', $request->loan_account_id)
                 ->firstOrFail();
 
+            $loanAccount = $emi->loanAccount;
             $projected = $this->getProjectedEmiData($emi);
             $totalPending = $projected['pending_amount'];
 
-            // Validate amount
-            if ($request->amount > $totalPending) {
-                return response()->json([
-                    'success' => false,
-                    'message' => "Maximum payable amount is ₹{$totalPending}"
-                ], 422);
+            // If amount exceeds single EMI, distribute across upcoming EMIs
+            if ($request->amount > ($totalPending + 0.01)) {
+                $pendingEmis = Emi::where('loan_account_id', $request->loan_account_id)
+                    ->where('instalment_number', '>=', $emi->instalment_number)
+                    ->whereIn('status', ['pending', 'partial', 'overdue'])
+                    ->orderBy('instalment_number')
+                    ->get();
+
+                $distResult = $this->distributePaymentAcrossEmis(
+                    $pendingEmis,
+                    $request->amount,
+                    $agentId,
+                    $request->payment_method,
+                    $request->payment_type,
+                    $proofImagePath
+                );
+                $collection = (object) ['id' => $distResult['collection_ids'][0] ?? null];
+            } else {
+                // Create collection record for single EMI
+                $collection = EmiCollection::create([
+                    'emi_id' => $request->emi_id,
+                    'agent_id' => $agentId,
+                    'amount' => $request->amount,
+                    'payment_method' => $request->payment_method,
+                    'payment_type' => $request->payment_type,
+                    'status' => 'in_progress', // Pending admin verification
+                    'proof_image_path' => $proofImagePath,
+                    'collected_at' => now(),
+                ]);
+
+                // Log activity
+                AgentActivity::create([
+                    'emi_id' => $request->emi_id,
+                    'agent_id' => $agentId,
+                    'type' => 'payment',
+                    'description' => "Recorded in-hand collection of ₹{$request->amount} for EMI #{$request->emi_id}",
+                    'action_at' => now(),
+                ]);
             }
-
-            // Create collection record
-            $collection = EmiCollection::create([
-                'emi_id' => $request->emi_id,
-                'agent_id' => $agentId,
-                'amount' => $request->amount,
-                'payment_method' => $request->payment_method,
-                'payment_type' => $request->payment_type,
-                'status' => 'in_progress', // Pending admin verification
-                'proof_image_path' => $proofImagePath,
-                'collected_at' => now(),
-            ]);
-
-            // Log activity
-            AgentActivity::create([
-                'emi_id' => $request->emi_id,
-                'agent_id' => $agentId,
-                'type' => 'payment',
-                'description' => "Recorded in-hand collection of ₹{$request->amount} for EMI #{$request->emi_id}",
-                'action_at' => now(),
-            ]);
-
         } else {
-            // Multiple EMIs mode (new feature)
+            // Multiple EMIs mode
             $overdueEmis = $this->getOverdueEmisForLoanAccount($request->loan_account_id, $agentId);
+            $loanAccount = LoanAccount::with('client')->findOrFail($request->loan_account_id);
 
             // Use helper to distribute payment across EMIs
             $result = $this->distributePaymentAcrossEmis(
@@ -875,30 +885,65 @@ class EmiCollectionControllerApi extends Controller
 
             // Log activity for first EMI
             $firstEmi = $overdueEmis->first();
-            AgentActivity::create([
-                'emi_id' => $firstEmi->id,
-                'agent_id' => $agentId,
-                'type' => 'payment',
-                'description' => "Recorded in-hand collection of ₹{$request->amount} for " . count($result['collection_ids']) . " EMIs (pending admin verification)",
-                'action_at' => now(),
-            ]);
+            if ($firstEmi) {
+                AgentActivity::create([
+                    'emi_id' => $firstEmi->id,
+                    'agent_id' => $agentId,
+                    'type' => 'payment',
+                    'description' => "Recorded in-hand collection of ₹{$request->amount} for " . count($result['collection_ids']) . " EMIs (pending admin verification)",
+                    'action_at' => now(),
+                ]);
+            }
 
             // Return first collection ID for response
-            $collection = (object) ['id' => $result['collection_ids'][0]];
+            $collection = (object) ['id' => $result['collection_ids'][0] ?? null];
         }
 
-        // Get projected status for the EMI (first one if multiple)
-        $projected = $this->getProjectedEmiData(Emi::find($emiIdForOtp));
+        $targetEmi = Emi::find($emiIdForOtp);
+        $projected = $targetEmi ? $this->getProjectedEmiData($targetEmi) : ['pending_amount' => 0, 'status' => 'paid'];
+        $loanAccount = $loanAccount ?? ($targetEmi ? $targetEmi->loanAccount : null);
+
+        $client = $loanAccount?->client;
+        $mobileNo = $client?->client_phone ?? '';
+        $cleanMobile = preg_replace('/\D/', '', $mobileNo);
+        if (strlen($cleanMobile) === 10) {
+            $cleanMobile = '91' . $cleanMobile;
+        }
+
+        $smsData = [];
+        if ($loanAccount && $client) {
+            $smsData = [
+                'client_name'        => $client->client_name ?? 'Client',
+                'mobile_no'          => $cleanMobile,
+                'account_no'         => $loanAccount->account_number,
+                'amount_paid'        => (float) $request->amount,
+                'remaining_balance'  => (float) $loanAccount->outstanding_amount,
+                'loan_mode'          => $loanAccount->loan_mode,
+                'payment_type'       => $request->payment_type,
+                'application_number' => $loanAccount->application_number,
+                'is_partial'         => ($request->payment_type === 'partial'),
+                'emi_balance'        => (float) $projected['pending_amount'],
+            ];
+
+            $smsData = array_merge($smsData, \App\Helpers\NotificationTemplateHelper::getRepaymentMessages($smsData));
+            if ($cleanMobile) {
+                $smsData['whatsapp_url'] = 'https://wa.me/' . $cleanMobile . '?text=' . rawurlencode($smsData['whatsapp_message'] ?? '');
+                $smsData['sms_url']      = 'sms:+' . $cleanMobile . '?body=' . rawurlencode($smsData['sms_message'] ?? '');
+            }
+        }
 
         return response()->json([
-            'success' => true,
-            'message' => 'OTP verified and collection recorded successfully. Pending admin verification.',
-            'collection_id' => $collection->id,
-            'status' => 'in_progress',
-            'emi_remaining_amount' => (float) $projected['pending_amount'],
-            'emi_projected_status' => $projected['status'],
-            'is_partial' => $projected['status'] === 'partial',
-            'note' => 'EMI will be updated after admin verification'
+            'success'               => true,
+            'message'               => 'OTP verified and collection recorded successfully. Pending admin verification.',
+            'collection_id'         => $collection->id ?? null,
+            'status'                => 'in_progress',
+            'emi_remaining_amount'  => (float) $projected['pending_amount'],
+            'emi_projected_status'  => $projected['status'],
+            'is_partial'            => $projected['status'] === 'partial',
+            'whatsapp_url'          => $smsData['whatsapp_url'] ?? null,
+            'sms_url'               => $smsData['sms_url'] ?? null,
+            'sms_data'              => $smsData,
+            'note'                  => 'EMI will be updated after admin verification'
         ]);
     }
 

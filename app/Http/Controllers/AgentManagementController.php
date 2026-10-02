@@ -18,6 +18,7 @@ use App\Models\Holiday;
 use Spatie\Permission\Models\Role;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
 
 
 class AgentManagementController extends Controller
@@ -447,6 +448,13 @@ class AgentManagementController extends Controller
                 'state' => ['required', 'string', 'max:255', 'regex:/^[a-zA-Z\s.]+$/'],
                 'pincode' => 'required|numeric|digits:6',
                 'location_id' => 'required|exists:locations,id',
+                'salary_amount' => 'required|numeric|min:0',
+                'account_holder_name' => 'nullable|string|max:255',
+                'bank_name' => 'nullable|string|max:255',
+                'account_number' => 'nullable|string|max:50',
+                'ifsc_code' => ['nullable', 'string', 'max:20', 'regex:/^[A-Z]{4}0[A-Z0-9]{6}$/i'],
+                'branch_name' => 'nullable|string|max:255',
+                'upi_id' => 'nullable|string|max:255',
                 'password' => 'required|string|min:8|confirmed',
             ], [
                 'name.required' => 'Name is required',
@@ -466,6 +474,10 @@ class AgentManagementController extends Controller
                 'pincode.digits' => 'Pincode must be exactly 6 digits',
                 'location_id.required' => 'Please select a location',
                 'location_id.exists' => 'Selected location does not exist',
+                'salary_amount.required' => 'Monthly salary is required',
+                'salary_amount.numeric' => 'Monthly salary must be a number',
+                'salary_amount.min' => 'Monthly salary cannot be negative',
+                'ifsc_code.regex' => 'Please enter a valid IFSC code (e.g. HDFC0001234)',
                 'password.required' => 'Password is required',
                 'password.min' => 'Password must be at least 8 characters',
                 'password.confirmed' => 'Passwords do not match',
@@ -474,17 +486,18 @@ class AgentManagementController extends Controller
             Log::info('Validation passed', $validated);
 
             // Check if agent phone/email exists in clients table
-            $clientExists = Client::where('client_email', $validated['email'])
-                ->orWhere('client_phone', $validated['phone'])
-                ->exists();
+            // $clientExists = Client::where('client_email', $validated['email'])
+            //     ->orWhere('client_phone', $validated['phone'])
+            //     ->exists();
 
-            if ($clientExists) {
-                Log::warning('Agent email or phone already exists in clients table', $validated);
-                return response()->json([
-                    'success' => false,
-                    'message' => 'This email or phone is already registered as a client'
-                ], 422);
-            }
+            // if ($clientExists) {
+            //     Log::warning('Agent email or phone already exists in clients table', $validated);
+            //     return response()->json([
+            //         'success' => false,
+            //         'message' => 'This email or phone is already registered as a client'
+            //     ], 422);
+            // }
+
 
             // Generate agent code
             $lastAgent = Agent::orderBy('id', 'desc')->first();
@@ -503,7 +516,6 @@ class AgentManagementController extends Controller
                 'email' => $validated['email'],
                 'phone' => $validated['phone'],
                 'password' => bcrypt($validated['password']),
-                'plain_password' => $validated['password'],
                 'status' => 'active',
             ]);
 
@@ -522,6 +534,13 @@ class AgentManagementController extends Controller
                 'state' => $validated['state'],
                 'pincode' => $validated['pincode'],
                 'location_id' => $validated['location_id'],
+                'salary_amount' => $validated['salary_amount'],
+                'account_holder_name' => $validated['account_holder_name'] ?? null,
+                'bank_name' => $validated['bank_name'] ?? null,
+                'account_number' => $validated['account_number'] ?? null,
+                'ifsc_code' => isset($validated['ifsc_code']) ? strtoupper($validated['ifsc_code']) : null,
+                'branch_name' => $validated['branch_name'] ?? null,
+                'upi_id' => $validated['upi_id'] ?? null,
                 'status' => 'active',
             ]);
 
@@ -646,69 +665,86 @@ class AgentManagementController extends Controller
         $realId = \App\Support\HashId::decode((string) $id) ?? $id;
         $agent = Agent::with(['user'])->findOrFail($realId);
 
-        try {
-            $validated = $request->validate([
-                'agent_name' => ['required', 'string', 'max:255', 'regex:/^[a-zA-Z\s.]+$/'],
-                'agent_email' => [
-                    'required',
-                    'email',
-                    'max:255',
-                    'unique:agents,agent_email,' . $agent->id
-                ],
-                'agent_phone' => [
-                    'required',
-                    'regex:/^[0-9]{10}$/',
-                    'unique:agents,agent_phone,' . $agent->id
-                ],
-                'status' => 'required|in:active,inactive',
-                'address' => 'nullable|string',
-                'city' => ['nullable', 'string', 'max:255', 'regex:/^[a-zA-Z\s.]+$/'],
-                'state' => ['nullable', 'string', 'max:255', 'regex:/^[a-zA-Z\s.]+$/'],
-                'pincode' => 'nullable|string|max:10',
-                'location_id' => 'nullable|exists:locations,id',
-                'password' => 'nullable|string|min:8|confirmed',
-            ], [
-                'city.regex' => 'The city field must not contain numbers.',
-                'state.regex' => 'The state field must not contain numbers.',
-                'password.min' => 'Password must be at least 8 characters.',
-                'password.confirmed' => 'Passwords do not match.',
-            ]);
+        $validated = $request->validate([
+            'agent_name' => ['required', 'string', 'max:255', 'regex:/^[a-zA-Z\s.]+$/'],
+            'agent_email' => [
+                'required',
+                'email',
+                'max:255',
+                'unique:agents,agent_email,' . $agent->id,
+                Rule::unique('users', 'email')->ignore($agent->user_id),
+            ],
+            'agent_phone' => [
+                'required',
+                'regex:/^[0-9]{10}$/',
+                'unique:agents,agent_phone,' . $agent->id,
+                Rule::unique('users', 'phone')->ignore($agent->user_id),
+            ],
+            'status' => 'required|in:active,inactive',
+            'address' => 'nullable|string',
+            'city' => ['nullable', 'string', 'max:255', 'regex:/^[a-zA-Z\s.]+$/'],
+            'state' => ['nullable', 'string', 'max:255', 'regex:/^[a-zA-Z\s.]+$/'],
+            'pincode' => 'nullable|string|max:10',
+            'location_id' => 'nullable|exists:locations,id',
+            'salary_amount' => 'required|numeric|min:0',
+            'account_holder_name' => 'nullable|string|max:255',
+            'bank_name' => 'nullable|string|max:255',
+            'account_number' => 'nullable|string|max:50',
+            'ifsc_code' => ['nullable', 'string', 'max:20', 'regex:/^[A-Z]{4}0[A-Z0-9]{6}$/i'],
+            'branch_name' => 'nullable|string|max:255',
+            'upi_id' => 'nullable|string|max:255',
+            'password' => 'nullable|string|min:8|confirmed',
+        ], [
+            'city.regex' => 'The city field must not contain numbers.',
+            'state.regex' => 'The state field must not contain numbers.',
+            'salary_amount.required' => 'Monthly salary is required.',
+            'salary_amount.numeric' => 'Monthly salary must be a number.',
+            'salary_amount.min' => 'Monthly salary cannot be negative.',
+            'ifsc_code.regex' => 'Please enter a valid IFSC code (e.g. HDFC0001234).',
+            'password.min' => 'Password must be at least 8 characters.',
+            'password.confirmed' => 'New password and confirm password do not match.',
+        ]);
 
-            $agent->update($validated);
+        $password = $validated['password'] ?? null;
+        unset($validated['password'], $validated['password_confirmation']);
 
-            // Also update the associated user if exists
-            if ($agent->user) {
-                $userUpdateData = [
-                    'name' => $validated['agent_name'],
-                    'email' => $validated['agent_email'],
-                    'phone' => $validated['agent_phone'],
-                ];
+        if (isset($validated['ifsc_code'])) {
+            $validated['ifsc_code'] = strtoupper($validated['ifsc_code']);
+        }
 
-                if (!empty($validated['password'])) {
-                    $userUpdateData['password'] = bcrypt($validated['password']);
-                    $userUpdateData['plain_password'] = $validated['password'];
-                }
+        $agent->update($validated);
 
-                $agent->user->update($userUpdateData);
+        // Sync linked login user (create if missing when setting a password)
+        if ($agent->user) {
+            $userData = [
+                'name' => $validated['agent_name'],
+                'email' => $validated['agent_email'],
+                'phone' => $validated['agent_phone'],
+            ];
+
+            if (!empty($password)) {
+                $userData['password'] = bcrypt($password);
             }
 
-            return response()->json([
-                'success' => true,
-                'message' => 'Agent profile updated successfully.'
+            $agent->user->update($userData);
+        } elseif (!empty($password)) {
+            $user = User::create([
+                'name' => $validated['agent_name'],
+                'email' => $validated['agent_email'],
+                'phone' => $validated['agent_phone'],
+                'password' => bcrypt($password),
+                'status' => $validated['status'] === 'active' ? 'active' : 'inactive',
             ]);
-
-        } catch (\Illuminate\Validation\ValidationException $e) {
-            return response()->json([
-                'success' => false,
-                'message' => $e->validator->errors()->first(),
-                'errors' => $e->errors()
-            ], 422);
-        } catch (\Throwable $e) {
-            return response()->json([
-                'success' => false,
-                'message' => $e->getMessage()
-            ], 500);
+            $user->assignRole('Agent');
+            $agent->update(['user_id' => $user->id]);
         }
+
+        return response()->json([
+            'success' => true,
+            'message' => !empty($password)
+                ? 'Agent profile and password updated successfully.'
+                : 'Agent profile updated successfully.',
+        ]);
     }
 
     /**
@@ -728,6 +764,7 @@ class AgentManagementController extends Controller
             // Total assigned cases (unique clients)
             'assigned_cases' => $agent->emiAssignments()
                 ->join('emis', 'emi_agent_assignments.emi_id', '=', 'emis.id')
+                ->whereNull('emis.deleted_at')
                 ->distinct('emis.loan_account_id')
                 ->count('emis.loan_account_id'),
 
@@ -735,6 +772,7 @@ class AgentManagementController extends Controller
             'unresolved_cases' => $agent->emiAssignments()
                 ->whereIn('emi_agent_assignments.status', ['assigned', 'visited'])
                 ->join('emis', 'emi_agent_assignments.emi_id', '=', 'emis.id')
+                ->whereNull('emis.deleted_at')
                 ->distinct('emis.loan_account_id')
                 ->count('emis.loan_account_id'),
 
@@ -743,6 +781,7 @@ class AgentManagementController extends Controller
                 ->where('emi_agent_assignments.status', 'visited')
                 ->whereDate('emi_agent_assignments.updated_at', $today)
                 ->join('emis', 'emi_agent_assignments.emi_id', '=', 'emis.id')
+                ->whereNull('emis.deleted_at')
                 ->distinct('emis.loan_account_id')
                 ->count('emis.loan_account_id'),
 
@@ -760,6 +799,7 @@ class AgentManagementController extends Controller
                         ->whereDate('due_date', '<=', now()->subDays(30));
                 })
                 ->join('emis', 'emi_agent_assignments.emi_id', '=', 'emis.id')
+                ->whereNull('emis.deleted_at')
                 ->distinct('emis.loan_account_id')
                 ->count('emis.loan_account_id'),
         ];

@@ -172,8 +172,11 @@ return [
     |
     */
 
-    // Default false so HTTP (XAMPP / local) gets a session cookie; set SESSION_SECURE_COOKIE=true only behind HTTPS.
-    'secure' => filter_var(env('SESSION_SECURE_COOKIE', false), FILTER_VALIDATE_BOOLEAN),
+    'secure' => env('SESSION_SECURE_COOKIE') !== null && env('SESSION_SECURE_COOKIE') !== ''
+        ? filter_var(env('SESSION_SECURE_COOKIE'), FILTER_VALIDATE_BOOLEAN)
+        : (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && $_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https')
+          || (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on')
+          || str_starts_with((string) env('APP_URL'), 'https://'),
 
     /*
     |--------------------------------------------------------------------------

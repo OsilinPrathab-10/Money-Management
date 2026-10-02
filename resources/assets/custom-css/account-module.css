@@ -1,0 +1,94 @@
+/* Accounting module — match Client Ledgers Management layout width & table UI */
+
+.account-module .acc-name,
+.account-module .acc-number,
+.acc-name,
+.acc-number {
+  font-weight: 700 !important;
+  color: var(--bs-primary) !important;
+}
+
+.account-module code.acc-number,
+code.acc-number {
+  font-weight: 700 !important;
+  color: var(--bs-primary) !important;
+  background: color-mix(in srgb, var(--bs-primary) 10%, transparent);
+  padding: 0.15rem 0.4rem;
+  border-radius: 0.25rem;
+}
+
+/* Credit = green, Debit = red */
+.acc-credit,
+.account-module .acc-credit,
+.account-module td.acc-credit,
+.account-module th.acc-credit {
+  color: var(--bs-success) !important;
+  font-weight: 600 !important;
+}
+
+.acc-debit,
+.account-module .acc-debit,
+.account-module td.acc-debit,
+.account-module th.acc-debit {
+  color: var(--bs-danger) !important;
+  font-weight: 600 !important;
+}
+
+.acc-credit.is-zero,
+.acc-debit.is-zero {
+  color: var(--bs-secondary) !important;
+  font-weight: 400 !important;
+}
+
+.account-module .badge.bg-label-success,
+.account-module .badge.bg-label-danger {
+  font-weight: 600;
+}
+
+/* Client Ledgers–style table card — full width, horizontal scroll */
+.account-module .card-datatable.table-responsive,
+.account-module .card-datatable,
+.account-module .table-responsive {
+  overflow-x: auto !important;
+  -webkit-overflow-scrolling: touch;
+}
+
+.account-module .account-datatable,
+.account-module table.account-datatable,
+.account-module .table-responsive > .table,
+.account-module .card > .table-responsive > table {
+  width: max-content;
+  min-width: 100%;
+  white-space: nowrap;
+}
+
+.account-module .table thead.table-light,
+.account-module .table-responsive > .table > thead:not([class]) {
+  background-color: var(--bs-tertiary-bg, var(--bs-gray-100));
+}
+
+.account-module .card.border-0.shadow-sm .card-header {
+  background: transparent;
+}
+
+/* Soften nested filter+table cards to match Client Ledgers single card feel */
+.account-module > .card:not(.border-0) {
+  border: 0;
+  box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
+}
+
+.account-module .card-border-shadow-primary {
+  border-left: 4px solid var(--bs-primary) !important;
+}
+.account-module .card-border-shadow-success {
+  border-left: 4px solid var(--bs-success) !important;
+}
+.account-module .card-border-shadow-warning {
+  border-left: 4px solid var(--bs-warning) !important;
+}
+.account-module .card-border-shadow-info {
+  border-left: 4px solid var(--bs-info) !important;
+}
+.account-module .card-border-shadow-danger {
+  border-left: 4px solid var(--bs-danger) !important;
+}

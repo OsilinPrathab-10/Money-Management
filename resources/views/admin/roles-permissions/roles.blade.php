@@ -29,6 +29,11 @@
     <div class="col-12">
       <h4 class="mb-2">Roles List</h4>
       <p class="text-muted mb-0">A role provides access to predefined menus and features so administrators only see what they need.</p>
+      <div class="mt-2">
+        <a href="{{ route('roles.menus', ['role' => 'Staff']) }}" class="btn btn-sm btn-label-primary">
+          <i class="ri-menu-fold-line me-1"></i> Assign menus by role
+        </a>
+      </div>
     </div>
     <div class="col-md-12 col-lg-12">
       <div class="text-sm-end text-center ms-auto">

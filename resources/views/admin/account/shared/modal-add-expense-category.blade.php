@@ -19,14 +19,6 @@
               <input type="text" name="category_code" class="form-control" required placeholder="e.g. EXP-001">
             </div>
             <div class="col-12">
-              <label class="form-label">{{ __('GL account') }} <span class="text-danger">*</span></label>
-              <select name="gl_account_id" class="form-select" required>
-                @foreach ($expenseGlAccounts as $g)
-                  <option value="{{ $g->id }}">{{ $g->account_code }} — {{ $g->account_name }}</option>
-                @endforeach
-              </select>
-            </div>
-            <div class="col-12">
               <label class="form-label">{{ __('Description') }}</label>
               <textarea name="description" class="form-control" rows="2" placeholder="{{ __('Optional') }}"></textarea>
             </div>

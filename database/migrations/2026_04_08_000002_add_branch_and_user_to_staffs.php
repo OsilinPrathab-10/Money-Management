@@ -11,10 +11,16 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::table('staffs', function (Blueprint $table) {
-            $table->foreignId('user_id')->nullable()->after('id')->constrained('users')->onDelete('set null');
-            $table->foreignId('branch_id')->nullable()->after('user_id')->constrained('branches')->onDelete('set null');
-        });
+        if (Schema::hasTable('staffs')) {
+            Schema::table('staffs', function (Blueprint $table) {
+                if (!Schema::hasColumn('staffs', 'user_id')) {
+                    $table->foreignId('user_id')->nullable()->after('id')->constrained('users')->onDelete('set null');
+                }
+                if (!Schema::hasColumn('staffs', 'branch_id')) {
+                    $table->foreignId('branch_id')->nullable()->after('user_id')->constrained('branches')->onDelete('set null');
+                }
+            });
+        }
     }
 
     /**
@@ -22,10 +28,12 @@ return new class extends Migration
      */
     public function down(): void
     {
-        Schema::table('staffs', function (Blueprint $table) {
-            $table->dropForeign(['branch_id']);
-            $table->dropForeign(['user_id']);
-            $table->dropColumn(['branch_id', 'user_id']);
-        });
+        if (Schema::hasTable('staffs')) {
+            Schema::table('staffs', function (Blueprint $table) {
+                $table->dropForeign(['branch_id']);
+                $table->dropForeign(['user_id']);
+                $table->dropColumn(['branch_id', 'user_id']);
+            });
+        }
     }
 };

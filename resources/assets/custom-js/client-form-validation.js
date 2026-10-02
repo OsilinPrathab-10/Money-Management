@@ -53,16 +53,6 @@ document.addEventListener('DOMContentLoaded', function () {
     bankAccountInput.addEventListener('input', function (e) {
       // Remove non-numeric characters
       this.value = this.value.replace(/[^0-9]/g, '');
-      // Limit to 18 digits (standard bank account length)
-      if (this.value.length > 18) {
-        this.value = this.value.substring(0, 18);
-      }
-    });
-
-    bankAccountInput.addEventListener('blur', function (e) {
-      if (this.value && this.value.length < 9) {
-        showFieldError(this, 'Bank Account Number must be at least 9 digits');
-      }
     });
   }
 
@@ -201,13 +191,7 @@ document.addEventListener('DOMContentLoaded', function () {
         return false;
       }
 
-      // Validate Bank Account
-      if (bankAccountInput && bankAccountInput.value && bankAccountInput.value.length < 9) {
-        e.preventDefault();
-        e.stopPropagation();
-        showFieldError(bankAccountInput, 'Bank Account Number must be at least 9 digits');
-        return false;
-      }
+
 
       // Validate Mobile numbers
       mobileInputs.forEach(mobileInput => {

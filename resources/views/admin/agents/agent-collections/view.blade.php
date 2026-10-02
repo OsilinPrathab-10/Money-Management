@@ -23,21 +23,29 @@
   @endif
 
   <div class="row g-6 mb-6">
-    <div class="col-12">
+    <div class="col-12 d-flex justify-content-between align-items-center flex-wrap gap-3">
       <a href="{{ route('agent-collections') }}" class="btn btn-sm btn-outline-secondary">
-        <i class="ri-arrow-left-line me-1"></i> Back to Collections
+        <i class="ri-arrow-left-line me-1"></i> {{ auth()->user()->hasRole('Agent') ? 'Back to My Collections' : 'Back to Agent Collections' }}
       </a>
+      <div class="d-flex align-items-center flex-wrap gap-2">
+        <span class="badge @if($collection->status === 'verified') bg-success @elseif($collection->status === 'rejected') bg-danger @else bg-warning text-dark @endif fs-6 px-3 py-2">
+          <i class="@if($collection->status === 'verified') ri-checkbox-circle-line @elseif($collection->status === 'rejected') ri-close-circle-line @else ri-time-line @endif me-1"></i>
+          {{ ucfirst(str_replace('_', ' ', $collection->status)) }}
+        </span>
+        @if(!empty($isMultiEmi))
+        <span class="badge bg-info fs-6 px-3 py-2">
+          <i class="ri-stack-line me-1"></i> Bulk Payment
+        </span>
+        @endif
+      </div>
     </div>
   </div>
 
   <div class="row g-6">
     <div class="col-xl-8">
       <div class="card mb-6">
-        <div class="card-header d-flex justify-content-between">
+        <div class="card-header border-bottom">
           <h5 class="mb-0">Collection Information</h5>
-          <span class="badge @if($collection->status === 'verified') bg-success @elseif($collection->status === 'rejected') bg-danger @else bg-warning @endif">
-            {{ ucfirst(str_replace('_', ' ', $collection->status)) }}
-          </span>
         </div>
         <div class="card-body">
           <div class="row g-4">
@@ -46,12 +54,23 @@
               <p class="mb-0 fw-medium">#{{ $collection->id }}</p>
             </div>
             <div class="col-md-6">
-              <h6 class="text-muted mb-1">EMI ID</h6>
-              <p class="mb-0 fw-medium">#{{ $collection->emi_id }}</p>
+              <h6 class="text-muted mb-1">{{ !empty($isMultiEmi) ? 'EMIs' : 'EMI ID' }}</h6>
+              <p class="mb-0 fw-medium">
+                @php
+                  $emiIdChunks = collect($emiNumbers ?? [])->filter()->values()->chunk(5);
+                @endphp
+                @if ($emiIdChunks->isNotEmpty())
+                  @foreach ($emiIdChunks as $emiIdChunk)
+                    <span class="d-block">EMI #{{ $emiIdChunk->implode(', #') }}</span>
+                  @endforeach
+                @else
+                  {{ $emiSplitLabel ?? ('#' . $collection->emi_id) }}
+                @endif
+              </p>
             </div>
             <div class="col-md-6">
-              <h6 class="text-muted mb-1">Amount</h6>
-              <p class="mb-0 fw-medium text-success">₹{{ number_format($collection->amount, 2) }}</p>
+              <h6 class="text-muted mb-1">{{ !empty($isMultiEmi) ? 'Collected Amount (Bulk)' : 'Amount' }}</h6>
+              <p class="mb-0 fw-medium text-success">₹{{ number_format($bulkTotalAmount ?? $collection->amount, 2) }}</p>
             </div>
             <div class="col-md-6">
               <h6 class="text-muted mb-1">Collection Date</h6>
@@ -96,6 +115,40 @@
             <div class="col-12">
               <h6 class="text-muted mb-1">Remarks</h6>
               <p class="mb-0">{{ $collection->remarks }}</p>
+            </div>
+            @endif
+            @if(!empty($isMultiEmi) && isset($relatedCollections) && count($relatedCollections))
+            <div class="col-12">
+              <h6 class="text-muted mb-2">EMI Split</h6>
+              <div class="table-responsive">
+                <table class="table table-sm table-bordered mb-0">
+                  <thead>
+                    <tr>
+                      <th>EMI</th>
+                      <th class="text-end">Amount</th>
+                      <th>Type</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    @foreach($relatedCollections as $related)
+                    <tr>
+                      <td>{{ $related->emi?->instalment_number ? ('EMI #' . $related->emi->instalment_number) : ('#' . $related->emi_id) }}</td>
+                      <td class="text-end">₹{{ number_format($related->amount, 2) }}</td>
+                      <td>{{ ucfirst($related->payment_type ?? 'full') }}</td>
+                      <td>{{ ucfirst(str_replace('_', ' ', $related->status)) }}</td>
+                    </tr>
+                    @endforeach
+                  </tbody>
+                  <tfoot>
+                    <tr>
+                      <th>Total</th>
+                      <th class="text-end">₹{{ number_format($bulkTotalAmount ?? $relatedCollections->sum('amount'), 2) }}</th>
+                      <th colspan="2"></th>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
             </div>
             @endif
           </div>
@@ -162,8 +215,8 @@
       <div class="card mb-6">
         <div class="card-header"><h5 class="mb-0">Collector Information</h5></div>
         <div class="card-body">
-          <h6 class="mb-0">{{ $collection->agent->agent_name ?? ($collection->verifiedBy ? 'Admin: ' . $collection->verifiedBy->name : 'Admin') }}</h6>
-          <small class="text-muted">{{ $collection->agent->agent_phone ?? '' }}</small>
+          <h6 class="mb-0">{{ $collection->getCollectedByLabel() }}</h6>
+          <small class="text-muted">{{ $collection->agent?->agent_phone ?? '' }}</small>
         </div>
       </div>
 
@@ -205,11 +258,52 @@
           <h5 class="modal-title">Approve Collection</h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
         </div>
-        <form method="POST" action="{{ route('agent-collections.verify', $collection->id) }}">
+        <form method="POST" action="{{ route('agent-collections.verify-one') }}" id="approveCollectionForm">
           @csrf
+          <input type="hidden" name="collection_id" value="{{ $collection->id }}">
           <input type="hidden" name="status" value="verified">
           <div class="modal-body">
             <p>Are you sure you want to approve this collection?</p>
+            @if(in_array(strtolower($collection->payment_method ?? ''), ['upi', 'bank_transfer']))
+              <div class="mb-3">
+                <label class="form-label" for="internal_bank_account_id">Credit Bank Account <span class="text-danger">*</span></label>
+                <select class="form-select" name="internal_bank_account_id" id="internal_bank_account_id" required>
+                  <option value="" disabled {{ $collection->bank_account_id ? '' : 'selected' }}>-- Select Internal Bank Account --</option>
+                  @foreach($bankAccounts as $bank)
+                    <option value="{{ $bank->id }}"
+                            @selected((int) $collection->bank_account_id === (int) $bank->id)
+                            data-bank-name="{{ $bank->bank_name }}"
+                            data-account-name="{{ $bank->account_name }}"
+                            data-account-number="{{ $bank->account_number }}"
+                            data-branch-name="{{ $bank->branch_name }}"
+                            data-account-type="{{ $bank->account_type }}"
+                            data-ifsc="{{ $bank->effective_ifsc }}"
+                            data-upi-id="{{ $bank->upi_id }}"
+                            data-qr-code="{{ $bank->qr_code ? asset('storage/' . $bank->qr_code) : '' }}">
+                      {{ $bank->account_name }} (₹{{ number_format($bank->current_balance, 2) }})
+                    </option>
+                  @endforeach
+                </select>
+              </div>
+
+              <div class="mb-3 d-none" id="verifyBankDetailsCard">
+                <div class="card bg-lighter border shadow-none">
+                  <div class="card-body p-3">
+                    <div class="row g-3 align-items-start">
+                      <div class="col-md-7">
+                        <h6 class="mb-2 fw-semibold text-heading" id="qrBankName">Bank Name</h6>
+                        <div id="verifyBankTransferContent" class="small text-dark"></div>
+                      </div>
+                      <div class="col-md-5 text-center" id="qrCodeDisplayContainer">
+                        <p class="mb-1 small text-muted">UPI / GPay QR</p>
+                        <p class="mb-2 small">UPI ID: <span class="fw-bold text-dark" id="qrUpiId">N/A</span></p>
+                        <div id="qrCodeImageWrapper"></div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            @endif
             <div class="mb-3">
               <label class="form-label">Remarks (Optional)</label>
               <textarea class="form-control" name="remarks" rows="3" placeholder="Add approval remarks..."></textarea>
@@ -217,7 +311,7 @@
           </div>
           <div class="modal-footer">
             <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
-            <button type="submit" class="btn btn-success">Confirm Approval</button>
+            <button type="submit" class="btn btn-success" id="confirmApproveBtn">Confirm Approval</button>
           </div>
         </form>
       </div>
@@ -232,8 +326,9 @@
           <h5 class="modal-title">Reject Collection</h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
         </div>
-        <form method="POST" action="{{ route('agent-collections.verify', $collection->id) }}">
+        <form method="POST" action="{{ route('agent-collections.verify-one') }}" id="rejectCollectionForm">
           @csrf
+          <input type="hidden" name="collection_id" value="{{ $collection->id }}">
           <input type="hidden" name="status" value="rejected">
           <div class="modal-body">
             <p>Are you sure you want to reject this collection?</p>
@@ -277,6 +372,160 @@
 
   <script>
   document.addEventListener('DOMContentLoaded', function() {
+    // Combined bank details + QR in verify/approve modal
+    const internalBankSelect = document.getElementById('internal_bank_account_id');
+    const detailsCard = document.getElementById('verifyBankDetailsCard');
+    const detailsContent = document.getElementById('verifyBankTransferContent');
+    const qrContainer = document.getElementById('qrCodeDisplayContainer');
+
+    function renderVerifyBankDetails(option) {
+      if (!option || !option.value || !detailsCard) {
+        if (detailsCard) detailsCard.classList.add('d-none');
+        return;
+      }
+
+      const bankName = option.getAttribute('data-bank-name') || 'N/A';
+      const accountName = option.getAttribute('data-account-name') || 'N/A';
+      const accountNumber = option.getAttribute('data-account-number') || 'N/A';
+      const branchName = option.getAttribute('data-branch-name') || 'N/A';
+      const ifsc = option.getAttribute('data-ifsc') || '';
+      const upiId = option.getAttribute('data-upi-id') || 'N/A';
+      const qrCodeUrl = option.getAttribute('data-qr-code') || '';
+
+      document.getElementById('qrBankName').textContent = bankName;
+      document.getElementById('qrUpiId').textContent = upiId;
+
+      let html = `
+        <p class="mb-1"><strong>Bank:</strong> ${bankName}</p>
+        <p class="mb-1"><strong>Account Name:</strong> ${accountName}</p>
+        <p class="mb-1"><strong>Account Number:</strong> ${accountNumber}</p>
+        <p class="mb-1"><strong>Branch:</strong> ${branchName}</p>
+      `;
+      if (ifsc) {
+        html += `<p class="mb-1"><strong>IFSC:</strong> ${ifsc}</p>`;
+      }
+      if (upiId && upiId !== 'N/A') {
+        html += `<p class="mb-1"><strong>UPI ID:</strong> ${upiId}</p>`;
+      }
+      html += '<p class="text-muted small mb-0 mt-2">Collection will be credited to this bank account.</p>';
+      if (detailsContent) {
+        detailsContent.innerHTML = html;
+      }
+
+      const wrapper = document.getElementById('qrCodeImageWrapper');
+      wrapper.innerHTML = '';
+      if (qrCodeUrl) {
+        wrapper.innerHTML = `<img src="${qrCodeUrl}" alt="QR Code" class="img-fluid my-1" style="max-height: 220px; border: 1px solid #eee; padding: 8px; border-radius: 8px;">`;
+      } else {
+        wrapper.innerHTML = `<div class="alert alert-warning py-2 mb-0 mt-1 small">No QR Code image uploaded for this bank account.</div>`;
+      }
+
+      detailsCard.classList.remove('d-none');
+      if (qrContainer) {
+        qrContainer.classList.remove('d-none');
+      }
+    }
+
+    if (internalBankSelect) {
+      internalBankSelect.addEventListener('change', function() {
+        renderVerifyBankDetails(this.options[this.selectedIndex]);
+      });
+      if (internalBankSelect.value) {
+        renderVerifyBankDetails(internalBankSelect.options[internalBankSelect.selectedIndex]);
+      }
+    }
+
+    const approveForm = document.getElementById('approveCollectionForm');
+    if (approveForm) {
+      approveForm.addEventListener('submit', function (e) {
+        e.preventDefault();
+        const btn = document.getElementById('confirmApproveBtn');
+        if (btn.disabled) return;
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Approving...';
+
+        const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
+        fetch(approveForm.action, {
+          method: 'POST',
+          headers: {
+            'X-CSRF-TOKEN': csrfToken,
+            'Accept': 'application/json',
+            'X-Requested-With': 'XMLHttpRequest'
+          },
+          body: new FormData(approveForm)
+        })
+        .then(r => r.json().catch(() => ({ success: false, message: 'Approve failed. Please try again.' })))
+        .then(data => {
+          const modalEl = document.getElementById('approveModal');
+          const modal = modalEl ? bootstrap.Modal.getInstance(modalEl) : null;
+          if (modal) modal.hide();
+
+          if (data.success) {
+            Swal.fire({ title: 'Approved', text: data.message || 'Collection verified successfully', icon: 'success' })
+              .then(() => location.reload());
+          } else {
+            Swal.fire({ title: 'Error', text: data.message || 'Verification failed', icon: 'error' });
+            btn.disabled = false;
+            btn.innerHTML = 'Confirm Approval';
+          }
+        })
+        .catch(() => {
+          Swal.fire({ title: 'Error', text: 'An error occurred. Please try again.', icon: 'error' });
+          btn.disabled = false;
+          btn.innerHTML = 'Confirm Approval';
+        });
+      });
+    }
+
+    const rejectForm = document.getElementById('rejectCollectionForm');
+    if (rejectForm) {
+      rejectForm.addEventListener('submit', function (e) {
+        e.preventDefault();
+        const btn = rejectForm.querySelector('button[type="submit"]');
+        if (btn && btn.disabled) return;
+        if (btn) {
+          btn.disabled = true;
+          btn.dataset.originalHtml = btn.innerHTML;
+          btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Rejecting...';
+        }
+
+        const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
+        fetch(rejectForm.action, {
+          method: 'POST',
+          headers: {
+            'X-CSRF-TOKEN': csrfToken,
+            'Accept': 'application/json',
+            'X-Requested-With': 'XMLHttpRequest'
+          },
+          body: new FormData(rejectForm)
+        })
+        .then(r => r.json().catch(() => ({ success: false, message: 'Reject failed. Please try again.' })))
+        .then(data => {
+          const modalEl = document.getElementById('rejectModal');
+          const modal = modalEl ? bootstrap.Modal.getInstance(modalEl) : null;
+          if (modal) modal.hide();
+
+          if (data.success) {
+            Swal.fire({ title: 'Rejected', text: data.message || 'Collection rejected successfully', icon: 'success' })
+              .then(() => location.reload());
+          } else {
+            Swal.fire({ title: 'Error', text: data.message || 'Rejection failed', icon: 'error' });
+            if (btn) {
+              btn.disabled = false;
+              btn.innerHTML = btn.dataset.originalHtml || 'Confirm Rejection';
+            }
+          }
+        })
+        .catch(() => {
+          Swal.fire({ title: 'Error', text: 'An error occurred. Please try again.', icon: 'error' });
+          if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = btn.dataset.originalHtml || 'Confirm Rejection';
+          }
+        });
+      });
+    }
+
     // Repay handler
     const repayBtn = document.getElementById('repayBtn');
     if (repayBtn) {

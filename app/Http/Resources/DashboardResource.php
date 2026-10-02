@@ -19,10 +19,11 @@ class DashboardResource extends JsonResource
      * @return array<string, mixed>
      */
 
-    public function __construct($resource, $overdueCount)
+    public function __construct($resource, $overdueCount, $publicLink = null)
     {
         parent::__construct($resource);
         $this->overdueCount = $overdueCount;
+        $this->publicLink = $publicLink;
     }
 
     public function toArray(Request $request): array
@@ -38,8 +39,8 @@ class DashboardResource extends JsonResource
         $nominee = !empty($nominee);
         $employeeInfo = !empty($employeeInfo);
 
-        // KYC is complete only if all 3 exist
-        $kycCompleted = $panVerified && $aadhaarVerified && $bankVerified && $selfieImage && $nominee && $employeeInfo && in_array($kyc->status, ['verified', 'pending']);
+        // KYC is complete when core KYC details & nominee are submitted and status is verified/pending
+        $kycCompleted = $panVerified && $aadhaarVerified && $bankVerified && $selfieImage && $nominee && in_array($kyc?->status, ['verified', 'pending']);
 
         return [
             'client' => [
@@ -49,6 +50,7 @@ class DashboardResource extends JsonResource
                 'profile_img' => $this->profile_image
                   ? url(Storage::url($this->profile_image))
                   : null,
+                'public_link' => $this->publicLink,
             ],
             'kyc_details' => [
                 'pan_verified' => $panVerified,
@@ -60,9 +62,6 @@ class DashboardResource extends JsonResource
                 'kyc_completed' => $kycCompleted,
                 'kyc_status' => $kyc?->status
             ],
-            'loan_products' => LoanProductResource::collection(
-                $this->whenLoaded('loanProducts')
-            ),
             'emi_status' => [
                 'overdue_count' => $this->overdueCount,
                 'has_overdue' => $this->overdueCount > 0,

@@ -67,7 +67,7 @@
                 <label class="form-label">Role</label>
                 <div class="input-group input-group-merge">
                   <span class="input-group-text"><i class="ri ri-shield-user-line"></i></span>
-                  <input type="text" class="form-control" value="Admin" readonly>
+                  <input type="text" class="form-control" value="{{ $user->getRoleNames()->implode(', ') ?: '—' }}" readonly>
                 </div>
               </div>
 

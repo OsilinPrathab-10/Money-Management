@@ -48,6 +48,7 @@ document.addEventListener('DOMContentLoaded', function (e) {
         data: function (d) {
           d.location_id = $('#FilterLocation').val();
           d.status = $('#FilterStatus').val();
+          d.account_type = $('#FilterAccountType').val();
         },
         dataSrc: function (json) {
           // Ensure recordsTotal and recordsFiltered are numeric and not undefined/null
@@ -75,15 +76,13 @@ document.addEventListener('DOMContentLoaded', function (e) {
             return `<div class="form-check"><input class="form-check-input dt-checkboxes" type="checkbox" value="${data}"></div>`;
           }
         },
-        { 
-          render: function (data, type, full, meta) {
-            return meta.row + meta.settings._iDisplayStart + 1;
-          }
-        },
+        { data: 'customer_id' },
         { data: 'name' },
         { data: 'email' },
         { data: 'mobile' },
         { data: 'zone' },
+        { data: 'loans_count' },
+        { data: 'chits_count' },
         { data: 'agent_name' },
         { data: 'added_by_name' },
         { data: 'status' },
@@ -107,16 +106,35 @@ document.addEventListener('DOMContentLoaded', function (e) {
           visible: (window.userRole !== 'Agent') // Hide for agents
         },
         {
-          searchable: false,
+          searchable: true,
           orderable: true,
-          targets: 2, // S.No column
+          targets: 2, // Customer ID
+          render: function (data, type, full) {
+            const id = data || full.customer_id || ('#' + (full.fake_id || ''));
+            return `<span class="fw-semibold text-heading">${id}</span>`;
+          }
         },
         {
           // User full name
           targets: 3,
           render: function (data, type, full, meta) {
             const { name, id } = full;
-            return `<a href="${userViewBase}${id}" class="text-heading"><span class="fw-medium">${name}</span></a>`;
+            const avatarUrl = full.profile_image_url || '';
+            const safeName = $('<div>').text(name || '').html();
+            const safeUrl = $('<div>').text(avatarUrl).html();
+            const avatarHtml = avatarUrl
+              ? `<a href="javascript:void(0)" class="avatar avatar-sm me-2 flex-shrink-0 view-client-selfie"
+                     data-selfie-url="${safeUrl}" data-client-name="${safeName}" title="View profile photo">
+                   <img src="${safeUrl}" alt="${safeName}" class="rounded-circle" style="width:32px;height:32px;object-fit:cover;"
+                        onerror="this.onerror=null;this.src='https://ui-avatars.com/api/?name=${encodeURIComponent(name || 'U')}&size=64&background=696cff&color=fff';">
+                 </a>`
+              : `<span class="avatar avatar-sm me-2 flex-shrink-0" title="No profile photo">
+                   <span class="avatar-initial rounded-circle bg-label-primary">${(name || 'U').substring(0, 2).toUpperCase()}</span>
+                 </span>`;
+            return `<div class="d-flex align-items-center">
+              ${avatarHtml}
+              <a href="${userViewBase}${id}" class="text-heading"><span class="fw-medium">${safeName}</span></a>
+            </div>`;
           }
         },
         {
@@ -147,8 +165,51 @@ document.addEventListener('DOMContentLoaded', function (e) {
           }
         },
         {
-          // Assigned Agent
+          // Loans Count
           targets: 7,
+          className: 'text-center',
+          render: function (data, type, full) {
+            const loansCount = full['loans_count'] || 0;
+            const emiCount = full['emi_count'] || 0;
+            const openCount = full['open_loan_count'] || 0;
+            const canManagePenalty = window.userRole === 'Admin' || window.userRole === 'Staff';
+            let breakdown = '';
+            if (loansCount > 0) {
+              const parts = [];
+              if (emiCount > 0) parts.push(`EMI: ${emiCount}`);
+              if (openCount > 0) parts.push(`Open: ${openCount}`);
+              if (parts.length > 0) breakdown = ` (${parts.join(', ')})`;
+            }
+            if (loansCount >= 1 && canManagePenalty) {
+              return `<button type="button" class="btn btn-sm rounded-pill btn-label-primary fw-medium open-client-penalty"
+                        data-client-id="${full['id']}" data-client-name="${$('<div>').text(full['name'] || '').html()}"
+                        data-penalty-type="loan" title="Set loan penalty${breakdown}">
+                        <i class="ri-hand-coin-line me-1_5"></i>${loansCount}
+                      </button>`;
+            }
+            return `<span class="badge rounded-pill bg-label-primary fw-medium" title="${breakdown ? breakdown.trim() : ''}"><i class="ri-hand-coin-line me-1_5"></i>${loansCount}</span>`;
+          }
+        },
+        {
+          // Chits Count
+          targets: 8,
+          className: 'text-center',
+          render: function (data, type, full) {
+            const chitsCount = full['chits_count'] || 0;
+            const canManagePenalty = window.userRole === 'Admin' || window.userRole === 'Staff';
+            if (chitsCount >= 1 && canManagePenalty) {
+              return `<button type="button" class="btn btn-sm rounded-pill btn-label-success fw-medium open-client-penalty"
+                        data-client-id="${full['id']}" data-client-name="${$('<div>').text(full['name'] || '').html()}"
+                        data-penalty-type="chit" title="Set chit penalty">
+                        <i class="ri-group-2-line me-1_5"></i>${chitsCount}
+                      </button>`;
+            }
+            return `<span class="badge rounded-pill bg-label-success fw-medium"><i class="ri-group-2-line me-1_5"></i>${chitsCount}</span>`;
+          }
+        },
+        {
+          // Assigned Agent
+          targets: 9,
           render: function (data, type, full) {
             const agentName = full['agent_name'];
             const isAgent = (window.userRole === 'Agent');
@@ -164,7 +225,7 @@ document.addEventListener('DOMContentLoaded', function (e) {
         },
         {
           // Added By
-          targets: 8,
+          targets: 10,
           render: function (data, type, full) {
             const addedByName = full['added_by_name'] || 'Admin';
             return `<span class="badge bg-label-info">${addedByName}</span>`;
@@ -172,7 +233,7 @@ document.addEventListener('DOMContentLoaded', function (e) {
         },
         {
           // Status
-          targets: 9,
+          targets: 11,
           className: 'text-center',
           render: function (data, type, full, meta) {
             const status = (full['status'] || 'inactive').toLowerCase();
@@ -199,9 +260,46 @@ document.addEventListener('DOMContentLoaded', function (e) {
           render: function (data, type, full, meta) {
             let actions = '<div class="d-flex align-items-center gap-2 flex-nowrap">';
             
-            // Apply Loan for Agents (only if active/verified)
-            if (window.userRole === 'Agent' && (full['status'] === 'active' || full['status'] === 'verified')) {
-              actions += `<button type="button" class="btn btn-icon btn-text-secondary btn-sm rounded-pill apply-loan-modal" data-id="${full['fake_id']}" title="Apply Loan"><i class="icon-base ri ri-hand-coin-line icon-22px"></i></button>`;
+            // Apply Options (Loan, Chit, FD) (only if active/verified)
+            if (full['status'] === 'active' || full['status'] === 'verified') {
+              const rawId = full['fake_id'] || full['id'];
+              const clientNameSafe = $('<div>').text(full['name'] || '').html();
+              actions += `
+                <div class="d-inline-block">
+                  <button type="button" class="btn btn-icon btn-text-secondary btn-sm rounded-pill dropdown-toggle hide-arrow" data-bs-toggle="dropdown" data-bs-boundary="viewport" aria-expanded="false" title="Apply Application (Loan, Chit, FD)">
+                    <i class="icon-base ri ri-hand-coin-line icon-22px text-primary"></i>
+                  </button>
+                  <ul class="dropdown-menu dropdown-menu-end shadow">
+                    <li><h6 class="dropdown-header text-uppercase small text-muted py-1">Apply Service</h6></li>
+                    <li>
+                      <a class="dropdown-item apply-loan-modal d-flex align-items-center py-2" href="javascript:void(0);" data-id="${full['id']}" data-raw-id="${rawId}" data-client-name="${clientNameSafe}">
+                        <i class="ri-bank-line me-2 text-primary fs-5"></i>
+                        <div class="d-flex flex-column">
+                          <span class="fw-semibold">Apply Loan</span>
+                          <small class="text-muted" style="font-size: 0.75rem;">Standard EMI / Open Loan</small>
+                        </div>
+                      </a>
+                    </li>
+                    <li>
+                      <a class="dropdown-item apply-chit-modal d-flex align-items-center py-2" href="javascript:void(0);" data-id="${full['id']}" data-raw-id="${rawId}" data-client-name="${clientNameSafe}">
+                        <i class="ri-group-line me-2 text-info fs-5"></i>
+                        <div class="d-flex flex-column">
+                          <span class="fw-semibold">Apply Chit</span>
+                          <small class="text-muted" style="font-size: 0.75rem;">Chit Fund Scheme</small>
+                        </div>
+                      </a>
+                    </li>
+                    <li>
+                      <a class="dropdown-item apply-fd-modal d-flex align-items-center py-2" href="javascript:void(0);" data-id="${full['id']}" data-raw-id="${rawId}" data-client-name="${clientNameSafe}">
+                        <i class="ri-safe-2-line me-2 text-warning fs-5"></i>
+                        <div class="d-flex flex-column">
+                          <span class="fw-semibold">Apply Fixed Deposit</span>
+                          <small class="text-muted" style="font-size: 0.75rem;">FD Investment</small>
+                        </div>
+                      </a>
+                    </li>
+                  </ul>
+                </div>`;
             }
 
             // Only show Toggle Status and Delete for Admin and Staff
@@ -210,6 +308,7 @@ document.addEventListener('DOMContentLoaded', function (e) {
               actions += `<button class="btn btn-icon btn-text-secondary btn-sm rounded-pill delete-record" data-id="${full['id']}"><i class="icon-base ri ri-delete-bin-7-line icon-22px"></i></button>`;
             }
             
+            actions += `<a href="${baseUrl}clients/view/ledger/${full['id']}" class="btn btn-icon btn-text-secondary btn-sm rounded-pill" title="View Ledger"><i class="icon-base ri ri-wallet-3-line icon-22px"></i></a>`;
             actions += `<a href="${userViewBase}${full['id']}" class="btn btn-icon btn-text-secondary btn-sm rounded-pill"><i class="icon-base ri ri-eye-line icon-22px"></i></a>`;
             actions += '</div>';
             return actions;
@@ -250,7 +349,7 @@ document.addEventListener('DOMContentLoaded', function (e) {
                       text: '<i class="icon-base ri ri-printer-line me-2" ></i>Print',
                       className: 'dropdown-item',
                       exportOptions: {
-                        columns: [2, 3, 4, 5, 6, 7, 8, 9],
+                        columns: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
                         // prevent avatar to be print
                         format: {
                           body: function (inner, coldex, rowdex) {
@@ -324,7 +423,7 @@ document.addEventListener('DOMContentLoaded', function (e) {
                       text: '<i class="icon-base ri ri-file-text-line me-2" ></i>Csv',
                       className: 'dropdown-item',
                       exportOptions: {
-                        columns: [2, 3, 4, 5, 6, 7, 8, 9],
+                        columns: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
                         format: {
                           body: function (inner, coldex, rowdex) {
                             if (inner == null) return '';
@@ -364,7 +463,7 @@ document.addEventListener('DOMContentLoaded', function (e) {
                       text: '<i class="icon-base ri ri-file-excel-line me-2"></i>Excel',
                       className: 'dropdown-item',
                       exportOptions: {
-                        columns: [2, 3, 4, 5, 6, 7, 8, 9],
+                        columns: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
                         format: {
                           body: function (inner, coldex, rowdex) {
                             if (inner == null) return '';
@@ -404,7 +503,7 @@ document.addEventListener('DOMContentLoaded', function (e) {
                       text: '<i class="icon-base ri ri-file-pdf-line me-2"></i>Pdf',
                       className: 'dropdown-item',
                       exportOptions: {
-                        columns: [2, 3, 4, 5, 6, 7, 8, 9],
+                        columns: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
                         format: {
                           body: function (inner) {
                             if (inner == null) return '';
@@ -439,7 +538,7 @@ document.addEventListener('DOMContentLoaded', function (e) {
 
                         const tableContent = doc.content.find(item => item.table);
                         if (tableContent) {
-                          tableContent.table.widths = ['10%', '30%', '25%', '15%', '20%'];
+                          tableContent.table.widths = ['8%', '18%', '16%', '12%', '10%', '8%', '8%', '10%', '10%', '10%'];
                           tableContent.layout = {
                             hLineWidth: function () { return 0.5; },
                             vLineWidth: function () { return 0.5; },
@@ -465,7 +564,7 @@ document.addEventListener('DOMContentLoaded', function (e) {
                       text: '<i class="icon-base ri ri-file-copy-line me-2" ></i>Copy',
                       className: 'dropdown-item',
                       exportOptions: {
-                        columns: [2, 3, 4, 5, 6, 7, 8, 9],
+                        columns: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
                         format: {
                           body: function (inner) {
                             if (inner == null) return '';
@@ -527,27 +626,41 @@ document.addEventListener('DOMContentLoaded', function (e) {
       }
     });
 
-    // Filter change event
-    $('#FilterLocation, #FilterStatus').on('change', function () {
+    // Filter change and reset events
+    $('#FilterLocation, #FilterStatus, #FilterAccountType').on('change', function () {
+      dt_user.draw();
+    });
+
+    $('#btnResetClientFilters').on('click', function () {
+      $('#FilterLocation').val('');
+      $('#FilterStatus').val('');
+      $('#FilterAccountType').val('');
       dt_user.draw();
     });
 
     // Bulk Assignment Logic for Clients
     const selectAllClients = $('#selectAllClients');
     const btnBulkAssignClients = $('#btnBulkAssignClients');
+    const btnBulkAssignZone = $('#btnBulkAssignZone');
     const btnBulkDeleteClients = $('#btnBulkDeleteClients');
     const assignAgentModal = new bootstrap.Modal(document.getElementById('assignAgentModal'));
+    const assignZoneModal = new bootstrap.Modal(document.getElementById('assignZoneModal'));
     const assignCountLabel = $('#assignCount');
+    const assignZoneCountLabel = $('#assignZoneCount');
     const assignAgentForm = $('#assignAgentForm');
+    const assignZoneForm = $('#assignZoneForm');
     const btnConfirmAssign = $('#btnConfirmAssign');
+    const btnConfirmAssignZone = $('#btnConfirmAssignZone');
 
     function updateBulkActions() {
       const checkedCount = $('.dt-checkboxes:checked').length;
       if (checkedCount > 0) {
         btnBulkAssignClients.removeClass('d-none');
+        btnBulkAssignZone.removeClass('d-none');
         btnBulkDeleteClients.removeClass('d-none');
       } else {
         btnBulkAssignClients.addClass('d-none');
+        btnBulkAssignZone.addClass('d-none');
         btnBulkDeleteClients.addClass('d-none');
         selectAllClients.prop('checked', false);
       }
@@ -558,7 +671,32 @@ document.addEventListener('DOMContentLoaded', function (e) {
       updateBulkActions();
     });
 
-    // Bulk Delete Action
+    // Open selfie / profile photo in popup modal
+    $('.datatables-users').on('click', '.view-client-selfie', function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      const url = $(this).data('selfie-url');
+      const clientName = $(this).data('client-name') || 'Profile Photo';
+      if (!url) return;
+
+      $('#clientSelfieModalTitle').text(clientName);
+      $('#clientSelfieModalImg').attr('src', url).attr('alt', clientName + ' selfie');
+
+      const modalEl = document.getElementById('clientSelfieModal');
+      if (modalEl && typeof bootstrap !== 'undefined') {
+        bootstrap.Modal.getOrCreateInstance(modalEl).show();
+      }
+    });
+
+    selectAllClients.on('change', function() {
+      $('.dt-checkboxes').prop('checked', $(this).is(':checked'));
+      updateBulkActions();
+    });
+
+    $('.datatables-users').on('change', '.dt-checkboxes', function() {
+      updateBulkActions();
+    });
+
     btnBulkDeleteClients.on('click', function() {
       const selectedIds = [];
       $('.dt-checkboxes:checked').each(function() {
@@ -569,11 +707,11 @@ document.addEventListener('DOMContentLoaded', function (e) {
 
       if (typeof Swal !== 'undefined') {
         Swal.fire({
-          title: 'Are you sure?',
-          text: `You want to delete these ${selectedIds.length} selected clients? You won't be able to revert this!`,
+          title: 'Move to Recycle Bin?',
+          text: `${selectedIds.length} selected client(s) and their loan, chit and deposit accounts will be moved to the recycle bin. You can restore them later.`,
           icon: 'warning',
           showCancelButton: true,
-          confirmButtonText: 'Yes, delete them!',
+          confirmButtonText: 'Yes, move them!',
           cancelButtonText: 'Cancel',
           customClass: {
             confirmButton: 'btn btn-danger me-3 waves-effect waves-light',
@@ -603,39 +741,43 @@ document.addEventListener('DOMContentLoaded', function (e) {
               },
               success: function(response) {
                 if (response.success) {
+                  const hasBlocked = Array.isArray(response.blocked_names) && response.blocked_names.length > 0;
                   Swal.fire({
-                    icon: 'success',
-                    title: 'Deleted!',
+                    icon: hasBlocked ? 'warning' : 'success',
+                    title: hasBlocked ? 'Partially Completed' : 'Deleted!',
                     text: response.message,
-                    customClass: { confirmButton: 'btn btn-success' }
+                    customClass: { confirmButton: 'btn btn-success' },
+                    buttonsStyling: false
                   });
                   selectAllClients.prop('checked', false);
                   dt_user.draw(false);
                   updateBulkActions();
                 } else {
                   Swal.fire({
-                    icon: 'error',
-                    title: 'Error!',
+                    icon: response.blocked ? 'warning' : 'error',
+                    title: response.blocked ? 'Cannot Delete Client(s)' : 'Error!',
                     text: response.message,
-                    customClass: { confirmButton: 'btn btn-primary' }
+                    customClass: { confirmButton: 'btn btn-primary' },
+                    buttonsStyling: false
                   });
                 }
               },
               error: function(xhr) {
-                const error = xhr.responseJSON ? xhr.responseJSON.message : 'An error occurred while deleting clients.';
+                const payload = xhr.responseJSON || {};
+                const error = payload.message || 'An error occurred while deleting clients.';
                 Swal.fire({
-                  icon: 'error',
-                  title: 'Error!',
+                  icon: payload.blocked ? 'warning' : 'error',
+                  title: payload.blocked ? 'Cannot Delete Client(s)' : 'Error!',
                   text: error,
-                  customClass: { confirmButton: 'btn btn-primary' }
+                  customClass: { confirmButton: 'btn btn-primary' },
+                  buttonsStyling: false
                 });
               }
             });
           }
         });
       } else {
-        // Fallback if Swal is not loaded
-        if (confirm(`Are you sure you want to delete these ${selectedIds.length} selected clients?`)) {
+        if (confirm(`Are you sure you want to delete these ${selectedIds.length} selected client(s)?`)) {
           $.ajax({
             url: baseUrl + 'client-management/bulk-delete',
             type: 'POST',
@@ -657,26 +799,24 @@ document.addEventListener('DOMContentLoaded', function (e) {
               }
             },
             error: function(xhr) {
-              alert('Error deleting clients.');
+              const payload = xhr.responseJSON || {};
+              alert(payload.message || 'Error deleting clients.');
             }
           });
         }
       }
     });
 
-    selectAllClients.on('change', function() {
-      $('.dt-checkboxes').prop('checked', $(this).is(':checked'));
-      updateBulkActions();
-    });
-
-    $('.datatables-users').on('change', '.dt-checkboxes', function() {
-      updateBulkActions();
-    });
-
     btnBulkAssignClients.on('click', function() {
       const checkedCount = $('.dt-checkboxes:checked').length;
       assignCountLabel.text(checkedCount);
       assignAgentModal.show();
+    });
+
+    btnBulkAssignZone.on('click', function() {
+      const checkedCount = $('.dt-checkboxes:checked').length;
+      assignZoneCountLabel.text(checkedCount);
+      assignZoneModal.show();
     });
 
     // Handle Assignment Submission
@@ -751,6 +891,77 @@ document.addEventListener('DOMContentLoaded', function (e) {
       });
     });
 
+    // Handle Zone Assignment Submission
+    assignZoneForm.on('submit', function(e) {
+      e.preventDefault();
+      
+      const selectedIds = [];
+      $('.dt-checkboxes:checked').each(function() {
+        selectedIds.push($(this).val());
+      });
+
+      if (selectedIds.length === 0) return;
+
+      const formData = {
+        client_ids: selectedIds,
+        location_id: $('#zoneSelect').val(),
+        _token: $('input[name="_token"]').val()
+      };
+
+      // Show loading
+      btnConfirmAssignZone.prop('disabled', true);
+      btnConfirmAssignZone.find('.spinner-border').removeClass('d-none');
+
+      $.ajax({
+        url: baseUrl + 'client-management/bulk-assign-zone',
+        type: 'POST',
+        data: formData,
+        success: function(response) {
+          btnConfirmAssignZone.prop('disabled', false);
+          btnConfirmAssignZone.find('.spinner-border').addClass('d-none');
+          
+          if (response.success) {
+            assignZoneModal.hide();
+            
+            if (typeof Swal !== 'undefined') {
+              Swal.fire({
+                icon: 'success',
+                title: 'Assigned!',
+                text: response.message,
+                customClass: { confirmButton: 'btn btn-success' }
+              });
+            }
+            
+            selectAllClients.prop('checked', false);
+            dt_user.draw(false);
+            updateBulkActions();
+          } else {
+            if (typeof Swal !== 'undefined') {
+              Swal.fire({
+                icon: 'error',
+                title: 'Error!',
+                text: response.message,
+                customClass: { confirmButton: 'btn btn-primary' }
+              });
+            }
+          }
+        },
+        error: function(xhr) {
+          btnConfirmAssignZone.prop('disabled', false);
+          btnConfirmAssignZone.find('.spinner-border').addClass('d-none');
+          const error = xhr.responseJSON ? xhr.responseJSON.message : 'An error occurred while assigning zone.';
+          if (typeof Swal !== 'undefined') {
+            Swal.fire({
+              icon: 'error',
+              title: 'Error!',
+              text: error,
+              customClass: { confirmButton: 'btn btn-primary' }
+            });
+          }
+        }
+      });
+    });
+
     // Single Reassign Logic
     $('.datatables-users').on('click', '.reassign-agent', function() {
       const clientId = this.getAttribute('data-id');
@@ -776,9 +987,15 @@ document.addEventListener('DOMContentLoaded', function (e) {
       assignAgentModal.show();
     });
 
-    // Apply Loan Modal Logic (for Agents)
+    // ---------------------------------------------------------
+    // Quick Apply Actions (Loan, Chit, FD) from Client Row
+    // ---------------------------------------------------------
+
+    // 1. Apply Loan
     $('.datatables-users').on('click', '.apply-loan-modal', function() {
       const clientId = $(this).data('id');
+      const rawId = $(this).data('raw-id') || clientId;
+      const clientName = $(this).data('client-name') || '';
       const modalEl = document.getElementById('modalApplyLoanGeneric');
       if (!modalEl) return;
 
@@ -791,7 +1008,76 @@ document.addEventListener('DOMContentLoaded', function (e) {
       $(modalEl).off('shown.bs.modal.applyLoanFromList').one('shown.bs.modal.applyLoanFromList', function () {
         const select = $('#apply_client_id');
         if (select.length) {
-          select.val(clientId).trigger('change');
+          let opt = select.find(`option[value="${rawId}"], option[value="${clientId}"]`);
+          if (!opt.length && clientName) {
+            const newOption = new Option(clientName, rawId, true, true);
+            select.append(newOption).trigger('change');
+          } else {
+            const val = opt.length ? opt.val() : String(rawId);
+            select.val(val).trigger('change');
+          }
+        }
+      });
+
+      applyModal.show();
+    });
+
+    // 2. Apply Chit
+    $('.datatables-users').on('click', '.apply-chit-modal', function() {
+      const clientId = $(this).data('id');
+      const rawId = $(this).data('raw-id') || clientId;
+      const clientName = $(this).data('client-name') || '';
+      const modalEl = document.getElementById('modalApplyChit');
+      if (!modalEl) return;
+
+      if (modalEl.classList.contains('show')) {
+        return;
+      }
+
+      const applyModal = bootstrap.Modal.getOrCreateInstance(modalEl);
+
+      $(modalEl).off('shown.bs.modal.applyChitFromList').one('shown.bs.modal.applyChitFromList', function () {
+        const select = $('#chit_client_id');
+        if (select.length) {
+          let opt = select.find(`option[value="${rawId}"], option[value="${clientId}"]`);
+          if (!opt.length && clientName) {
+            const newOption = new Option(clientName, rawId, true, true);
+            select.append(newOption).trigger('change');
+          } else {
+            const val = opt.length ? opt.val() : String(rawId);
+            select.val(val).trigger('change');
+          }
+        }
+      });
+
+      applyModal.show();
+    });
+
+    // 3. Apply Fixed Deposit (FD)
+    $('.datatables-users').on('click', '.apply-fd-modal', function() {
+      const clientId = $(this).data('id');
+      const rawId = $(this).data('raw-id') || clientId;
+      const clientName = $(this).data('client-name') || '';
+      const modalEl = document.getElementById('modalApplyFdGeneric');
+      if (!modalEl) return;
+
+      if (modalEl.classList.contains('show')) {
+        return;
+      }
+
+      const applyModal = bootstrap.Modal.getOrCreateInstance(modalEl);
+
+      $(modalEl).off('shown.bs.modal.applyFdFromList').one('shown.bs.modal.applyFdFromList', function () {
+        const select = $('#formApplyFdGeneric_client_id');
+        if (select.length) {
+          let opt = select.find(`option[value="${rawId}"], option[value="${clientId}"]`);
+          if (!opt.length && clientName) {
+            const newOption = new Option(clientName, rawId, true, true);
+            select.append(newOption).trigger('change');
+          } else {
+            const val = opt.length ? opt.val() : String(rawId);
+            select.val(val).trigger('change');
+          }
         }
       });
 
@@ -801,6 +1087,9 @@ document.addEventListener('DOMContentLoaded', function (e) {
     // Initialize Select2 in modal
     $('#agentSelect').select2({
       dropdownParent: $('#assignAgentModal')
+    });
+    $('#zoneSelect').select2({
+      dropdownParent: $('#assignZoneModal')
     });
 
     // Delete Record
@@ -831,33 +1120,62 @@ document.addEventListener('DOMContentLoaded', function (e) {
       deleteModal.hide();
 
       if (currentDeleteId) {
-        // delete the data
-        fetch(`${baseUrl}client-list/${currentDeleteId}`, {
-          method: 'DELETE',
-          headers: {
-            'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').getAttribute('content'),
-            'Content-Type': 'application/json'
-          }
-        })
-          .then(response => {
-            if (response.ok) {
-              dt_user.draw();
-
-              // Show success modal
-              setTimeout(() => {
-                const successModal = new bootstrap.Modal(document.getElementById('successModal'));
-                successModal.show();
-              }, 300);
-            } else {
-              throw new Error('Delete failed');
-            }
-          })
-          .catch(error => {
-            console.error('Delete error:', error);
-            alert('Failed to delete client. Please try again.');
-          });
+        performDelete(currentDeleteId);
       }
     });
+
+    function performDelete(id) {
+      const url = `${baseUrl}client-list/${id}`;
+      fetch(url, {
+        method: 'DELETE',
+        headers: {
+          'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').getAttribute('content'),
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'X-Requested-With': 'XMLHttpRequest'
+        }
+      })
+        .then(async response => {
+          const data = await response.json().catch(() => ({}));
+
+          if (response.ok && data.success !== false) {
+            dt_user.draw();
+
+            setTimeout(() => {
+              const successModal = new bootstrap.Modal(document.getElementById('successModal'));
+              successModal.show();
+            }, 300);
+            return;
+          }
+
+          const errMsg = data.message || 'Failed to delete client. Please try again.';
+          if (typeof Swal !== 'undefined') {
+            Swal.fire({
+              icon: data.blocked ? 'warning' : 'error',
+              title: data.blocked ? 'Cannot Delete Client' : 'Deletion Failed',
+              text: errMsg,
+              customClass: { confirmButton: 'btn btn-primary' },
+              buttonsStyling: false
+            });
+          } else {
+            alert(errMsg);
+          }
+        })
+        .catch(error => {
+          console.error('Delete error:', error);
+          if (typeof Swal !== 'undefined') {
+            Swal.fire({
+              icon: 'error',
+              title: 'Deletion Failed',
+              text: error.message || 'Failed to delete client. Please try again.',
+              customClass: { confirmButton: 'btn btn-primary' },
+              buttonsStyling: false
+            });
+          } else {
+            alert(error.message || 'Failed to delete client. Please try again.');
+          }
+        });
+    }
 
     // edit record
     document.addEventListener('click', function (e) {
@@ -1447,15 +1765,40 @@ document.addEventListener('DOMContentLoaded', function (e) {
       submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Submitting...';
 
       const formData = new FormData(formAddNewClient);
+      const sameOriginStore = `${window.location.pathname.replace(/\/+$/, '').replace(/\/client-management.*$/, '')}/client-management/store`.replace(/\/{2,}/g, '/');
 
-      fetch(`${baseUrl}client-management/store`, {
+      fetch(sameOriginStore, {
         method: 'POST',
+        credentials: 'same-origin',
         headers: {
-          'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
+          'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').getAttribute('content'),
+          'Accept': 'application/json',
+          'X-Requested-With': 'XMLHttpRequest',
+          'ngrok-skip-browser-warning': '1'
         },
         body: formData
       })
-      .then(response => response.json())
+      .then(async response => {
+        const raw = await response.text();
+        let json = null;
+        try {
+          json = raw ? JSON.parse(raw) : {};
+        } catch (e) {
+          const status = response.status;
+          let message = 'Unable to complete registration. Please try again.';
+          if (status === 403) {
+            message = 'The server blocked this registration (403). Try smaller photos and submit again.';
+          } else if (status === 413) {
+            message = 'Uploaded files are too large. Please use smaller photos and try again.';
+          } else if (status === 419) {
+            message = 'Your session expired. Please refresh the page and try again.';
+          }
+          throw new Error(message);
+        }
+        json._httpStatus = response.status;
+        json._ok = response.ok;
+        return json;
+      })
       .then(json => {
         submitBtn.disabled = false;
         submitBtn.innerHTML = '<i class="icon-base ri ri-save-line me-2"></i> Complete Registration';
@@ -1472,7 +1815,6 @@ document.addEventListener('DOMContentLoaded', function (e) {
             customClass: { confirmButton: 'btn btn-success' }
           });
         } else {
-          // Flatten validation errors if they exist
           let errorMsg = json.message || 'Validation failed on the server.';
           if (json.errors) {
             errorMsg = Object.values(json.errors).flat().join('<br>');
@@ -1491,8 +1833,8 @@ document.addEventListener('DOMContentLoaded', function (e) {
         submitBtn.disabled = false;
         submitBtn.innerHTML = '<i class="icon-base ri ri-save-line me-2"></i> Complete Registration';
         Swal.fire({
-          title: 'Connection Error',
-          text: 'Unable to communicate with the server. Please check your connection.',
+          title: 'Registration Failed',
+          text: err?.message || 'Unable to communicate with the server. Please check your connection.',
           icon: 'error',
           customClass: { confirmButton: 'btn btn-primary' }
         });
@@ -1515,6 +1857,99 @@ document.addEventListener('DOMContentLoaded', function (e) {
       fv.resetForm(true);
       // Reset to first tab using our custom function
       switchToTab('#tab-personal');
+    });
+  }
+
+  // Bulk Import AJAX Submission
+  const bulkImportForm = document.getElementById('bulkImportForm');
+  const bulkImportModalEl = document.getElementById('bulkImportModal');
+  if (bulkImportForm && bulkImportModalEl) {
+    const bulkImportModal = bootstrap.Modal.getOrCreateInstance(bulkImportModalEl);
+    const btnConfirmImport = document.getElementById('btnConfirmImport');
+    const importErrorsContainer = document.getElementById('importErrorsContainer');
+    const importErrorsList = document.getElementById('importErrorsList');
+
+    bulkImportForm.addEventListener('submit', function (e) {
+      e.preventDefault();
+
+      // Clear previous errors
+      importErrorsContainer.classList.add('d-none');
+      importErrorsList.innerHTML = '';
+
+      // Show spinner
+      btnConfirmImport.disabled = true;
+      btnConfirmImport.querySelector('.spinner-border').classList.remove('d-none');
+
+      const formData = new FormData(bulkImportForm);
+
+      fetch(`${baseUrl}client-management/bulk-import`, {
+        method: 'POST',
+        headers: {
+          'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
+        },
+        body: formData
+      })
+      .then(response => response.json())
+      .then(json => {
+        btnConfirmImport.disabled = false;
+        btnConfirmImport.querySelector('.spinner-border').classList.add('d-none');
+
+        if (json.success) {
+          bulkImportModal.hide();
+          bulkImportForm.reset();
+          
+          // Reload Datatable
+          $('.datatables-users').DataTable().ajax.reload(null, false);
+
+          Swal.fire({
+            icon: 'success',
+            title: 'Import Successful!',
+            text: json.message,
+            customClass: { confirmButton: 'btn btn-success' }
+          });
+        } else {
+          // Display errors inside the modal
+          importErrorsContainer.classList.remove('d-none');
+          
+          if (json.errors && Array.isArray(json.errors)) {
+            json.errors.forEach(err => {
+              const li = document.createElement('li');
+              li.textContent = err;
+              importErrorsList.appendChild(li);
+            });
+          } else {
+            const li = document.createElement('li');
+            li.textContent = json.message || 'An error occurred during import.';
+            importErrorsList.appendChild(li);
+          }
+
+          Swal.fire({
+            title: 'Import Failed',
+            text: 'Some errors were found in the uploaded sheet. Please check the list below.',
+            icon: 'error',
+            customClass: { confirmButton: 'btn btn-primary' }
+          });
+        }
+      })
+      .catch(err => {
+        console.error('Import error:', err);
+        btnConfirmImport.disabled = false;
+        btnConfirmImport.querySelector('.spinner-border').classList.add('d-none');
+
+        Swal.fire({
+          title: 'Connection Error',
+          text: 'Unable to communicate with the server. Please check your connection.',
+          icon: 'error',
+          customClass: { confirmButton: 'btn btn-primary' }
+        });
+      });
+    });
+
+    // Clear form and errors when modal is closed
+    bulkImportModalEl.addEventListener('hidden.bs.modal', function () {
+      bulkImportForm.reset();
+      importErrorsContainer.classList.add('d-none');
+      importErrorsList.innerHTML = '';
     });
   }
 
@@ -1546,5 +1981,240 @@ document.addEventListener('DOMContentLoaded', function (e) {
       });
     });
   }
+
+  // ---- Per-client Loan / Chit Penalty popup ----
+  const penaltyModalEl = document.getElementById('clientPenaltyModal');
+  const penaltyModal = penaltyModalEl ? new bootstrap.Modal(penaltyModalEl) : null;
+  const penaltyListEl = document.getElementById('clientPenaltyList');
+  const penaltyLoadingEl = document.getElementById('clientPenaltyLoading');
+  const penaltyEmptyEl = document.getElementById('clientPenaltyEmpty');
+  const penaltyTitleEl = document.getElementById('clientPenaltyModalTitle');
+  const penaltyClientNameEl = document.getElementById('clientPenaltyClientName');
+  let currentPenaltyType = 'loan';
+
+  function formatPenaltyMoney(amount) {
+    const n = Number(amount) || 0;
+    return '₹' + n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
+  function setPenaltyModalState(state) {
+    if (penaltyLoadingEl) penaltyLoadingEl.classList.toggle('d-none', state !== 'loading');
+    if (penaltyEmptyEl) penaltyEmptyEl.classList.toggle('d-none', state !== 'empty');
+    if (penaltyListEl) penaltyListEl.classList.toggle('d-none', state !== 'list');
+  }
+
+  function renderPenaltyRows(type, accounts) {
+    if (!penaltyListEl) return;
+    penaltyListEl.innerHTML = '';
+
+    accounts.forEach(function (account) {
+      const card = document.createElement('div');
+      card.className = 'border rounded p-3';
+      const amountLabel = type === 'loan' ? 'Loan amount' : 'Chit value';
+      const amountValue = formatPenaltyMoney(account.amount);
+      const extra =
+        type === 'loan'
+          ? `<span class="text-muted small">Outstanding: ${formatPenaltyMoney(account.outstanding)}</span>`
+          : `<span class="text-muted small">Group: ${account.group_name || '—'}</span>`;
+      const currentType = account.penalty_type === 'percentage' ? 'percentage' : 'fixed';
+      const currentValue = account.penalty != null ? account.penalty : '';
+
+      card.innerHTML = `
+        <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3">
+          <div>
+            <h6 class="mb-1">${account.label}</h6>
+            <div class="d-flex flex-wrap gap-2 align-items-center">
+              <span class="badge bg-label-secondary text-capitalize">${account.status || '—'}</span>
+              <span class="text-muted small">${amountLabel}: ${amountValue}</span>
+              ${extra}
+            </div>
+          </div>
+        </div>
+        <div class="row g-2 align-items-end">
+          <div class="col-md-4">
+            <label class="form-label small mb-1">Penalty Type</label>
+            <select class="form-select form-select-sm penalty-type-select">
+              <option value="fixed" ${currentType === 'fixed' ? 'selected' : ''}>Fixed (₹)</option>
+              <option value="percentage" ${currentType === 'percentage' ? 'selected' : ''}>Percentage (%)</option>
+            </select>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label small mb-1">Penalty Value</label>
+            <input type="number" min="0" step="0.01" class="form-control form-control-sm penalty-value-input"
+                   value="${currentValue}" placeholder="0.00">
+          </div>
+          <div class="col-md-4">
+            <button type="button" class="btn btn-primary btn-sm w-100 apply-account-penalty"
+                    data-account-id="${account.id}">
+              <span class="spinner-border spinner-border-sm d-none me-1" role="status"></span>
+              Apply
+            </button>
+          </div>
+        </div>
+      `;
+      penaltyListEl.appendChild(card);
+    });
+  }
+
+  function openClientPenaltyModal(clientId, clientName, type) {
+    if (!penaltyModal) return;
+    currentPenaltyType = type;
+    if (penaltyTitleEl) {
+      penaltyTitleEl.textContent = type === 'loan' ? 'Loan Penalty' : 'Chit Penalty';
+    }
+    if (penaltyClientNameEl) {
+      penaltyClientNameEl.textContent = clientName || '';
+    }
+    setPenaltyModalState('loading');
+    if (penaltyListEl) penaltyListEl.innerHTML = '';
+    penaltyModal.show();
+
+    fetch(`${baseUrl}client-management/${clientId}/penalty-accounts?type=${encodeURIComponent(type)}`, {
+      headers: {
+        Accept: 'application/json',
+        'X-Requested-With': 'XMLHttpRequest'
+      }
+    })
+      .then(res => res.json())
+      .then(json => {
+        if (!json.success) {
+          setPenaltyModalState('empty');
+          Swal.fire({
+            icon: 'error',
+            title: 'Unable to load',
+            text: json.message || 'Failed to load accounts.',
+            customClass: { confirmButton: 'btn btn-primary' }
+          });
+          return;
+        }
+        const accounts = Array.isArray(json.accounts) ? json.accounts : [];
+        if (accounts.length === 0) {
+          setPenaltyModalState('empty');
+          return;
+        }
+        renderPenaltyRows(type, accounts);
+        setPenaltyModalState('list');
+      })
+      .catch(err => {
+        console.error(err);
+        setPenaltyModalState('empty');
+        Swal.fire({
+          icon: 'error',
+          title: 'Connection Error',
+          text: 'Unable to load penalty accounts.',
+          customClass: { confirmButton: 'btn btn-primary' }
+        });
+      });
+  }
+
+  document.addEventListener('click', function (e) {
+    const openBtn = e.target.closest('.open-client-penalty');
+    if (openBtn) {
+      e.preventDefault();
+      openClientPenaltyModal(
+        openBtn.getAttribute('data-client-id'),
+        openBtn.getAttribute('data-client-name'),
+        openBtn.getAttribute('data-penalty-type') || 'loan'
+      );
+      return;
+    }
+
+    const applyBtn = e.target.closest('.apply-account-penalty');
+    if (!applyBtn || !penaltyListEl || !penaltyListEl.contains(applyBtn)) return;
+
+    e.preventDefault();
+    const card = applyBtn.closest('.border');
+    if (!card) return;
+
+    const accountId = applyBtn.getAttribute('data-account-id');
+    const typeSelect = card.querySelector('.penalty-type-select');
+    const valueInput = card.querySelector('.penalty-value-input');
+    const penaltyType = typeSelect ? typeSelect.value : 'fixed';
+    const penaltyValue = valueInput ? parseFloat(valueInput.value) : NaN;
+
+    if (!accountId || isNaN(penaltyValue) || penaltyValue < 0) {
+      Swal.fire({
+        icon: 'warning',
+        title: 'Invalid value',
+        text: 'Enter a valid penalty value (0 or greater).',
+        customClass: { confirmButton: 'btn btn-primary' }
+      });
+      return;
+    }
+
+    if (penaltyType === 'percentage' && penaltyValue > 100) {
+      Swal.fire({
+        icon: 'warning',
+        title: 'Invalid percentage',
+        text: 'Percentage penalty cannot exceed 100%.',
+        customClass: { confirmButton: 'btn btn-primary' }
+      });
+      return;
+    }
+
+    const spinner = applyBtn.querySelector('.spinner-border');
+    applyBtn.disabled = true;
+    if (spinner) spinner.classList.remove('d-none');
+
+    const url =
+      currentPenaltyType === 'chit'
+        ? `${baseUrl}client-management/penalty/apply-chit`
+        : `${baseUrl}client-management/penalty/apply-loan`;
+
+    const body =
+      currentPenaltyType === 'chit'
+        ? {
+            group_member_id: accountId,
+            penalty_type: penaltyType,
+            penalty_value: penaltyValue
+          }
+        : {
+            loan_account_id: accountId,
+            penalty_type: penaltyType,
+            penalty_value: penaltyValue
+          };
+
+    fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+        'X-CSRF-TOKEN': $('meta[name="csrf-token"]').attr('content'),
+        'X-Requested-With': 'XMLHttpRequest'
+      },
+      body: JSON.stringify(body)
+    })
+      .then(async res => {
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok || !json.success) {
+          const msg =
+            json.message ||
+            (json.errors ? Object.values(json.errors).flat().join(' ') : null) ||
+            'Failed to apply penalty.';
+          throw new Error(msg);
+        }
+        return json;
+      })
+      .then(json => {
+        Swal.fire({
+          icon: 'success',
+          title: 'Penalty Applied',
+          text: json.message || 'Penalty saved successfully.',
+          customClass: { confirmButton: 'btn btn-primary' }
+        });
+      })
+      .catch(err => {
+        Swal.fire({
+          icon: 'error',
+          title: 'Apply Failed',
+          text: err.message || 'Unable to apply penalty.',
+          customClass: { confirmButton: 'btn btn-primary' }
+        });
+      })
+      .finally(() => {
+        applyBtn.disabled = false;
+        if (spinner) spinner.classList.add('d-none');
+      });
+  });
 });
 

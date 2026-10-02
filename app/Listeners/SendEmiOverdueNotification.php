@@ -41,28 +41,17 @@ class SendEmiOverdueNotification
                 return;
             }
 
-            $devices = $user->userDevice()->get() ?? collect();
-
-            if ($devices->isEmpty()) {
-                Log::info('No devices found for client to send push', [
-                    'client_id' => $client->id,
-                    'user_id' => $user->id,
-                ]);
-                return;
-            }
-
-            foreach ($devices as $device) {
-                $this->fcm->sendPushNotification(
-                    $device->device_token,
-                    "EMI Overdue ⚠️",
-                    "Your EMI of ₹{$emi->total_amount} due on {$emi->due_date->format('d-m-Y')} is now overdue.",
-                    [
-                        'screen' => 'emi_overdue',
-                        'emi_id' => (string) $emi->id,
-                        'loan_id' => (string) $loan->id,
-                    ]
-                );
-            }
+            $this->fcm->sendToCustomer(
+                $client,
+                'EMI Overdue',
+                "Your EMI of ₹{$emi->total_amount} due on {$emi->due_date->format('d-m-Y')} is now overdue.",
+                'emi_overdue',
+                [
+                    'screen' => 'emi_overdue',
+                    'emi_id' => (string) $emi->id,
+                    'loan_id' => (string) $loan->id,
+                ]
+            );
 
         } catch (Throwable $e) {
             Log::error('SendEmiOverdueNotification failed: ' . $e->getMessage(), [

@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\Validator;
 use App\Models\AgentActivity;
 use App\Models\Emi;
 use App\Models\EmiCollection;
+use App\Models\ChitCollection;
 
 class AgentCaseControllerApi extends Controller
 {
@@ -397,8 +398,10 @@ class AgentCaseControllerApi extends Controller
     {
         $agentId = Auth::user()->id;
         $today = now()->toDateString();
-        $startOfMonth = now()->startOfMonth()->toDateString();
-        $endOfMonth = now()->endOfMonth()->toDateString();
+        $todayStart = now()->startOfDay();
+        $todayEnd = now()->endOfDay();
+        $startOfMonth = now()->startOfMonth()->startOfDay();
+        $endOfMonth = now()->endOfMonth()->endOfDay();
 
         // Get all assignments for the agent to calculate summaries
         $assignments = EmiAgentAssignment::where('agent_id', $agentId)
@@ -422,7 +425,7 @@ class AgentCaseControllerApi extends Controller
             $dueDate = optional($emi->due_date)->toDateString();
 
             // Monthly stats (Target)
-            if ($dueDate >= $startOfMonth && $dueDate <= $endOfMonth) {
+            if ($dueDate >= $startOfMonth->toDateString() && $dueDate <= $endOfMonth->toDateString()) {
                 // Use total_due instead of total_amount
                 $monthTotalDue += (float) $emi->total_due;
                 // $monthCollected comes from actuals now
@@ -456,12 +459,32 @@ class AgentCaseControllerApi extends Controller
         }
 
         // Calculate ACTUAL COLLECTIONS (regardless of due date)
-        $todayCollected = EmiCollection::where('agent_id', $agentId)
-            ->whereDate('collected_at', $today)
+        $todayCollected = (float) EmiCollection::where('agent_id', $agentId)
+            ->whereBetween('collected_at', [$todayStart, $todayEnd])
+            ->whereIn('status', ['in_progress', 'verified', 'completed'])
+            ->where(function ($q) {
+                $q->where('status', '!=', 'in_progress')
+                    ->orWhere('payment_method', '!=', 'payment_link');
+            })
             ->sum('amount');
 
-        $monthCollected = EmiCollection::where('agent_id', $agentId)
+        $todayCollected += (float) ChitCollection::where('agent_id', $agentId)
+            ->whereBetween('collected_at', [$todayStart, $todayEnd])
+            ->whereIn('status', ['in_progress', 'verified', 'completed'])
+            ->sum('amount');
+
+        $monthCollected = (float) EmiCollection::where('agent_id', $agentId)
             ->whereBetween('collected_at', [$startOfMonth, $endOfMonth])
+            ->whereIn('status', ['in_progress', 'verified', 'completed'])
+            ->where(function ($q) {
+                $q->where('status', '!=', 'in_progress')
+                    ->orWhere('payment_method', '!=', 'payment_link');
+            })
+            ->sum('amount');
+
+        $monthCollected += (float) ChitCollection::where('agent_id', $agentId)
+            ->whereBetween('collected_at', [$startOfMonth, $endOfMonth])
+            ->whereIn('status', ['in_progress', 'verified', 'completed'])
             ->sum('amount');
 
         $todaySummary = [

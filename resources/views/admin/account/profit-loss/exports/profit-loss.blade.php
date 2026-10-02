@@ -27,16 +27,18 @@
   <meta charset="utf-8">
   <title>{{ __('Profit & Loss') }}</title>
   <style>
-    body { font-family: DejaVu Sans, sans-serif; font-size: 11px; color: #333; }
+    @page { size: A4 landscape; margin: 10mm; }
+    body { font-family: DejaVu Sans, sans-serif; font-size: 10px; color: #333; margin: 0; }
     h2 { font-size: 16px; margin-bottom: 8px; }
     .muted { color: #666; margin-bottom: 12px; }
-    table { border-collapse: collapse; width: 100%; margin-bottom: 16px; }
-    th, td { border: 1px solid #999; padding: 6px 8px; }
-    th { background: #f3f4f6; }
+    table { border-collapse: collapse; width: 100%; margin-bottom: 16px; table-layout: auto; word-wrap: break-word; }
+    th, td { border: 1px solid #999; padding: 6px 8px; font-size: 9px; vertical-align: top; word-break: break-word; mso-number-format: "\@"; }
+    th { background: #666cff; color: #ffffff; font-weight: bold; }
     .num { text-align: right; }
   </style>
 </head>
 <body>
+  @include('admin.reports.partials.download-branding')
   <h2>{{ __('Profit & Loss') }}</h2>
   <p class="muted">{{ __('Period') }}: <strong>{{ $fromDate }}</strong> → <strong>{{ $toDate }}</strong> ({{ $statusMode }})</p>
   <table>

@@ -166,7 +166,7 @@
                                 @endphp
                                 <span class="badge {{ $statusClass }}">{{ ucfirst($app->status) }}</span>
                             </td>
-                            <td>{{ $app->created_at->format('d-m-Y') }}</td>
+                            <td>{{ $app->applied_date->format('d-m-Y') }}</td>
                         </tr>
                         @empty
                         <tr>

@@ -41,27 +41,25 @@ class EmiControllerApi extends Controller
 
     public function generateEmiReceipt($id)
     {
-        $emi = Emi::with('loanAccount', 'loanAccount.client')->findOrFail($id);
+        $decodedId = \App\Support\HashId::decode((string) $id);
+        $realId = $decodedId ?: (is_numeric($id) ? (int) $id : null);
+
+        if (! $realId) {
+            return response()->json([
+                'status' => false,
+                'message' => 'Invalid EMI Receipt ID',
+            ], 404);
+        }
+
+        $emi = Emi::with('loanAccount', 'loanAccount.client', 'collections.emi')->findOrFail($realId);
         $loan = $emi->loanAccount;
-        $client = $loan->client;
+        $client = optional($loan)->client;
 
-        $receiptData = [
-            'receipt_number'     => 'RCPT-' . $emi->id,
-            'paid_date'          => $emi->paid_date,
-            'payment_reference'  => $emi->payment_reference,
-            'payment_method'     => $emi->payment_method,
-
-            'application_number' => $loan->application_number,
-            'account_number'     => $loan->account_number,
-            'disbursed_date'     => $loan->disbursed_at,
-
-            'principal_amount'   => $emi->principal_amount,
-            'interest_amount'    => $emi->interest_amount,
-            'emi_amount'         => $emi->total_amount,
-            'paid_amount'        => $emi->paid_amount,
-            'overdue_amount'     => $emi->overdue_amount ?? 0,
-            'show_overdue'       => $emi->overdue_amount > 0,
-        ];
+        $receiptData = app(\App\Http\Controllers\EmiController::class)->buildReceiptPayload($emi);
+        $receiptData['account_number'] = $receiptData['account_number']
+            ?? optional($loan)->account_number
+            ?? optional($loan)->customer_loan_account_number;
+        $receiptData['disbursed_date'] = $receiptData['disbursed_date'] ?? optional($loan)->disbursed_at;
 
         $body = view('pdf.payment-receipt-api', compact('receiptData', 'client', 'loan'))->render();
 
@@ -89,10 +87,18 @@ class EmiControllerApi extends Controller
 
         Storage::disk('public')->put($filePath, $mpdf->Output('', 'S'));
 
+        $encodedEmiId = \App\Support\HashId::encode($emi->id);
+        $encodedAccountId = $loan ? \App\Support\HashId::encode($loan->id) : null;
+
         return response()->json([
             'status' => true,
             'message' => 'Receipt generated successfully',
             'url' => asset('storage/' . $filePath),
+            'receipt_url' => url('/emi/receipt/' . ($encodedEmiId ?: $emi->id)),
+            'receipt_view_url' => url('/emi/receipt/' . ($encodedEmiId ?: $emi->id)),
+            'admin_receipt_url' => url('/emi/receipts/view/' . ($encodedEmiId ?: $emi->id)),
+            'statement_url' => $encodedAccountId ? url('/loan/statement/' . $encodedAccountId) : null,
+            'statement_view_url' => $encodedAccountId ? url('/loan/statement/' . $encodedAccountId) : null,
         ]);
     }
 

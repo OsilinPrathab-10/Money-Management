@@ -118,9 +118,7 @@ class PaymentControllerApi extends Controller
         $api = new Api(env('RAZORPAY_KEY_ID'), env('RAZORPAY_KEY_SECRET'));
         $paymentInfo = $api->payment->fetch($request->razorpay_payment_id);
 
-        $payment = Payment::where('order_id', $request->razorpay_order_id)
-            ->lockForUpdate()
-            ->firstOrFail();
+        $payment = Payment::where('order_id', $request->razorpay_order_id)->firstOrFail();
 
         if ((int) $payment->amount_paise !== (int) $paymentInfo['amount']) {
             return response()->json([
@@ -132,6 +130,22 @@ class PaymentControllerApi extends Controller
         DB::beginTransaction();
 
         try {
+            $payment = Payment::where('order_id', $request->razorpay_order_id)
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            if ($payment->status === 'success') {
+                DB::commit();
+
+                return response()->json([
+                    'status' => true,
+                    'message' => 'Payment already processed',
+                    'loan_account_id' => $payment->loan_account_id,
+                    'payment_type' => $payment->payment_type,
+                    'already_processed' => true,
+                ]);
+            }
+
             $payment->update([
                 'payment_id' => $request->razorpay_payment_id,
                 'signature'  => $request->razorpay_signature,

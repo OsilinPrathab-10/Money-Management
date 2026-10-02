@@ -52,15 +52,29 @@ class SmsTemplateSeeder extends Seeder
             [
                 'identifier' => 'payment_received_sms',
                 'name' => 'Payment Received SMS (Redirect)',
-                'sms_body' => "Dear [[client_name]],\nYour [[payment_type]] payment of ₹[[amount_paid]] towards Shanmuga Finance Loan Account [[account_no]] has been received successfully.\nOutstanding Balance: ₹[[remaining_balance]].\n\nPlease check your EMI Schedule here: [[public_link]]\n\nThank you!",
+                'sms_body' => "Dear [[client_name]],\nYour [[payment_type]] payment of ₹[[amount_paid]] towards [[company_name]] Loan Account [[account_no]] has been received successfully.\nOutstanding Balance: ₹[[remaining_balance]].\n\nPlease check your EMI Schedule here: [[public_link]]\n\nThank you!",
                 'template_id' => 'DLT_PAY_RECV_SMS_ID',
                 'status' => 1
             ],
             [
                 'identifier' => 'payment_received_whatsapp',
                 'name' => 'Payment Received WhatsApp (Redirect)',
-                'sms_body' => "Dear [[client_name]],\nYour [[payment_type]] payment of ₹[[amount_paid]] towards Shanmuga Finance Loan Account [[account_no]] has been received successfully.\nOutstanding Balance: ₹[[remaining_balance]].\n\nPlease check your EMI Schedule here: [[public_link]]\n\nThank you!",
+                'sms_body' => "Dear [[client_name]],\nYour [[payment_type]] payment of ₹[[amount_paid]] towards [[company_name]] Loan Account [[account_no]] has been received successfully.\nOutstanding Balance: ₹[[remaining_balance]].\n\nPlease check your EMI Schedule here: [[public_link]]\n\nThank you!",
                 'template_id' => 'DLT_PAY_RECV_WA_ID',
+                'status' => 1
+            ],
+            [
+                'identifier' => 'chit_payment_received_sms',
+                'name' => 'Chit Payment Received SMS (Redirect)',
+                'sms_body' => "Dear [[client_name]],\nYour Chit Payment of ₹[[amount_paid]] towards Chit Group [[group_name]] (Month [[month_number]]) has been received successfully.\nRemaining Balance: ₹[[remaining_balance]].\n\nPlease check your Chit Schedule here: [[public_link]]\n\nThank you!",
+                'template_id' => 'DLT_CHIT_PAY_RECV_SMS_ID',
+                'status' => 1
+            ],
+            [
+                'identifier' => 'chit_payment_received_whatsapp',
+                'name' => 'Chit Payment Received WhatsApp (Redirect)',
+                'sms_body' => "Dear [[client_name]],\nYour Chit Payment of ₹[[amount_paid]] towards Chit Group [[group_name]] (Month [[month_number]]) has been received successfully.\nRemaining Balance: ₹[[remaining_balance]].\n\nPlease check your Chit Schedule here: [[public_link]]\n\nThank you!",
+                'template_id' => 'DLT_CHIT_PAY_RECV_WA_ID',
                 'status' => 1
             ],
         ];

@@ -18,7 +18,8 @@ document.addEventListener('DOMContentLoaded', function (e) {
     currentTheme,
     chartBgColor;
 
-  if (isDarkStyle) {
+  const isDark = (typeof isDarkStyle !== 'undefined' && isDarkStyle) || (window.isDarkStyle || false);
+  if (isDark) {
     heatMap1 = '#333457';
     heatMap2 = '#3c3e75';
     heatMap3 = '#484b9b';

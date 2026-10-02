@@ -25,7 +25,7 @@
   const baseUrl = "{{ url('/') }}/";
   
   @if(!$isAgent)
-  $(document).ready(function() {
+  document.addEventListener('DOMContentLoaded', function() {
     // Initialize DataTables
     const dt_assignments = $('#assignmentsTable').DataTable({
       ajax: {

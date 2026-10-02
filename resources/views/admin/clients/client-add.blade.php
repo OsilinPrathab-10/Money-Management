@@ -312,7 +312,166 @@
   }
 
   function validateStep(step) {
-    return true;
+    const stepEl = document.getElementById('step' + step);
+    if (!stepEl) return true;
+    
+    // Enforce OTP/Verification on Step 2 (Identity & Banking — all mandatory)
+    if (step === 2) {
+      const aadharInput = document.getElementById('aadhar_number');
+      if (!aadharInput || !aadharInput.value.trim() || !/^[0-9]{12}$/.test(aadharInput.value.trim())) {
+         aadharInput?.classList.add('is-invalid');
+         Swal.fire({
+            icon: 'error',
+            title: 'Aadhaar Required',
+            text: 'Aadhaar number must be exactly 12 digits.',
+            confirmButtonColor: '#666cff'
+         });
+         return false;
+      }
+
+      const panInput = document.getElementById('pan_number');
+      if (!panInput || !panInput.value.trim() || !/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/.test(panInput.value.trim())) {
+         panInput?.classList.add('is-invalid');
+         Swal.fire({
+            icon: 'error',
+            title: 'Invalid PAN',
+            text: 'PAN number is mandatory and must match the standard format (e.g. ABCDE1234F).',
+            confirmButtonColor: '#666cff'
+         });
+         return false;
+      }
+
+      const accountInput = document.querySelector('#clientWizardForm input[name="account_number"]');
+      const ifscInput = document.querySelector('#clientWizardForm input[name="ifsc_code"]');
+      const accountTypeSelect = document.querySelector('#clientWizardForm select[name="account_type"]');
+      const holderInput = document.querySelector('#clientWizardForm input[name="account_holder"]');
+      const bankNameInput = document.querySelector('#clientWizardForm input[name="bank_name"]');
+      const branchInput = document.querySelector('#clientWizardForm input[name="branch_name"]');
+
+      const rawAccountVal = accountInput ? accountInput.value.trim() : '';
+      const cleanAccountVal = rawAccountVal.replace(/\s+/g, '');
+      if (!cleanAccountVal || !/^[0-9]+$/.test(cleanAccountVal)) {
+         accountInput?.classList.add('is-invalid');
+         Swal.fire({
+            icon: 'error',
+            title: 'Invalid Account Number',
+            text: 'Bank account number is mandatory and must contain only numbers.',
+            confirmButtonColor: '#666cff'
+         });
+         return false;
+      }
+
+      if (!ifscInput?.value.trim() || !/^[A-Z]{4}0[A-Z0-9]{6}$/.test(ifscInput.value.trim())) {
+         ifscInput?.classList.add('is-invalid');
+         Swal.fire({
+            icon: 'error',
+            title: 'Invalid IFSC Code',
+            text: 'IFSC Code is mandatory and must be 11 characters (e.g., HDFC0001234).',
+            confirmButtonColor: '#666cff'
+         });
+         return false;
+      }
+
+      if (!accountTypeSelect?.value) {
+         accountTypeSelect?.classList.add('is-invalid');
+         Swal.fire({
+            icon: 'error',
+            title: 'Account Type Required',
+            text: 'Please select the bank account type.',
+            confirmButtonColor: '#666cff'
+         });
+         return false;
+      }
+
+      if (!branchInput?.value.trim()) {
+         branchInput?.classList.add('is-invalid');
+         Swal.fire({
+            icon: 'error',
+            title: 'Branch Required',
+            text: 'Please enter the bank branch name manually (bank API does not return branch).',
+            confirmButtonColor: '#666cff'
+         });
+         return false;
+      }
+
+
+    }
+
+    // Find all required fields in this step
+    const requiredInputs = Array.from(stepEl.querySelectorAll('[required]'));
+    
+    let isValid = true;
+    let errorMessages = [];
+    
+    requiredInputs.forEach(input => {
+      input.classList.remove('is-invalid');
+      if (input.tagName === 'SELECT' && $(input).data('select2')) {
+        $(input).next('.select2-container').find('.select2-selection').removeClass('is-invalid');
+      }
+      
+      if (!input.value.trim()) {
+        input.classList.add('is-invalid');
+        if (input.tagName === 'SELECT' && $(input).data('select2')) {
+          $(input).next('.select2-container').find('.select2-selection').addClass('is-invalid');
+        }
+        isValid = false;
+        
+        let labelText = '';
+        const label = input.closest('.col-md-6, .col-md-4, .col-12, .p-3')?.querySelector('.form-label');
+        if (label) {
+          labelText = label.innerText.replace('*', '').trim();
+        } else {
+          labelText = input.placeholder || input.name;
+        }
+        errorMessages.push(`${labelText} is mandatory.`);
+      } else {
+        // Format checks if filled
+        if (input.name === 'phone' && !/^[0-9]{10}$/.test(input.value)) {
+          input.classList.add('is-invalid');
+          isValid = false;
+          errorMessages.push('Phone number must be exactly 10 digits.');
+        }
+        if (input.name === 'aadhar_number' && !/^[0-9]{12}$/.test(input.value)) {
+          input.classList.add('is-invalid');
+          isValid = false;
+          errorMessages.push('Aadhar number must be exactly 12 digits.');
+        }
+      }
+    });
+    
+    // Validate non-required fields if filled
+    const otherInputs = Array.from(stepEl.querySelectorAll('input:not([required]), select:not([required]), textarea:not([required])'));
+    otherInputs.forEach(input => {
+      if (input.value.trim()) {
+        if (input.name === 'pan_number' && !/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/.test(input.value)) {
+          input.classList.add('is-invalid');
+          isValid = false;
+          errorMessages.push('PAN Number must be in format ABCDE1234F.');
+        }
+        if (input.name === 'ifsc_code' && !/^[A-Z]{4}0[A-Z0-9]{6}$/.test(input.value)) {
+          input.classList.add('is-invalid');
+          isValid = false;
+          errorMessages.push('IFSC Code must be 11 characters (e.g. HDFC0001234).');
+        }
+      }
+    });
+    
+    if (!isValid) {
+      let errorHtml = '<ul class="text-start mt-3 mb-0" style="font-size: 0.85rem; list-style-type: none; padding-left: 0;">';
+      errorMessages.forEach(err => {
+         errorHtml += `<li class="text-danger mb-1"><i class="ri-error-warning-line me-1"></i> ${err}</li>`;
+      });
+      errorHtml += '</ul>';
+
+      Swal.fire({ 
+         icon: 'error', 
+         title: 'Validation Failed', 
+         html: errorHtml,
+         confirmButtonColor: '#666cff'
+      });
+    }
+    
+    return isValid;
   }
   /*
   function old_validateStep(step) {
@@ -439,75 +598,202 @@
     window.scrollTo(0, 0);
   }
 
+  async function compressImageFile(file, maxSize = 1600, quality = 0.72) {
+    if (!file || !file.type || !file.type.startsWith('image/') || file.size <= 400 * 1024) {
+      return file;
+    }
+
+    const dataUrl = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+
+    const img = await new Promise((resolve, reject) => {
+      const image = new Image();
+      image.onload = () => resolve(image);
+      image.onerror = () => reject(new Error('Unable to read image'));
+      image.src = dataUrl;
+    });
+
+    const scale = Math.min(1, maxSize / Math.max(img.width, img.height));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(img.width * scale));
+    canvas.height = Math.max(1, Math.round(img.height * scale));
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', quality));
+    if (!blob) {
+      return file;
+    }
+
+    const baseName = (file.name || 'photo').replace(/\.[^.]+$/, '');
+    return new File([blob], baseName + '.jpg', { type: 'image/jpeg', lastModified: Date.now() });
+  }
+
+  async function buildRegistrationFormData(form) {
+    const formData = new FormData(form);
+    const imageFields = [
+      'selfie_photo',
+      'aadhar_photo_front',
+      'aadhar_photo_back',
+      'aadhar_photo',
+      'pan_photo',
+      'payslip',
+      'business_document'
+    ];
+
+    for (const field of imageFields) {
+      const original = formData.get(field);
+      if (!(original instanceof File) || original.size === 0) {
+        continue;
+      }
+      try {
+        formData.set(field, await compressImageFile(original));
+      } catch (e) {
+        console.warn('Image compress skipped for', field, e);
+      }
+    }
+
+    return formData;
+  }
+
+  function registrationStoreUrl(form) {
+    const currentPath = window.location.pathname.replace(/\/+$/, '');
+    if (currentPath.endsWith('/client-management/add')) {
+      return currentPath.replace(/\/add$/, '/store');
+    }
+
+    const raw = form.getAttribute('action') || form.action;
+    try {
+      const parsed = new URL(raw, window.location.href);
+      return parsed.pathname + parsed.search;
+    } catch (e) {
+      return raw;
+    }
+  }
+
+  function csrfToken(form) {
+    return form.querySelector('input[name="_token"]')?.value
+      || document.querySelector('meta[name="csrf-token"]')?.getAttribute('content')
+      || '';
+  }
+
+  function messageFromFailedResponse(status, raw, parsed) {
+    if (parsed?.message) {
+      return parsed.message;
+    }
+    if (status === 403) {
+      return 'The server blocked this registration (403). Please try again with smaller photos (under 2 MB each).';
+    }
+    if (status === 413) {
+      return 'Uploaded files are too large. Please use smaller photos and try again.';
+    }
+    if (status === 419) {
+      return 'Your session expired. Please refresh the page and try again.';
+    }
+    if (status === 401) {
+      return 'Your session has expired. Please refresh the page and login again.';
+    }
+    if (typeof raw === 'string' && raw.trim().startsWith('<')) {
+      return 'The server returned an error page instead of JSON. Please refresh and try again.';
+    }
+    return 'Something went wrong during registration.';
+  }
+
+  async function parseJsonResponse(response) {
+    const raw = await response.text();
+    if (!raw) {
+      return { parsed: {}, raw: '' };
+    }
+    try {
+      return { parsed: JSON.parse(raw), raw };
+    } catch (e) {
+      return { parsed: null, raw };
+    }
+  }
+
   async function submitForm() {
     const form = document.getElementById('clientWizardForm');
-    const formData = new FormData(form);
     const submitBtn = document.getElementById('nextBtn');
     const originalBtnText = submitBtn.innerText;
 
-    // Show loading state
     submitBtn.disabled = true;
     submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span> Processing...';
 
     try {
-      const response = await fetch(form.action, {
+      const formData = await buildRegistrationFormData(form);
+      const response = await fetch(registrationStoreUrl(form), {
         method: 'POST',
+        credentials: 'same-origin',
         headers: {
-          'X-CSRF-TOKEN': document.querySelector('input[name="_token"]').value,
-          'Accept': 'application/json'
+          'X-CSRF-TOKEN': csrfToken(form),
+          'Accept': 'application/json',
+          'X-Requested-With': 'XMLHttpRequest',
+          'ngrok-skip-browser-warning': '1'
         },
         body: formData
       });
 
-      const result = await response.json();
+      const { parsed, raw } = await parseJsonResponse(response);
 
-      if (response.ok && result.success) {
+      if (!parsed) {
+        throw new Error(messageFromFailedResponse(response.status, raw, null));
+      }
+
+      if (response.ok && parsed.success) {
         Swal.fire({
           icon: 'success',
           title: 'Registration Successful!',
-          text: result.message || 'Client has been registered and moved to KYC verification.',
+          text: parsed.message || 'Client has been registered and moved to KYC verification.',
           confirmButtonColor: '#666cff',
           timer: 3000,
           timerProgressBar: true
         }).then(() => {
-          window.location.href = "{{ url('client-management') }}";
+          window.location.href = "{{ \App\Helpers\Helpers::appWebBasePath() }}client-management";
         });
-      } else {
-        // Handle Validation Errors or Server Errors
-        let errorMessage = result.message || 'Something went wrong during registration.';
-        
-        if (result.errors) {
-          let errorList = '<ul class="text-start mt-3 mb-0" style="font-size: 0.85rem; list-style-type: none; padding-left: 0;">';
-          Object.values(result.errors).forEach(errArray => {
-             errArray.forEach(err => {
-                errorList += `<li class="text-danger mb-1"><i class="ri-error-warning-line me-1"></i> ${err}</li>`;
-             });
-          });
-          errorList += '</ul>';
-          errorMessage = errorList;
-        }
-
-        Swal.fire({
-          icon: 'error',
-          title: 'Registration Failed',
-          html: errorMessage,
-          confirmButtonColor: '#666cff'
-        });
-        submitBtn.disabled = false;
-        submitBtn.innerText = originalBtnText;
+        return;
       }
+
+      let errorMessage = messageFromFailedResponse(response.status, raw, parsed);
+
+      if (parsed.errors) {
+        let errorList = '<ul class="text-start mt-3 mb-0" style="font-size: 0.85rem; list-style-type: none; padding-left: 0;">';
+        Object.values(parsed.errors).forEach(errArray => {
+          (Array.isArray(errArray) ? errArray : [errArray]).forEach(err => {
+            errorList += `<li class="text-danger mb-1"><i class="ri-error-warning-line me-1"></i> ${err}</li>`;
+          });
+        });
+        errorList += '</ul>';
+        errorMessage = errorList;
+      }
+
+      Swal.fire({
+        icon: 'error',
+        title: 'Registration Failed',
+        html: errorMessage,
+        confirmButtonColor: '#666cff'
+      });
+      submitBtn.disabled = false;
+      submitBtn.innerText = originalBtnText;
     } catch (error) {
       console.error('Submission error:', error);
       Swal.fire({
         icon: 'error',
-        title: 'Network Error',
-        text: 'Unable to connect to the server. Please check your connection and try again.',
+        title: 'Registration Failed',
+        text: error?.message || 'Unable to connect to the server. Please check your connection and try again.',
         confirmButtonColor: '#666cff'
       });
       submitBtn.disabled = false;
       submitBtn.innerText = originalBtnText;
     }
   }
+
+  window.showStep = showStep;
+  window.nextPrev = nextPrev;
+  window.submitForm = submitForm;
 
   document.addEventListener('DOMContentLoaded', function() {
     window.showStep(1);
@@ -537,9 +823,6 @@
             businessFields.style.display = 'none';
             salariedInputs.forEach(input => {
                 input.removeAttribute('disabled');
-                if (input.name === 'company_name' || input.name === 'monthly_salary') {
-                    input.setAttribute('required', 'required');
-                }
             });
             businessInputs.forEach(input => {
                 input.setAttribute('disabled', 'disabled');
@@ -575,7 +858,7 @@
     toggleEmp();
 
     // Real-time Blur Validations
-    const panInput = document.querySelector('input[name="pan_number"]');
+    const panInput = document.getElementById('pan_number');
     if (panInput) {
         panInput.addEventListener('blur', function() {
             if (this.value.trim() && !/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/.test(this.value)) {
@@ -589,7 +872,7 @@
         });
     }
     
-    const ifscInput = document.querySelector('input[name="ifsc_code"]');
+    const ifscInput = document.getElementById('ifsc_code');
     if (ifscInput) {
         ifscInput.addEventListener('blur', function() {
             if (this.value.trim() && !/^[A-Z]{4}0[A-Z0-9]{6}$/.test(this.value)) {
@@ -624,7 +907,6 @@
             }
         });
     }
-
 
   });
 </script>
@@ -675,7 +957,7 @@
       
       <div class="card-body p-lg-5">
 
-        <form id="clientWizardForm" method="POST" action="{{ route('client-management-store') }}" enctype="multipart/form-data">
+        <form id="clientWizardForm" method="POST" action="{{ \App\Helpers\Helpers::appWebBasePath() }}client-management/store" enctype="multipart/form-data">
           @csrf
           
           <!-- STEP 1: PERSONAL DETAILS -->
@@ -689,30 +971,37 @@
               <div class="col-md-6">
                 <label class="form-label fw-bold">Full Name (As per Aadhar) <span class="text-danger">*</span> </label>
                 <div class="input-group input-group-merge input-group-custom">
-                  <span class="input-group-text bg-light border-end-0"><i class="ri-user-smile-line text-primary"></i></span>
-                  <input type="text" name="name" class="form-control border-start-0 ps-0" placeholder="Enter Full Name" oninput="this.value = this.value.replace(/[^a-zA-Z0-9\s]/g, '')" required>
+                  <span class="input-group-text"><i class="ri-user-smile-line text-primary"></i></span>
+                  <input type="text" name="name" class="form-control" placeholder="Enter Full Name" oninput="this.value = this.value.replace(/[^a-zA-Z0-9\s]/g, '')" required>
                 </div>
               </div>
               <div class="col-md-6">
+                <label class="form-label fw-bold">Nickname</label>
+                <div class="input-group input-group-merge input-group-custom">
+                  <span class="input-group-text"><i class="ri-user-heart-line text-primary"></i></span>
+                  <input type="text" name="nickname" class="form-control" placeholder="Enter Nickname (Optional)" maxlength="255">
+                </div>
+              </div>
+              <div class="col-md-4">
                 <label class="form-label fw-bold">Phone Number <span class="text-danger">*</span> </label>
                 <div class="input-group input-group-merge input-group-custom">
-                  <span class="input-group-text bg-light border-end-0"><i class="ri-phone-line text-primary"></i></span>
-                  <input type="text" name="phone" id="phone" class="form-control border-start-0 ps-0" placeholder="10 Digit Mobile" maxlength="10" oninput="this.value = this.value.replace(/[^0-9]/g, '')" required>
+                  <span class="input-group-text"><i class="ri-phone-line text-primary"></i></span>
+                  <input type="text" name="phone" id="phone" class="form-control" placeholder="10 Digit Mobile" maxlength="10" oninput="this.value = this.value.replace(/[^0-9]/g, '')" required>
                 </div>
                 <div id="phone-feedback" class="invalid-feedback">Please enter exactly 10 digits.</div>
               </div>
-              <div class="col-md-6">
-                <label class="form-label fw-bold">Email Address </label>
-                <div class="input-group input-group-merge input-group-custom">
-                  <span class="input-group-text bg-light border-end-0"><i class="ri-mail-line text-primary"></i></span>
-                  <input type="email" name="email" class="form-control border-start-0 ps-0" placeholder="example@email.com" pattern="[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$" title="Please enter a valid email address">
-                </div>
-              </div>
-              <div class="col-md-6">
+              <div class="col-md-4">
                 <label class="form-label fw-bold">Alternate Phone</label>
                 <div class="input-group input-group-merge input-group-custom">
-                  <span class="input-group-text bg-light border-end-0"><i class="ri-smartphone-line text-primary"></i></span>
-                  <input type="text" name="alternate_phone" class="form-control border-start-0 ps-0" placeholder="Optional 10 Digit" maxlength="10" oninput="this.value = this.value.replace(/[^0-9]/g, '')">
+                  <span class="input-group-text"><i class="ri-smartphone-line text-primary"></i></span>
+                  <input type="text" name="alternate_phone" class="form-control" placeholder="Optional 10 Digit" maxlength="10" oninput="this.value = this.value.replace(/[^0-9]/g, '')">
+                </div>
+              </div>
+              <div class="col-md-4">
+                <label class="form-label fw-bold">Email Address </label>
+                <div class="input-group input-group-merge input-group-custom">
+                  <span class="input-group-text"><i class="ri-mail-line text-primary"></i></span>
+                  <input type="email" name="email" class="form-control" placeholder="example@email.com" pattern="[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$" title="Please enter a valid email address">
                 </div>
               </div>
               
@@ -743,8 +1032,8 @@
               <div class="col-md-12">
                 <label class="form-label fw-bold">Select Zone/Area <span class="text-danger">*</span></label>
                 <div class="input-group input-group-merge input-group-custom">
-                  <span class="input-group-text bg-light border-end-0"><i class="ri-map-pin-range-line text-primary"></i></span>
-                  <select name="location_id" id="location_id" class="form-select border-start-0 ps-0" required>
+                  <span class="input-group-text"><i class="ri-map-pin-range-line text-primary"></i></span>
+                  <select name="location_id" id="location_id" class="form-select" required>
                     <option value="">Search & Select Zone...</option>
                     @foreach($locations as $loc)
                       <option value="{{ $loc->id }}" 
@@ -782,25 +1071,25 @@
           <div class="wizard-step" id="step2">
             <div class="form-section-title">
               <i class="ri-bank-card-line"></i>
-              Identity & Banking Details
+              Identity & Banking Details <span class="text-danger">*</span>
             </div>
             
             <div class="row g-4">
               <div class="col-md-6">
-                <div class="p-3 border rounded-3 bg-light bg-opacity-10">
-                   <label class="form-label fw-bold small text-uppercase mb-2">Aadhar Verification </label>
+                <div class="p-3 border rounded-3 bg-light bg-opacity-10 h-100 d-flex flex-column justify-content-center">
+                   <label class="form-label fw-bold small text-uppercase mb-2">Aadhar Number <span class="text-danger">*</span></label>
                    <div class="input-group input-group-merge input-group-custom">
                       <span class="input-group-text"><i class="ri-fingerprint-line text-primary"></i></span>
-                      <input type="text" name="aadhar_number" class="form-control" placeholder="12 Digit Aadhar" maxlength="12" oninput="this.value = this.value.replace(/[^0-9]/g, '')">
+                      <input type="text" name="aadhar_number" id="aadhar_number" class="form-control" placeholder="12 Digit Aadhar" maxlength="12" oninput="this.value = this.value.replace(/[^0-9]/g, '')" required>
                    </div>
                 </div>
               </div>
               <div class="col-md-6">
-                <div class="p-3 border rounded-3 bg-light bg-opacity-10">
-                   <label class="form-label fw-bold small text-uppercase mb-2">PAN Verification </label>
+                <div class="p-3 border rounded-3 bg-light bg-opacity-10 h-100 d-flex flex-column justify-content-center">
+                   <label class="form-label fw-bold small text-uppercase mb-2">PAN Number <span class="text-danger">*</span></label>
                    <div class="input-group input-group-merge input-group-custom">
                       <span class="input-group-text"><i class="ri-id-card-line text-primary"></i></span>
-                      <input type="text" name="pan_number" class="form-control" placeholder="ABCDE1234F" maxlength="10" oninput="this.value = this.value.toUpperCase().replace(/[^A-Z0-9]/g, '')" pattern="[A-Z]{5}[0-9]{4}[A-Z]{1}$" title="Invalid PAN format (e.g. ABCDE1234F)">
+                      <input type="text" name="pan_number" id="pan_number" class="form-control" placeholder="ABCDE1234F" maxlength="10" oninput="this.value = this.value.toUpperCase().replace(/[^A-Z0-9]/g, '')" pattern="[A-Z]{5}[0-9]{4}[A-Z]{1}$" title="Invalid PAN format (e.g. ABCDE1234F)" required>
                    </div>
                 </div>
               </div>
@@ -811,25 +1100,30 @@
                 </div>
               </div>
 
-              <div class="col-md-6">
-                <label class="form-label fw-bold">Account Holder Name </label>
+              <div class="col-md-6 bank-field-group">
+                <label class="form-label fw-bold">Account Holder Name</label>
                 <input type="text" name="account_holder" class="form-control input-group-custom" placeholder="As per Bank Passbook" oninput="this.value = this.value.replace(/[^a-zA-Z\s]/g, '')">
               </div>
-              <div class="col-md-6">
-                <label class="form-label fw-bold">Account Number </label>
-                <input type="text" name="account_number" class="form-control input-group-custom" placeholder="Numbers only" oninput="this.value = this.value.replace(/[^0-9]/g, '')" minlength="9" maxlength="18">
+              <div class="col-md-6 bank-field-group">
+                <label class="form-label fw-bold">Account Number <span class="text-danger">*</span></label>
+                <input type="text" name="account_number" id="account_number" class="form-control input-group-custom" placeholder="Numbers only" oninput="this.value = this.value.replace(/[^0-9]/g, '')" required>
               </div>
-              <div class="col-md-4">
-                <label class="form-label fw-bold">Bank Name </label>
-                <input type="text" name="bank_name" class="form-control input-group-custom" placeholder="Name of Bank" oninput="this.value = this.value.replace(/[^a-zA-Z\s]/g, '')">
+              <div class="col-md-3 bank-field-group">
+                <label class="form-label fw-bold">Bank Name  </label>
+                <input type="text" name="bank_name" class="form-control input-group-custom" placeholder="Name of Bank" oninput="this.value = this.value.replace(/[^a-zA-Z\s]/g, '')" >
               </div>
-              <div class="col-md-4">
-                <label class="form-label fw-bold">IFSC Code </label>
-                      <input type="text" name="ifsc_code" class="form-control input-group-custom" placeholder="e.g. HDFC0001234" maxlength="11" oninput="this.value = this.value.toUpperCase().replace(/[^A-Z0-9]/g, '')" pattern="^[A-Z]{4}0[A-Z0-9]{6}$" title="Invalid IFSC Code (e.g. HDFC0001234)">
+              <div class="col-md-3 bank-field-group">
+                <label class="form-label fw-bold">IFSC Code <span class="text-danger">*</span></label>
+                <input type="text" name="ifsc_code" id="ifsc_code" class="form-control input-group-custom" placeholder="e.g. HDFC0001234" maxlength="11" oninput="this.value = this.value.toUpperCase().replace(/[^A-Z0-9]/g, '')" pattern="^[A-Z]{4}0[A-Z0-9]{6}$" title="Invalid IFSC Code (e.g. HDFC0001234)" required>
               </div>
-              <div class="col-md-4">
-                <label class="form-label fw-bold">Account Type </label>
-                <select name="account_type" class="form-select input-group-custom">
+              <div class="col-md-3 bank-field-group">
+                <label class="form-label fw-bold">Branch Name <span class="text-danger">*</span></label>
+                <input type="text" name="branch_name" class="form-control input-group-custom" placeholder="Enter branch manually" required>
+                <small class="text-muted">Branch is not returned by bank API — enter it manually.</small>
+              </div>
+              <div class="col-md-3 bank-field-group">
+                <label class="form-label fw-bold">Account Type <span class="text-danger">*</span></label>
+                <select name="account_type" class="form-select input-group-custom" required>
                   <option value="" disabled selected>Select Account Type</option>
                   <option value="savings">Savings Account</option>
                   <option value="current">Current Account</option>
@@ -858,6 +1152,7 @@
                 <label class="form-label fw-bold">Relationship </label>
                 <select name="nominee1_relationship" class="form-select input-group-custom">
                   <option value="" disabled selected>Select Relationship</option>
+                  <option value="husband">Husband</option>
                   <option value="spouse">Spouse</option>
                   <option value="father">Father</option>
                   <option value="mother">Mother</option>
@@ -886,6 +1181,7 @@
                 <label class="form-label">Relationship</label>
                 <select name="nominee2_relationship" class="form-select input-group-custom">
                   <option value="">Select</option>
+                  <option value="husband">Husband</option>
                   <option value="spouse">Spouse</option>
                   <option value="father">Father</option>
                   <option value="mother">Mother</option>
@@ -918,7 +1214,7 @@
                        <option value="Friend">Friend</option>
                        <option value="Relative">Relative</option>
                        <option value="Colleague">Colleague</option>
-                       <option value="Neighbor">Neighbour</option>
+                       <option value="Neighbor">Neighbor</option>
                        <option value="Other">Other</option>
                     </select>
                   </div>
@@ -1037,20 +1333,20 @@
               
               <div class="col-md-4">
                 <div class="p-3 border rounded-3 text-center bg-light bg-opacity-10">
-                  <label class="form-label fw-bold d-block mb-3">Selfie Photo </label>
-                  <input type="file" name="selfie_photo" class="form-control form-control-sm">
+                  <label class="form-label fw-bold d-block mb-3">Selfie Photo <span class="text-danger">*</span></label>
+                  <input type="file" name="selfie_photo" class="form-control form-control-sm" required>
                 </div>
               </div>
               <div class="col-md-4">
                 <div class="p-3 border rounded-3 text-center bg-light bg-opacity-10">
-                  <label class="form-label fw-bold d-block mb-3">Aadhar Front </label>
-                  <input type="file" name="aadhar_photo_front" class="form-control form-control-sm">
+                  <label class="form-label fw-bold d-block mb-3">Aadhar Front <span class="text-danger">*</span></label>
+                  <input type="file" name="aadhar_photo_front" class="form-control form-control-sm" required>
                 </div>
               </div>
               <div class="col-md-4">
                 <div class="p-3 border rounded-3 text-center bg-light bg-opacity-10">
-                  <label class="form-label fw-bold d-block mb-3">Aadhar Back </label>
-                  <input type="file" name="aadhar_photo_back" class="form-control form-control-sm">
+                  <label class="form-label fw-bold d-block mb-3">Aadhar Back <span class="text-danger">*</span></label>
+                  <input type="file" name="aadhar_photo_back" class="form-control form-control-sm" required>
                 </div>
               </div>
               <div class="col-md-6">

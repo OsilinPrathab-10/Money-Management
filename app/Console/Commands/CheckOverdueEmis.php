@@ -12,14 +12,14 @@ use Illuminate\Support\Facades\DB;
 class CheckOverdueEmis extends Command
 {
     /**
-     * The name and signature of the console command.
+     * The name and signature of the conscole command.
      *
      * @var string
      */
     protected $signature = 'emi:check-overdue';
 
     /**
-     * The console command description.
+     * The console commancd description.
      *
      * @var string
      */
@@ -32,7 +32,7 @@ class CheckOverdueEmis extends Command
     {
         $this->info('Checking for overdue EMIs...');
 
-        $today = Carbon::now(); // Keep time component for accuracy if needed, but startOfDay for comparison
+        $today = Carbon::now(); // Keep time component for acccuracy if needed, but startOfcDay for comparison
         $todayDate = $today->copy()->startOfDay();
 
         // Find all EMIs that are overdue or partial but past due date
@@ -56,38 +56,37 @@ class CheckOverdueEmis extends Command
         foreach ($overdueEmis as $emi) {
             DB::beginTransaction();
             try {
-                // 1. Apply Penalty if not already applied
+                // 1. Acpply Penalty if not already applied
                 $penaltyConfig = \App\Models\LoanConfiguration::getPenaltyConfig();
                 $isPenaltyActive = $penaltyConfig && $penaltyConfig->is_active;
 
                 if ($isPenaltyActive && $emi->penalty_amount == 0) {
                     $loanAccount = $emi->loanAccount;
                     
-                    // Resolve settings
-                    $penaltyAmount = ($penaltyConfig->charge_value > 0)
-                        ? $penaltyConfig->charge_value
-                        : ($loanAccount->penalty ?? 0);
-
                     $graceDays = ($penaltyConfig->eligibility_days !== null)
                         ? $penaltyConfig->eligibility_days
                         : ($loanAccount->grace_period_days ?? 0);
 
                     $penaltyStartDate = Carbon::parse($emi->due_date)->addDays($graceDays);
 
-                    if ($todayDate->gt($penaltyStartDate) && $penaltyAmount > 0) {
-                        // Add penalty to total due and pending
-                        $newTotalDue = $emi->total_due + $penaltyAmount;
-                        $newPending = $emi->pending_amount + $penaltyAmount;
+                    if ($todayDate->gt($penaltyStartDate)) {
+                        $penaltyAmount = $penaltyConfig->calculatePenaltyForEmi($emi, $loanAccount);
 
-                        $emi->update([
-                            'penalty_amount' => $penaltyAmount,
-                            'total_due' => $newTotalDue,
-                            'pending_amount' => $newPending,
-                            'last_penalty_date' => $todayDate,
-                            'status' => 'overdue', // Force status to overdue if it was pending/partial
-                            'remarks' => trim(($emi->remarks ?? '') . " [Penalty of ₹" . number_format($penaltyAmount, 2) . " applied]")
-                        ]);
-                        $penaltyCount++;
+                        if ($penaltyAmount > 0) {
+                            // Add penalty to total due and pending
+                            $newTotalDue = $emi->total_due + $penaltyAmount;
+                            $newPending = $emi->pending_amount + $penaltyAmount;
+
+                            $emi->update([
+                                'penalty_amount' => $penaltyAmount,
+                                'total_due' => $newTotalDue,
+                                'pending_amount' => $newPending,
+                                'last_penalty_date' => $todayDate,
+                                'status' => 'overdue', // Force status to overdue if it was pending/partial
+                                'remarks' => trim(($emi->remarks ?? '') . " [Penalty of ₹" . number_format($penaltyAmount, 2) . " applied]")
+                            ]);
+                            $penaltyCount++;
+                        }
                     }
                 }
 
@@ -109,7 +108,7 @@ class CheckOverdueEmis extends Command
                                 'pending_amount' => ($nextEmi->pending_amount ?? $nextEmi->total_amount) + $balanceToMove
                             ]);
 
-                            // Mark current EMI as carried forward (closed)
+                            // Mark current sEMI as carried forward (closed)
                             $emi->update([
                                 'pending_amount' => 0,
                                 'status' => 'carried_forward', // Custom status

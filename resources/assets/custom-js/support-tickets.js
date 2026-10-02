@@ -7,7 +7,8 @@
 $(function () {
   let borderColor, bodyBg, headingColor;
 
-  if (isDarkStyle) {
+  const isDark = (typeof isDarkStyle !== 'undefined' && isDarkStyle) || (window.isDarkStyle || false);
+  if (isDark && config.colors_dark) {
     borderColor = config.colors_dark.borderColor;
     bodyBg = config.colors_dark.bodyBg;
     headingColor = config.colors_dark.headingColor;

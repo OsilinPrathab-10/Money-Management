@@ -2,139 +2,214 @@
 
 namespace App\Http\Controllers;
 
-use Illuminate\Http\Request;
-use App\Models\UserDevice;
-use App\Services\PushNotificationService;
+use App\Models\Agent;
 use App\Models\ApplicationInfo;
 use App\Models\Appearance;
+use App\Models\Client;
+use App\Services\AppNotificationService;
+use App\Services\PushNotificationService;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Validation\ValidationException;
 
 class AdminBroadCastController extends Controller
 {
-    protected PushNotificationService $fcm;
+    public function __construct(
+        protected PushNotificationService $fcm,
+        protected AppNotificationService $notifications
+    ) {}
 
-    public function __construct(PushNotificationService $fcm)
-    {
-        $this->fcm = $fcm;
-    }
-
-    // Show admin form
     public function create()
     {
         $appInfo = ApplicationInfo::first();
         $appearance = Appearance::where('type', 'app')->first();
-        return view('admin.notifications.send', compact('appInfo', 'appearance'));
+        $clients = Client::query()
+            ->orderBy('client_name')
+            ->get(['id', 'client_name', 'client_phone']);
+        $agents = Agent::query()
+            ->orderBy('agent_name')
+            ->get(['id', 'agent_name', 'agent_phone', 'agent_code']);
+
+        return view('admin.notifications.send', compact('appInfo', 'appearance', 'clients', 'agents'));
     }
 
-    // Send notification
     public function send(Request $request)
     {
         $request->validate([
             'title' => 'required|string|max:191',
-            'body'  => 'required|string',
-            'type'  => 'required|string',
-            'target' => 'nullable|in:users,agents,all', // Target audience
+            'body' => 'required|string',
+            'type' => 'required|string',
+            'target' => 'required|in:users,agents,all',
+            'recipient_scope' => 'required|in:all,particular',
+            'client_ids' => 'nullable|array',
+            'client_ids.*' => 'integer|exists:clients,id',
+            'agent_ids' => 'nullable|array',
+            'agent_ids.*' => 'integer|exists:agents,id',
         ]);
+
+        $target = $request->input('target');
+        $scope = $request->input('recipient_scope');
+
+        if ($scope === 'particular') {
+            if ($target === 'users' && empty($request->input('client_ids'))) {
+                throw ValidationException::withMessages([
+                    'client_ids' => 'Select at least one client.',
+                ]);
+            }
+            if ($target === 'agents' && empty($request->input('agent_ids'))) {
+                throw ValidationException::withMessages([
+                    'agent_ids' => 'Select at least one agent.',
+                ]);
+            }
+            if ($target === 'all' && empty($request->input('client_ids')) && empty($request->input('agent_ids'))) {
+                throw ValidationException::withMessages([
+                    'client_ids' => 'Select at least one client or agent.',
+                ]);
+            }
+        }
 
         $payload = match ($request->type) {
             'loan_product' => ['screen' => 'loanProductList'],
             'interest_update' => ['screen' => 'interestUpdate'],
             'offer' => ['screen' => 'offerList'],
+            'disbursement' => ['screen' => 'disbursed'],
             default => ['screen' => 'home'],
         };
+        $payload['broadcast'] = '1';
+        $payload['notification_type'] = (string) $request->type;
 
-        // Filter devices based on target
-        $target = $request->target ?? 'users'; // Default to users for backward compatibility
-        
-        $devicesQuery = UserDevice::query();
-        
-        if ($target === 'users') {
-            $devicesQuery->where('user_type', 'Client');
-        } elseif ($target === 'agents') {
-            $devicesQuery->where('user_type', 'Agent');
-        }
-        // If 'all', no filter needed - sends to both users and agents
-        
-        $devices = $devicesQuery->get();
+        $clients = collect();
+        $agents = collect();
 
-        if ($devices->isEmpty()) {
-            return back()->with('error', 'No devices found to send notification!');
+        if (in_array($target, ['users', 'all'], true)) {
+            $clients = $scope === 'particular' && $request->filled('client_ids')
+                ? Client::whereIn('id', $request->input('client_ids'))->get()
+                : ($scope === 'all' ? Client::query()->get() : collect());
         }
 
-        $successCount = 0;
-        $failCount = 0;
-        $agentIds = [];
+        if (in_array($target, ['agents', 'all'], true)) {
+            $agents = $scope === 'particular' && $request->filled('agent_ids')
+                ? Agent::whereIn('id', $request->input('agent_ids'))->get()
+                : ($scope === 'all' ? Agent::query()->get() : collect());
+        }
 
-        foreach ($devices as $device) {
+        if ($clients->isEmpty() && $agents->isEmpty()) {
+            return back()->withInput()->with('error', 'No clients or agents found for the selected audience.');
+        }
 
-            // Send notification
-            $response = $this->fcm->sendPushNotification(
-                $device->device_token,
+        $clientSaved = 0;
+        $clientPush = 0;
+        $clientNoDevice = [];
+        $agentSuccess = 0;
+        $agentFail = 0;
+
+        foreach ($clients as $client) {
+            $result = $this->notifications->notifyCustomer(
+                $client,
                 $request->title,
                 $request->body,
+                $request->type,
                 $payload
             );
-
-            if ($response['success']) {
-                $successCount++;
+            if (! empty($result['saved'])) {
+                $clientSaved++;
+            }
+            if (! empty($result['push'])) {
+                $clientPush++;
             } else {
-                $failCount++;
+                $clientNoDevice[] = $client->client_name ?: ('Client #' . $client->id);
             }
-
-            // Collect agent IDs for database storage
-            if ($device->user_type === 'Agent') {
-                $agentIds[] = $device->user_id;
-            }
-
-            // Log each notification
-            Log::info('FCM Notification Sent', [
-                'device_token' => substr($device->device_token, 0, 20) . '...', // Truncate for security
-                'user_type'    => $device->user_type,
-                'title'        => $request->title,
-                'body'         => $request->body,
-                'type'         => $request->type,
-                'target'       => $target,
-                'payload'      => $payload,
-                'success'      => $response['success'],
-            ]);
         }
 
-        // Save broadcast notifications to database for agents
-        if (!empty($agentIds) && ($target === 'agents' || $target === 'all')) {
-            $agentIds = array_unique($agentIds);
-            
-            // Generate unique notification ID for this broadcast
-            $broadcastId = 'broadcast_' . uniqid() . '_' . time();
-            
-            // Get agent records from user_ids
-            $agents = \App\Models\Agent::whereIn('user_id', $agentIds)->get();
-            
-            foreach ($agents as $agent) {
-                \App\Models\AgentNotification::create([
+        foreach ($agents as $agent) {
+            try {
+                $this->notifications->notifyAgent(
+                    $agent,
+                    $request->title,
+                    $request->body,
+                    'broadcast',
+                    $payload,
+                    null,
+                    'medium'
+                );
+                $agentSuccess++;
+            } catch (\Throwable $e) {
+                $agentFail++;
+                Log::error('Broadcast agent notification failed: ' . $e->getMessage(), [
                     'agent_id' => $agent->id,
-                    'notification_type' => 'broadcast',
-                    'notification_id' => $broadcastId, // Unique ID for this broadcast
-                    'title' => $request->title,
-                    'message' => $request->body,
-                    'notification_type_label' => $request->type,
-                    'icon' => match($request->type) {
-                        'general' => 'notification',
-                        'offer' => 'gift',
-                        default => 'notification',
-                    },
-                    'priority' => 'medium',
-                    'action_data' => $payload,
                 ]);
             }
-            
-            Log::info('Broadcast notifications saved to database', [
-                'agent_count' => count($agents),
-                'type' => $request->type,
-                'broadcast_id' => $broadcastId,
-            ]);
         }
 
-        $message = "Notification sent successfully! (Success: {$successCount}, Failed: {$failCount})";
-        return back()->with('success', $message);
+        $audienceBits = [];
+        if ($clients->isNotEmpty()) {
+            $audienceBits[] = $clients->count() === 1
+                ? ($clients->first()->client_name ?: '1 client')
+                : $clients->count() . ' clients';
+        }
+        if ($agents->isNotEmpty()) {
+            $audienceBits[] = $agents->count() === 1
+                ? ($agents->first()->agent_name ?: '1 agent')
+                : $agents->count() . ' agents';
+        }
+        $audience = $audienceBits !== [] ? implode(' and ', $audienceBits) : 'selected recipients';
+
+        $adminRecord = $this->notifications->notifyAdmin(
+            'broadcast',
+            $request->title,
+            $request->body,
+            url('/admin/notifications'),
+            null,
+            'ri-megaphone-line'
+        );
+
+        Log::info('Admin broadcast notification sent', [
+            'target' => $target,
+            'scope' => $scope,
+            'type' => $request->type,
+            'clients' => $clients->count(),
+            'agents' => $agents->count(),
+            'client_saved' => $clientSaved,
+            'client_push' => $clientPush,
+            'agent_success' => $agentSuccess,
+            'agent_fail' => $agentFail,
+        ]);
+
+        $parts = [];
+        if ($clients->isNotEmpty()) {
+            $parts[] = "Sent to {$audience}. Clients: {$clientSaved} saved in the app" . ($clientPush ? ", {$clientPush} push delivered" : '');
+            if ($clientNoDevice !== []) {
+                $names = implode(', ', array_slice($clientNoDevice, 0, 5));
+                $extra = count($clientNoDevice) > 5 ? ' and others' : '';
+                $parts[] = "Phone push was not delivered for {$names}{$extra} (no FCM token on the device yet)";
+            }
+        }
+        if ($agents->isNotEmpty() && $clients->isEmpty()) {
+            $parts[] = "Agents: {$agentSuccess} sent" . ($agentFail ? ", {$agentFail} failed" : '');
+        } elseif ($agents->isNotEmpty()) {
+            $parts[] = "Agents: {$agentSuccess} sent" . ($agentFail ? ", {$agentFail} failed" : '');
+        }
+
+        $flash = $clientSaved > 0 || $agentSuccess > 0 ? 'success' : 'error';
+
+        $popup = null;
+        if ($adminRecord) {
+            $popup = [
+                'id' => $adminRecord->id,
+                'type' => $adminRecord->type,
+                'title' => $adminRecord->title,
+                'message' => $adminRecord->message,
+                'link' => $adminRecord->link,
+                'icon' => $adminRecord->icon_class,
+                'badge_color' => $adminRecord->badge_color,
+                'is_read' => false,
+                'created_at' => 'just now',
+                'created_at_formatted' => now()->format('d-m-Y h:i A'),
+            ];
+        }
+
+        return back()
+            ->with($flash, implode('. ', $parts) . '.')
+            ->with('notification_popup', $popup);
     }
 }

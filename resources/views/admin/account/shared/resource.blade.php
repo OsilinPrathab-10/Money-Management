@@ -3,7 +3,7 @@
 @section('title', $pageTitle ?? __('Accounting'))
 
 @section('content')
-<div class="container-xxl flex-grow-1 container-p-y">
+<div class="account-module">
   <div class="d-flex justify-content-between align-items-center mb-4">
     <h4 class="mb-0">{{ $pageTitle ?? __('Accounting') }}</h4>
     <a href="{{ url('/account') }}" class="btn btn-sm btn-outline-secondary">
@@ -52,14 +52,27 @@
             </div>
           @endif
 
-          @if (array_key_exists('date_from', $filters))
+          @if (array_key_exists('date_from', $filters) && array_key_exists('date_to', $filters))
+            <div class="col-12">
+              @include('partials.date-range-filter', [
+                'fromId' => 'resourceDateFrom',
+                'toId' => 'resourceDateTo',
+                'presetId' => 'resourceDatePreset',
+                'fromName' => 'date_from',
+                'toName' => 'date_to',
+                'fromValue' => request('date_from'),
+                'toValue' => request('date_to'),
+                'presetValue' => request('date_preset', 'all'),
+                'autoSubmit' => true,
+                'size' => 'sm',
+              ])
+            </div>
+          @elseif (array_key_exists('date_from', $filters))
             <div class="col-md-2">
               <label class="form-label">{{ __('From') }}</label>
               <input type="date" name="date_from" value="{{ request('date_from') }}" class="form-control">
             </div>
-          @endif
-
-          @if (array_key_exists('date_to', $filters))
+          @elseif (array_key_exists('date_to', $filters))
             <div class="col-md-2">
               <label class="form-label">{{ __('To') }}</label>
               <input type="date" name="date_to" value="{{ request('date_to') }}" class="form-control">

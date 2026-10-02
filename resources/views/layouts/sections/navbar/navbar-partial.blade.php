@@ -1,6 +1,12 @@
 @php
   use Illuminate\Support\Facades\Auth;
   use Illuminate\Support\Facades\Route;
+
+  $isClientUser = Auth::check() && method_exists(Auth::user(), 'hasRole') && Auth::user()->hasRole('Client');
+  $showStaffNotifications = Auth::check() && method_exists(Auth::user(), 'hasRole') && (
+    Auth::user()->hasRole('Admin') || Auth::user()->hasRole('Staff') || Auth::user()->hasRole('Agent')
+  );
+  $showLayoutCustomizer = ($configData['hasCustomizer'] ?? false) && Auth::check() && !$isClientUser;
 @endphp
 
 <!--  Brand demo (display only for navbar-full and hide on below xl) -->
@@ -32,7 +38,7 @@
 
 <div class="navbar-nav-right d-flex align-items-center justify-content-end" id="navbar-collapse">
 
-  @if (!isset($menuHorizontal) && !auth()->user()->hasRole('Client'))
+  @if (!isset($menuHorizontal) && !$isClientUser)
     <!-- Search -->
     <div class="navbar-nav align-items-center">
       <div class="nav-item navbar-search-wrapper mb-0">
@@ -56,59 +62,80 @@
     @endif
 
 
-    <!-- Style Switcher -->
-    <li class="nav-item dropdown me-sm-2 me-xl-0">
-      <a class="nav-link dropdown-toggle hide-arrow btn btn-icon btn-text-secondary rounded-pill" id="nav-theme"
-        href="javascript:void(0);" data-bs-toggle="dropdown">
-        <i class="icon-base ri ri-sun-line icon-22px theme-icon-active"></i>
-        <span class="d-none ms-2" id="nav-theme-text">Toggle theme</span>
-      </a>
-      <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="nav-theme-text">
-        <li>
-          <button type="button" class="dropdown-item align-items-center active" data-bs-theme-value="light"
-            aria-pressed="false">
-            <span><i class="icon-base ri ri-sun-line icon-22px me-3" data-icon="sun-line"></i>Light</span>
-          </button>
-        </li>
-        <li>
-          <button type="button" class="dropdown-item align-items-center" data-bs-theme-value="dark"
-            aria-pressed="true">
-            <span><i class="icon-base ri ri-moon-clear-line icon-22px me-3"
-                data-icon="moon-clear-line"></i>Dark</span>
-          </button>
-        </li>
-        <li>
-          <button type="button" class="dropdown-item align-items-center" data-bs-theme-value="system"
-            aria-pressed="false">
-            <span><i class="icon-base ri ri-computer-line icon-22px me-3" data-icon="computer-line"></i>System</span>
-          </button>
-        </li>
-      </ul>
-    </li>
-    <!-- / Style Switcher-->
+    @auth
+      <!-- Theme / scheme settings -->
+      <li class="nav-item dropdown me-sm-2 me-xl-0">
+        <a class="nav-link dropdown-toggle hide-arrow btn btn-icon btn-text-secondary rounded-pill"
+          id="nav-theme"
+          href="javascript:void(0);"
+          data-bs-toggle="dropdown"
+          data-bs-auto-close="outside"
+          title="{{ __('Theme & Settings') }}"
+          aria-label="{{ __('Theme & Settings') }}">
+          <i class="icon-base ri ri-settings-3-line icon-22px"></i>
+          <i class="d-none theme-icon-active ri ri-sun-line"></i>
+          <span class="d-none ms-2" id="nav-theme-text">{{ __('Theme') }}</span>
+        </a>
+        <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="nav-theme-text" style="min-width: 220px;">
+          <li class="dropdown-menu-header border-bottom mb-1">
+            <div class="dropdown-header py-2">
+              <h6 class="mb-0"><i class="ri-palette-line me-1"></i> {{ __('Color Scheme') }}</h6>
+              <small class="text-muted">{{ __('Choose your display mode') }}</small>
+            </div>
+          </li>
+          <li>
+            <button type="button" class="dropdown-item align-items-center active" data-bs-theme-value="light" aria-pressed="false">
+              <span><i class="icon-base ri ri-sun-line icon-22px me-3" data-icon="sun-line"></i>{{ __('Light') }}</span>
+            </button>
+          </li>
+          <li>
+            <button type="button" class="dropdown-item align-items-center" data-bs-theme-value="dark" aria-pressed="true">
+              <span><i class="icon-base ri ri-moon-clear-line icon-22px me-3" data-icon="moon-clear-line"></i>{{ __('Dark') }}</span>
+            </button>
+          </li>
+          <li>
+            <button type="button" class="dropdown-item align-items-center" data-bs-theme-value="system" aria-pressed="false">
+              <span><i class="icon-base ri ri-computer-line icon-22px me-3" data-icon="computer-line"></i>{{ __('System') }}</span>
+            </button>
+          </li>
+          @if ($showLayoutCustomizer)
+          <li><hr class="dropdown-divider my-1"></li>
+          <li class="dropdown-menu-header border-bottom mb-1">
+            <div class="dropdown-header py-2">
+              <h6 class="mb-0"><i class="ri-layout-grid-line me-1"></i> {{ __('Layout & Menu') }}</h6>
+              <small class="text-muted">{{ __('Sidebar, navbar, and content layout') }}</small>
+            </div>
+          </li>
+          <li>
+            <button type="button" class="dropdown-item align-items-center" id="btnOpenLayoutCustomizerFromMenu">
+              <span><i class="icon-base ri ri-equalizer-line icon-22px me-3"></i>{{ __('Customize Layout') }}</span>
+            </button>
+          </li>
+          @endif
+          @if (Auth::user()->hasRole('Admin'))
+          <li><hr class="dropdown-divider my-1"></li>
+          <li>
+            <a class="dropdown-item" href="{{ route('website-appearance') }}">
+              <i class="icon-base ri ri-brush-2-line icon-22px me-3"></i>{{ __('Appearance Settings') }}
+            </a>
+          </li>
+          @endif
+        </ul>
+      </li>
+    @endauth
 
-    <!-- Menu Color (Semi-Dark) Switcher -->
-    <li class="nav-item me-sm-2 me-xl-0 d-flex align-items-center" style="padding-right: 8px;">
-      <div class="form-check form-switch mb-0" style="min-height: auto;">
-        <input class="form-check-input cursor-pointer" type="checkbox" id="nav-menu-theme-toggle" {{ $configData['semiDark'] ? 'checked' : '' }} style="width: 2.5rem; height: 1.25rem;">
-        <label class="form-check-label text-muted small ms-2 cursor-pointer" for="nav-menu-theme-toggle" style="font-weight: 500;">Semi-Dark Menu</label>
-      </div>
+    @if ($showLayoutCustomizer)
+    <!-- Layout / menu customizer -->
+    <li class="nav-item me-sm-2 me-xl-0">
+      <button type="button"
+        class="nav-link btn btn-icon btn-text-secondary rounded-pill border-0 bg-transparent"
+        id="btnOpenLayoutCustomizer"
+        title="{{ __('Layout & Menu') }}"
+        aria-label="{{ __('Layout & Menu') }}">
+        <i class="icon-base ri ri-layout-grid-line icon-22px"></i>
+      </button>
     </li>
-    <!-- / Menu Color (Semi-Dark) Switcher -->
-
-    <script>
-    document.addEventListener('DOMContentLoaded', function() {
-      const toggle = document.getElementById('nav-menu-theme-toggle');
-      if (toggle) {
-        toggle.addEventListener('change', function() {
-          const value = this.checked ? 'true' : 'false';
-          const maxAge = 365 * 24 * 60 * 60;
-          document.cookie = `customize_semi_dark=${value}; max-age=${maxAge}; path=/;`;
-          window.location.reload();
-        });
-      }
-    });
-    </script>
+    @endif
 
     {{-- Clock and Date Widget --}}
     <li class="nav-item me-3 d-none d-lg-flex align-items-center">
@@ -238,7 +265,7 @@
         opacity: 0;
       }
     </style>
-    @if(!auth()->user()->hasRole('Client'))
+    @if ($showStaffNotifications)
     <li class="nav-item dropdown-notifications navbar-dropdown dropdown me-4 me-xl-1">
       <a class="nav-link dropdown-toggle hide-arrow btn btn-icon btn-text-secondary rounded-pill notification-bell"
         href="javascript:void(0);" data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false" id="notificationDropdown">
@@ -293,7 +320,7 @@
       <ul class="dropdown-menu dropdown-menu-end mt-3 py-2">
         <li>
           <a class="dropdown-item"
-            href="{{ Route::has('profile.show') ? route('profile.show') : url('/profile') }}">
+            href="{{ Route::has('profile.index') ? route('profile.index') : (Route::has('profile.show') ? route('profile.show') : url('/profile')) }}">
             <div class="d-flex align-items-center">
               <div class="flex-shrink-0 me-2">
                 <div class="avatar avatar-online">
@@ -319,7 +346,7 @@
         </li>
         @if (Auth::check())
           <li>
-            <a class="dropdown-item" href="{{ Auth::user()->hasRole('Client') ? route('client.profile') : url('/profile') }}">
+            <a class="dropdown-item" href="{{ Auth::user()->hasRole('Client') ? route('client.profile') : route('profile.index') }}">
               <i class="icon-base ri ri-user-3-line icon-22px me-2"></i>
               <span class="align-middle">My Profile</span>
             </a>
@@ -390,11 +417,11 @@
   </div>
 </div>
 @endpush
- 
+@endif
+
+@if ($showStaffNotifications)
 @push('modals')
-{{-- ======================================================= --}}
 {{-- Global Notification Detail Modal (shared across all pages) --}}
-{{-- ======================================================= --}}
 <div class="modal fade" id="notificationDetailModal" tabindex="-1" aria-labelledby="notificationDetailModalLabel" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered">
     <div class="modal-content">
@@ -418,14 +445,38 @@
       </div>
       <div class="modal-footer justify-content-between">
         <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Close</button>
-        <!-- <a href="#" id="notifModalGoBtn" class="btn btn-primary d-none" target="_self">
-          <i class="ri-arrow-right-circle-line me-1"></i> Go to Page
-        </a> -->
       </div>
     </div>
   </div>
 </div>
 @endpush
+@endif
+
+@if ($showLayoutCustomizer)
+@push('footer-scripts')
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  function openLayoutCustomizer(e) {
+    if (e) e.preventDefault();
+    var openBtn = document.querySelector('.template-customizer-open-btn');
+    if (openBtn) {
+      openBtn.click();
+      return;
+    }
+    var panel = document.getElementById('template-customizer');
+    if (panel) {
+      panel.classList.add('template-customizer-open');
+    }
+  }
+
+  document.getElementById('btnOpenLayoutCustomizer')?.addEventListener('click', openLayoutCustomizer);
+  document.getElementById('btnOpenLayoutCustomizerFromMenu')?.addEventListener('click', openLayoutCustomizer);
+});
+</script>
+@endpush
+@endif
+
+@if (Auth::check() && method_exists(Auth::user(), 'hasRole') && Auth::user()->hasRole('Admin'))
 @push('footer-scripts')
 <script>
 document.addEventListener('DOMContentLoaded', function () {

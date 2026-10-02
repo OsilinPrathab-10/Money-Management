@@ -27,7 +27,7 @@
         $pagePenaltyAmount = 0;
         $pageTotalRevenue = 0;
       @endphp
-      @forelse($loans as $index => $loan)
+      @forelse($items as $index => $loan)
         @php
           $pageProcessingFee += $loan->processing_fee;
           $pageDocCharges += $loan->document_charges;
@@ -41,7 +41,7 @@
           $typeLabel = $loan->loan_mode === 'interest_only' ? 'Open Loan' : 'Standard EMI';
         @endphp
         <tr>
-          <td class="text-center">{{ $loans->firstItem() + $index }}</td>
+          <td class="text-center">{{ $items->firstItem() + $index }}</td>
           <td>
             <div class="fw-semibold text-dark">{{ $loan->client->user->name ?? $loan->client->client_name ?? 'N/A' }}</div>
             <small class="text-muted">ID: {{ $loan->client->client_code ?? 'N/A' }}</small>
@@ -76,7 +76,7 @@
         </tr>
       @endforelse
     </tbody>
-    @if($loans->isNotEmpty())
+    @if($items->isNotEmpty())
       <tfoot class="table-light border-top-2">
         <tr class="fw-bold text-dark">
           <td colspan="4" class="text-end">Total (This Page):</td>
@@ -96,5 +96,5 @@
 </div>
 
 <div class="mt-4">
-  {{ $loans->links('pagination::bootstrap-5') }}
+  {{ $items->links('pagination::bootstrap-5') }}
 </div>

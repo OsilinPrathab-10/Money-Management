@@ -22,11 +22,16 @@ class PublicLoanController extends Controller
             
             $loan = LoanAccount::with(['client', 'emis.collections', 'loanApplication.product'])
                 ->where('application_number', $applicationNumber)
+                ->whereNotIn('status', ['closed', 'foreclosed'])
+                ->where(function ($q) {
+                    $q->whereNull('is_foreclosed')->orWhere('is_foreclosed', false);
+                })
+                ->whereNull('closed_at')
                 ->firstOrFail();
 
             return view('public.loan-schedule', compact('loan'));
         } catch (\Exception $e) {
-            abort(404, 'Invalid loan schedule link.');
+            abort(404, 'Invalid loan schedule link or loan account is closed.');
         }
     }
 }

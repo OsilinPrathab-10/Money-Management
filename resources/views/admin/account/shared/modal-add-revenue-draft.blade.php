@@ -25,7 +25,7 @@
               <label class="form-label">{{ __('Category') }} <span class="text-danger">*</span></label>
               <select name="category_id" class="form-select" required>
                 <option value="">{{ __('Select') }}</option>
-                @foreach ($allRevenueCategories as $c)
+                @foreach (($allRevenueCategories ?? collect()) as $c)
                   <option value="{{ $c->id }}">{{ $c->category_name }}</option>
                 @endforeach
               </select>
@@ -34,17 +34,8 @@
               <label class="form-label">{{ __('Bank account') }} <span class="text-danger">*</span></label>
               <select name="bank_account_id" class="form-select" required>
                 <option value="">{{ __('Select') }}</option>
-                @foreach ($allBankAccounts as $b)
+                @foreach (($allBankAccounts ?? collect()) as $b)
                   <option value="{{ $b->id }}">{{ $b->account_name }}</option>
-                @endforeach
-              </select>
-            </div>
-            <div class="col-md-6">
-              <label class="form-label">{{ __('Revenue GL') }} <span class="text-danger">*</span></label>
-              <select name="chart_of_account_id" class="form-select" required>
-                <option value="">{{ __('Select') }}</option>
-                @foreach ($revenueGlAccounts as $g)
-                  <option value="{{ $g->id }}">{{ $g->account_code }} — {{ $g->account_name }}</option>
                 @endforeach
               </select>
             </div>

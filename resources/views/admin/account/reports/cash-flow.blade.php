@@ -3,7 +3,7 @@
 @section('title', $pageTitle ?? __('Cash Flow Statement'))
 
 @section('content')
-<div class="container-xxl flex-grow-1 container-p-y">
+<div class="account-module">
   <div class="d-flex flex-wrap justify-content-between align-items-center mb-4">
     <h4 class="fw-bold mb-0"><i class="ri-water-flash-line text-primary me-2"></i>{{ $pageTitle ?? __('Cash Flow Statement') }}</h4>
     <a href="{{ route('account.reports.index') }}" class="btn btn-outline-secondary rounded-pill shadow-sm">

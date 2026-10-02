@@ -258,22 +258,74 @@
         </div>
       </div>
       <div class="card-body pt-4">
-        <form action="{{ route('loan-configuration.save-penalty') }}" method="POST" id="penaltyConfigForm">
+        <form action="{{ route('loan-configuration.save-penalty') }}" method="POST" id="penaltyConfigForm" novalidate>
           @csrf
           <input type="hidden" name="is_active" id="penaltyEnabled" value="{{ ($penaltyConfig->is_active ?? false) ? '1' : '0' }}" data-has-config="{{ $penaltyConfig && $penaltyConfig->id ? 'true' : 'false' }}">
 
           <div class="row mb-4">
+            <div class="col-12 mb-3">
+              <label class="form-label text-uppercase text-muted small fw-bold" for="penaltyChargeType">PENALTY CALCULATION TYPE</label>
+              <select id="penaltyChargeType" name="penalty_charge_type" class="form-select">
+                <option value="fixed" {{ ($penaltyConfig->penalty_charge_type ?? 'fixed') === 'fixed' ? 'selected' : '' }}>Fixed Amount (₹)</option>
+                <option value="percentage" {{ ($penaltyConfig->penalty_charge_type ?? 'fixed') === 'percentage' ? 'selected' : '' }}>Percentage of EMI Principal (%)</option>
+              </select>
+              <small class="text-muted">Determine if the penalty is a fixed flat charge or a percentage of the principal in the overdue EMI.</small>
+            </div>
             <div class="col-md-6 mb-3">
-              <label class="form-label text-uppercase text-muted small fw-bold" for="penaltyChargeValue">DEFAULT PENALTY AMOUNT (₹)</label>
-              <input type="number" id="penaltyChargeValue" name="charge_value" class="form-control"
-                step="0.01" min="0" placeholder="0.00" value="{{ $penaltyConfig->charge_value ?? 0 }}" />
-              <small class="text-muted">Fixed amount applied on overdue EMIs</small>
+              <label class="form-label text-uppercase text-muted small fw-bold" for="penaltyChargeValue" id="penaltyChargeValueLabel">
+                {{ ($penaltyConfig->penalty_charge_type ?? 'fixed') === 'percentage' ? 'DEFAULT PENALTY PERCENTAGE (%)' : 'DEFAULT PENALTY AMOUNT (₹)' }}
+              </label>
+              <div class="input-group">
+                <input type="number" id="penaltyChargeValue" name="charge_value" class="form-control"
+                  step="any" min="0" inputmode="decimal"
+                  placeholder="{{ ($penaltyConfig->penalty_charge_type ?? 'fixed') === 'percentage' ? 'e.g. 2.5' : '0.00' }}"
+                  value="{{ $penaltyConfig->charge_value ?? 0 }}" />
+                <span class="input-group-text" id="penaltyChargeValueSuffix">
+                  {{ ($penaltyConfig->penalty_charge_type ?? 'fixed') === 'percentage' ? '%' : '₹' }}
+                </span>
+              </div>
+              <small class="text-muted" id="penaltyChargeValueHint">
+                {{ ($penaltyConfig->penalty_charge_type ?? 'fixed') === 'percentage'
+                    ? 'Percentage of the principal in the overdue EMI applied as penalty'
+                    : 'Fixed amount applied on overdue EMIs' }}
+              </small>
             </div>
             <div class="col-md-6 mb-3">
               <label class="form-label text-uppercase text-muted small fw-bold" for="penaltyEligibilityDays">DEFAULT GRACE PERIOD (DAYS)</label>
               <input type="number" id="penaltyEligibilityDays" name="eligibility_days" class="form-control"
                 min="0" placeholder="0" value="{{ $penaltyConfig->eligibility_days ?? 0 }}" />
-              <small class="text-muted">Days before penalties start applying</small>
+              <small class="text-muted">Days after due date before penalty starts applying</small>
+            </div>
+          </div>
+
+          <div class="row">
+            <div class="col-sm-12">
+              <button type="submit" class="btn btn-primary w-100">
+                <i class="ri-save-line me-1"></i> Save Configuration
+              </button>
+            </div>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Loan Account Prefix Configuration Card -->
+  <div class="col-12 col-lg-6">
+    <div class="card h-100">
+      <div class="card-header border-bottom">
+        <h5 class="mb-0">Loan Account Prefix Configuration</h5>
+        <small class="text-muted">Configure the global prefix for automatically generated customer loan account numbers</small>
+      </div>
+      <div class="card-body pt-4">
+        <form action="{{ route('loan-configuration.save-account-prefix') }}" method="POST" id="accountPrefixConfigForm">
+          @csrf
+          <div class="row mb-4">
+            <div class="col-sm-12">
+              <label class="form-label text-uppercase text-muted small fw-bold" for="accountPrefix">Loan Account Number Prefix</label>
+              <input type="text" id="accountPrefix" name="prefix" class="form-control text-uppercase"
+                maxlength="4" placeholder="MF" value="{{ $accountPrefixConfig->prefix ?? 'MF' }}" required />
+              <small class="text-muted">Allowed: Up to 4 capital letters (e.g. SDC, MF, etc.).</small>
             </div>
           </div>
 

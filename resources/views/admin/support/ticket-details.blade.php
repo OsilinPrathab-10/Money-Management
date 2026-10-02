@@ -241,21 +241,32 @@
 
     <!-- Reply Form -->
     @if($ticket->status !== 'closed')
-      <div class="border-top pt-4 mt-4">
+      <div class="border-top pt-3 mt-4">
         <form id="replyForm" enctype="multipart/form-data">
-          <div class="mb-3">
-            <label class="form-label" for="replyMessage">Your Reply</label>
-            <textarea id="replyMessage" name="message" class="form-control" rows="4" placeholder="Type your reply..." required></textarea>
-          </div>
-          <div class="mb-3">
-            <label class="form-label" for="replyAttachments">Attachments</label>
-            <input type="file" id="replyAttachments" name="attachments[]" class="form-control" multiple accept=".jpg,.jpeg,.png,.pdf,.doc,.docx">
-            <small class="text-muted">Max 10MB per file</small>
-          </div>
-          <div class="text-end">
-            <button type="submit" class="btn btn-primary">
-              <i class="icon-base ri ri-send-plane-fill me-1"></i> Send Reply
-            </button>
+          <div class="card border shadow-none mb-0">
+            <div class="card-body p-3">
+              <div class="mb-2">
+                <textarea id="replyMessage" name="message" class="form-control border-0 p-0 shadow-none" rows="3" placeholder="Type your reply here..." style="resize: none;" required></textarea>
+              </div>
+
+              <!-- Selected File Pills Preview -->
+              <div id="filePreviewContainer" class="d-flex flex-wrap gap-2 mb-2 d-none"></div>
+
+              <div class="d-flex justify-content-between align-items-center border-top pt-2">
+                <div class="d-flex align-items-center gap-2">
+                  <!-- File Attachment Icon right nearby message input -->
+                  <label for="replyAttachments" class="btn btn-icon btn-outline-primary btn-sm rounded-circle mb-0 cursor-pointer" title="Attach files" style="cursor: pointer;">
+                    <i class="icon-base ri ri-attachment-2 icon-20px"></i>
+                  </label>
+                  <input type="file" id="replyAttachments" name="attachments[]" class="d-none" multiple accept=".jpg,.jpeg,.png,.pdf,.doc,.docx">
+                  <span id="fileSelectedText" class="text-muted small">Attach file</span>
+                </div>
+
+                <button type="submit" class="btn btn-primary btn-sm rounded-pill px-4">
+                  <i class="icon-base ri ri-send-plane-fill me-1"></i> Send Reply
+                </button>
+              </div>
+            </div>
           </div>
         </form>
       </div>

@@ -145,21 +145,37 @@
         <h5 class="card-title mb-0">Loan Applications</h5>
       </div>
       <div class="col-12 col-md-8">
-        <div class="d-flex flex-wrap align-items-center justify-content-md-end gap-3">
+          <div class="d-flex flex-wrap align-items-center justify-content-md-end gap-3">
           <button type="button" class="btn btn-primary shadow-sm" id="btnOpenApplyLoanModal">
             <i class="icon-base ri ri-add-line me-1"></i> Apply for Loan
           </button>
+          @include('partials.date-range-filter', [
+            'fromId' => 'fromDate',
+            'toId' => 'toDate',
+            'presetId' => 'loanAppDatePreset',
+          ])
           <div class="d-flex align-items-center gap-2">
-            <label for="fromDate" class="form-label mb-0 text-nowrap small fw-medium">From:</label>
-            <input type="date" id="fromDate" class="form-control form-control-sm" style="min-width: 130px;">
+            <label for="loanModeFilter" class="form-label mb-0 text-nowrap small fw-medium">Mode:</label>
+            <select id="loanModeFilter" class="form-select form-select-sm no-search" style="width: 130px;">
+              <option value="">All Modes</option>
+              <option value="emi">Standard EMI</option>
+              <option value="interest_only">Open Loan</option>
+            </select>
           </div>
           <div class="d-flex align-items-center gap-2">
-            <label for="toDate" class="form-label mb-0 text-nowrap small fw-medium">To:</label>
-            <input type="date" id="toDate" class="form-control form-control-sm" style="min-width: 130px;">
+            <label for="loanTypeFilter" class="form-label mb-0 text-nowrap small fw-medium">Loan Type:</label>
+            <select id="loanTypeFilter" class="form-select form-select-sm no-search" style="min-width: 160px; max-width: 220px;">
+              <option value="">All Types</option>
+              @if(isset($loanTypes))
+                @foreach($loanTypes as $lt)
+                  <option value="{{ $lt->id }}">{{ trim($lt->name) }}</option>
+                @endforeach
+              @endif
+            </select>
           </div>
           <div class="d-flex align-items-center gap-2">
             <label for="statusFilter" class="form-label mb-0 text-nowrap small fw-medium">Status:</label>
-            <select id="statusFilter" class="form-select form-select-sm" style="min-width: 120px;">
+            <select id="statusFilter" class="form-select form-select-sm no-search" style="width: 130px;">
               <option value="">All Statuses</option>
               <option value="pending">Pending</option>
               <option value="approved">Approved</option>
@@ -184,6 +200,7 @@
           <th>Loan Name</th>
           <th class="text-end">Loan Amount</th>
           <th class="text-center">Status</th>
+          <th class="text-center">Applied On</th>
           <th class="text-center">Actions</th>
         </tr>
       </thead>

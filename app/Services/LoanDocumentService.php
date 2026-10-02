@@ -21,8 +21,8 @@ class LoanDocumentService
     public function generateAndSaveDocument(int $loanId, string $documentType): array
     {
         if ($documentType === 'loan_agreement') {
-            $loanAccount = LoanAccount::find($loanId);
-            $loanProduct = $loanAccount->loanApplication->product ?? null;
+            $loanAccount = LoanAccount::with(['loanApplication.product', 'product'])->find($loanId);
+            $loanProduct = $loanAccount?->loanApplication?->product ?? $loanAccount?->product;
             if ($loanProduct) {
                 $productSpecificType = 'loan_agreement_' . strtolower(str_replace(' ', '_', $loanProduct->loan_name ?? ''));
                 if (LoanDocumentTemplate::whereRaw('LOWER(type) = ?', [strtolower($productSpecificType)])->exists()) {
@@ -34,14 +34,17 @@ class LoanDocumentService
         $document = $this->prepareDocument($loanId, $documentType);
         
         // Get loan account and client info
-        $loanAccount = LoanAccount::with(['loanApplication.client'])->findOrFail($loanId);
-        $client = $loanAccount->loanApplication->client;
-        
-        // Define file path
+        $loanAccount = LoanAccount::with(['loanApplication.client', 'client'])->findOrFail($loanId);
+        $client = $loanAccount->client ?? $loanAccount->loanApplication?->client;
+        if (! $client) {
+            throw new \RuntimeException('Cannot generate document: loan account has no linked client.');
+        }
+
         $fileName = $document['fileName'];
-        $filePath = "loan_documents/{$loanAccount->account_number}/{$fileName}";
-        
-        // Save PDF to storage (Local)
+        $directory = "loan_documents/{$loanAccount->account_number}";
+        $filePath = "{$directory}/{$fileName}";
+
+        Storage::disk('public')->makeDirectory($directory);
         Storage::disk('public')->put($filePath, $document['binary']);
         
         // Get file size
@@ -83,7 +86,7 @@ class LoanDocumentService
     public function getExistingDocument(int $loanId, string $documentType): ?ClientLoanDocument
     {
         return ClientLoanDocument::where('loan_account_id', $loanId)
-            ->where('document_type', $documentType)
+            ->whereRaw('LOWER(document_type) = ?', [strtolower($documentType)])
             ->first();
     }
 
@@ -113,23 +116,24 @@ class LoanDocumentService
     public function getAvailableDocuments(LoanAccount $loanAccount)
     {
         $loanStatus = strtolower($loanAccount->status ?? 'pending');
-        $loanProduct = $loanAccount->loanApplication->product ?? null;
+        $loanProduct = $loanAccount->loanApplication->product
+            ?? $loanAccount->loanProduct
+            ?? $loanAccount->product
+            ?? null;
         $isForeclosed = $loanAccount->is_foreclosed ?? false;
         
-        // Define document availability based on loan lifecycle
+        $openStatuses = ['active', 'disbursed', 'approved', 'process'];
+        $closedStatuses = ['closed', 'foreclosed'];
+        $allLiveStatuses = array_merge($openStatuses, $closedStatuses);
+
         $documentRules = [
-            // Documents shown for active/disbursed loans (also shown when closed/foreclosed)
-            'loan_agreement' => ['active', 'closed', 'foreclosed'],
-            'loan_sanction_letter' => ['pending', 'active', 'closed', 'foreclosed'],
-            'repayment_schedule' => ['active', 'closed', 'foreclosed'],
-            'statement' => ['active', 'closed', 'foreclosed'],
-            'payment_receipt' => ['active', 'closed', 'foreclosed'],
-            
-            // Documents shown for closed loans
-            'loan_closure_certificate' => ['closed', 'foreclosed'],
-            'noc' => ['closed', 'foreclosed'],
-            
-            // Foreclosure specific - shown only when is_foreclosed = true
+            'loan_agreement' => $allLiveStatuses,
+            'loan_sanction_letter' => array_merge(['pending'], $allLiveStatuses),
+            'repayment_schedule' => $allLiveStatuses,
+            'statement' => $allLiveStatuses,
+            'payment_receipt' => $allLiveStatuses,
+            'loan_closure_certificate' => $closedStatuses,
+            'noc' => $closedStatuses,
             'foreclosure_letter' => ['foreclosed'],
         ];
 
@@ -187,24 +191,80 @@ class LoanDocumentService
     }
 
     /**
+     * Merge available templates with saved files for the loan account documents table.
+     */
+    public function buildDocumentRows($availableTemplates, $savedDocuments)
+    {
+        $savedDocuments = collect($savedDocuments);
+        $rows = collect();
+        $seen = [];
+
+        foreach ($availableTemplates as $template) {
+            $type = (string) $template->type;
+            $saved = $this->matchSavedDocument($savedDocuments, $type);
+            $seen[strtolower($type)] = true;
+            if ($saved) {
+                $seen[strtolower((string) $saved->document_type)] = true;
+            }
+            $rows->push((object) [
+                'document_type' => $type,
+                'document_title' => $template->display_title ?? $template->title ?? ucwords(str_replace('_', ' ', $type)),
+                'generated' => (bool) $saved,
+                'saved' => $saved,
+            ]);
+        }
+
+        foreach ($savedDocuments as $saved) {
+            $key = strtolower((string) $saved->document_type);
+            if (isset($seen[$key])) {
+                continue;
+            }
+            $seen[$key] = true;
+            $rows->push((object) [
+                'document_type' => $saved->document_type,
+                'document_title' => $saved->document_title ?? ucwords(str_replace('_', ' ', $saved->document_type)),
+                'generated' => true,
+                'saved' => $saved,
+            ]);
+        }
+
+        return $rows->values();
+    }
+
+    protected function matchSavedDocument($savedDocuments, string $type)
+    {
+        $type = strtolower($type);
+
+        return collect($savedDocuments)->first(function ($doc) use ($type) {
+            $docType = strtolower((string) $doc->document_type);
+            if ($docType === $type) {
+                return true;
+            }
+
+            return str_starts_with($type, 'loan_agreement')
+                && str_starts_with($docType, 'loan_agreement');
+        });
+    }
+
+    /**
      * Prepare and generate PDF document
      */
     private function prepareDocument(int $loanId, string $documentType): array
     {
-        $loanAccount = LoanAccount::with(['loanApplication.client', 'loanApplication.product'])
+        $loanAccount = LoanAccount::with(['loanApplication.client', 'loanApplication.product', 'client', 'product'])
             ->findOrFail($loanId);
 
         if ($documentType === 'loan_agreement') {
-            $loanProduct = $loanAccount->loanApplication->product ?? null;
+            $loanProduct = $loanAccount->loanApplication?->product ?? $loanAccount->product;
             if ($loanProduct) {
                 $productSpecificType = 'loan_agreement_' . strtolower(str_replace(' ', '_', $loanProduct->loan_name ?? ''));
-                if (LoanDocumentTemplate::where('type', $productSpecificType)->exists()) {
+                if (LoanDocumentTemplate::whereRaw('LOWER(type) = ?', [strtolower($productSpecificType)])->exists()) {
                     $documentType = $productSpecificType;
                 }
             }
         }
 
-        $template = LoanDocumentTemplate::where('type', $documentType)->first();
+        $template = LoanDocumentTemplate::whereRaw('LOWER(type) = ?', [strtolower($documentType)])->first();
         if (!$template) {
             $template = new \stdClass();
             $template->title = ucfirst(str_replace('_', ' ', $documentType));
@@ -266,7 +326,7 @@ class LoanDocumentService
             'body' => $body,
             'logo' => $logoData['logo'],
             'loan' => $loanAccount,
-            'client' => $loanAccount->loanApplication->client,
+            'client' => $loanAccount->loanApplication->client ?? $loanAccount->client,
             'title' => $displayTitle,
             'company' => [
                 'name' => AppearanceHelper::get('title', 'Loan App'),
@@ -275,6 +335,11 @@ class LoanDocumentService
         ])->render();
 
         // Create mPDF instance with Unicode support
+        $tempDir = storage_path('app/temp');
+        if (! is_dir($tempDir)) {
+            mkdir($tempDir, 0755, true);
+        }
+
         $mpdf = new Mpdf([
             'mode' => 'utf-8',
             'format' => 'A4',
@@ -286,7 +351,7 @@ class LoanDocumentService
             'margin_header' => 9,
             'margin_footer' => 9,
             'default_font' => 'dejavusans',
-            'tempDir' => storage_path('app/temp')
+            'tempDir' => $tempDir
         ]);
 
         $mpdf->WriteHTML($htmlContent);
@@ -355,19 +420,70 @@ class LoanDocumentService
         foreach ($candidatePaths as $path) {
             if ($path && file_exists($path)) {
                 $debug['resolvedPath'] = $path;
-                $extension = strtolower(pathinfo($path, PATHINFO_EXTENSION));
-                $mime = in_array($extension, ['png', 'jpg', 'jpeg', 'gif', 'svg'])
-                    ? 'image/' . ($extension === 'svg' ? 'svg+xml' : ($extension === 'jpg' ? 'jpeg' : $extension))
-                    : mime_content_type($path);
-                $logo = 'data:' . $mime . ';base64,' . base64_encode(file_get_contents($path));
-                $debug['embedded'] = 'yes';
-                Log::info('PDF Logo embedded', $debug);
-                return ['logo' => $logo, 'debug' => $debug];
+                $logo = $this->embedLogoDataUri($path, $debug);
+                if ($logo) {
+                    $debug['embedded'] = 'yes';
+                    Log::info('PDF Logo embedded', $debug);
+                    return ['logo' => $logo, 'debug' => $debug];
+                }
             }
         }
 
         Log::warning('PDF Logo file not found', $debug);
         return ['logo' => null, 'debug' => $debug];
+    }
+
+    /**
+     * Embed a reasonably sized logo so mPDF does not overflow the page.
+     */
+    private function embedLogoDataUri(string $path, array &$debug): ?string
+    {
+        $maxWidth = 160;
+        $maxHeight = 50;
+        $info = @getimagesize($path);
+        if (! $info) {
+            return 'data:' . (mime_content_type($path) ?: 'image/png') . ';base64,' . base64_encode(file_get_contents($path));
+        }
+
+        [$width, $height] = $info;
+        $debug['originalSize'] = "{$width}x{$height}";
+
+        $src = null;
+        switch ($info[2]) {
+            case IMAGETYPE_JPEG:
+                $src = imagecreatefromjpeg($path);
+                break;
+            case IMAGETYPE_PNG:
+                $src = imagecreatefrompng($path);
+                break;
+            case IMAGETYPE_GIF:
+                $src = imagecreatefromgif($path);
+                break;
+        }
+
+        if (! $src) {
+            return 'data:' . $info['mime'] . ';base64,' . base64_encode(file_get_contents($path));
+        }
+
+        $scale = min($maxWidth / max($width, 1), $maxHeight / max($height, 1), 1);
+        $newWidth = max(1, (int) round($width * $scale));
+        $newHeight = max(1, (int) round($height * $scale));
+        $dst = imagecreatetruecolor($newWidth, $newHeight);
+        imagealphablending($dst, false);
+        imagesavealpha($dst, true);
+        $transparent = imagecolorallocatealpha($dst, 0, 0, 0, 127);
+        imagefilledrectangle($dst, 0, 0, $newWidth, $newHeight, $transparent);
+        imagecopyresampled($dst, $src, 0, 0, 0, 0, $newWidth, $newHeight, $width, $height);
+
+        ob_start();
+        imagepng($dst);
+        $png = ob_get_clean();
+        imagedestroy($src);
+        imagedestroy($dst);
+
+        $debug['resizedTo'] = "{$newWidth}x{$newHeight}";
+
+        return 'data:image/png;base64,' . base64_encode($png);
     }
 
     /**

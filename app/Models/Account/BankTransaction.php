@@ -14,6 +14,8 @@ class BankTransaction extends Model
         'transaction_type',
         'reference_number',
         'description',
+        'module_tag',
+        'entry_tag',
         'amount',
         'running_balance',
         'transaction_status',

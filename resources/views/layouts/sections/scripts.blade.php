@@ -1,3 +1,27 @@
+<script>
+window.SDS_SESSION = {
+  idleMs: {{ auth()->check() ? 30 * 60 * 1000 : 0 }},
+  pingUrl: @json(auth()->check() ? route('session.ping') : null),
+  unlockUrl: @json(auth()->check() ? route('session.unlock') : null),
+  loginUrl: @json(route('login')),
+  logoutUrl: @json(route('logout')),
+  csrf: @json(csrf_token()),
+  email: @json(optional(auth()->user())->email),
+  name: @json(optional(auth()->user())->name),
+  lockEnabled: @json(auth()->check())
+};
+</script>
+@guest
+<script>
+(function () {
+  try {
+    localStorage.removeItem('sds.session.lastActivity');
+    localStorage.removeItem('sds.session.locked');
+  } catch (e) {}
+})();
+</script>
+@endguest
+
 <!-- BEGIN: Vendor JS-->
 
 @vite(['resources/assets/vendor/libs/jquery/jquery.js', 'resources/assets/vendor/libs/popper/popper.js', 'resources/assets/vendor/js/bootstrap.js', 'resources/assets/vendor/libs/node-waves/node-waves.js', 'resources/assets/vendor/libs/@algolia/autocomplete-js.js'])
@@ -10,6 +34,10 @@
 
 @yield('vendor-script')
 <!-- END: Page Vendor JS-->
+
+@auth
+  @include('layouts.sections.session-lock')
+@endauth
 
 <!-- BEGIN: Theme JS-->
 @vite(['resources/assets/js/main.js'])
@@ -24,16 +52,92 @@
 <!-- END: Page JS-->
 
 <!-- app JS -->
-@vite(['resources/assets/custom-js/app.js'])
+@vite(['resources/assets/custom-js/app.js', 'resources/assets/vendor/libs/select2/select2.js', 'resources/assets/custom-js/searchable-selects.js', 'resources/assets/custom-js/date-range-filter.js'])
 <!-- END: app JS-->
 
-@if(auth()->check() && (auth()->user()->hasRole('Admin') || auth()->user()->hasRole('Staff')))
+@if(auth()->check() && (auth()->user()->hasRole('Admin') || auth()->user()->hasRole('Staff') || auth()->user()->hasRole('Agent')))
   <!-- Admin Notifications JS -->
   @vite(['resources/assets/js/admin-notifications.js'])
-  <!-- END: Admin Notifications JS -->
 @endif
 
 @stack('footer-scripts')
+
+{{-- Single-click lock: stop double taps on tablet/mobile for submit and money actions --}}
+<script>
+(function () {
+  const recentClicks = new WeakMap();
+  const inFlight = new Set();
+  const ACTION_SELECTOR = [
+    'button[type="submit"]',
+    'input[type="submit"]',
+    '[data-single-click]',
+    '#disburseBtn',
+    '#confirmDisburseBtn',
+    '#confirmRejectBtn',
+    '#confirmApproveBtn',
+    '#chitPaySubmitBtn',
+    '#chitPartialSubmitBtn',
+    '#chitBulkSubmitBtn',
+    '#bulkPaySubmitBtn',
+    '#initiateSettlementBtn',
+    '#confirmTransferBtn',
+    '.btn-book-fd-app',
+    '.btn-approve-fd-app',
+    '.btn-reject-fd-app',
+    '.btn-approve-app',
+    '.btn-reject-app',
+    '.btn-collect-assigned',
+    '.btn-submit-group-settlement'
+  ].join(',');
+
+  function isToggle(el) {
+    return !!(el.dataset.bsToggle || el.dataset.bsDismiss || el.getAttribute('data-bs-toggle') || el.getAttribute('data-bs-dismiss'));
+  }
+
+  document.addEventListener('click', function (e) {
+    const btn = e.target.closest('button, input[type="submit"], input[type="button"], a.btn');
+    if (!btn || btn.classList.contains('no-single-click') || isToggle(btn) || btn.type === 'reset') {
+      return;
+    }
+
+    if (btn.disabled || btn.dataset.busy === '1' || btn.classList.contains('pe-none')) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      return;
+    }
+
+    const last = recentClicks.get(btn) || 0;
+    if (Date.now() - last < 800) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      return;
+    }
+    recentClicks.set(btn, Date.now());
+
+    if (btn.matches('button[type="submit"], input[type="submit"]')) {
+      btn.dataset.busy = '1';
+    }
+  }, true);
+
+  document.addEventListener('submit', function (e) {
+    const form = e.target;
+    if (!(form instanceof HTMLFormElement) || form.dataset.skipSingleSubmit === '1') {
+      return;
+    }
+    if (form.dataset.busy === '1' || inFlight.has(form)) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      return;
+    }
+    form.dataset.busy = '1';
+    inFlight.add(form);
+    form.querySelectorAll('button[type="submit"], input[type="submit"]').forEach(function (btn) {
+      btn.disabled = true;
+      btn.dataset.busy = '1';
+    });
+  }, true);
+})();
+</script>
 
 {{-- ============================================================
      GLOBAL: SweetAlert2 — loads from CDN if not already available,
@@ -86,15 +190,31 @@
         });
 
         // ── Session flash via SweetAlert2 ───────────────────────────
+        function openAdminNotificationPopup() {
+            @if(session('notification_popup'))
+                var popup = @json(session('notification_popup'));
+                if (typeof window.refreshAdminNotifications === 'function') {
+                    window.refreshAdminNotifications();
+                }
+                if (popup && typeof window.showNotificationModal === 'function') {
+                    window.showNotificationModal(popup);
+                }
+            @endif
+        }
+
         @if(session('success'))
             Swal.fire({
                 icon: 'success',
-                title: 'Success!',
+                title: {!! json_encode(session('notification_popup') ? 'Notification sent' : 'Success!') !!},
                 text: {!! json_encode(session('success')) !!},
-                timer: 2500,
+                timer: 2200,
                 showConfirmButton: false,
                 position: 'center'
+            }).then(function () {
+                openAdminNotificationPopup();
             });
+        @elseif(session('notification_popup'))
+            openAdminNotificationPopup();
         @endif
 
         @if(session('error'))

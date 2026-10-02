@@ -25,7 +25,7 @@ class VerificationControllerApi extends Controller
             'aadhaar_number' => ['required', new KycRule('aadhaar')]
         ]);
 
-        $result = $curlService->verifyAadhaar(
+        $result = $curlService->verifyAadhaarOtpRequest(
             $validated['aadhaar_number']
         );
 
@@ -38,7 +38,7 @@ class VerificationControllerApi extends Controller
             'aadhaar_number' => ['required', new KycRule('aadhaar')]
         ]);
 
-        $result = $curlService->resendAadhaarOtp(
+        $result = $curlService->verifyAadhaarOtpRequest(
             $validated['aadhaar_number']
         );
 
@@ -53,11 +53,98 @@ class VerificationControllerApi extends Controller
             'reference_id' => 'required|string',
         ]);
 
-        $result = $curlService->verifyAadhaarOtp(
+        $result = $curlService->verifyAadhaarOtpConfirm(
             $validated['aadhaar_number'],
             $validated['otp'],
             $validated['reference_id']
         );
+
+        if (!isset($result['status']) || $result['status'] !== true) {
+            Log::warning("API Aadhaar OTP verification failed for Aadhaar {$validated['aadhaar_number']} using Reference ID {$validated['reference_id']}. Response: " . json_encode($result));
+            return response()->json($result);
+        }
+
+        // If verification is successful, update the client data
+        $user = Auth::user();
+        if ($user) {
+            $client = Client::where('user_id', $user->id)->first();
+
+            if ($client) {
+                $d = $result['data']['data'] ?? $result['data'] ?? [];
+                
+                $fullAddress = '';
+                $city = null;
+                $state = null;
+                $pincode = $d['zip'] ?? $d['pincode'] ?? null;
+
+                if (isset($d['address'])) {
+                    if (is_array($d['address'])) {
+                        $addr = $d['address'];
+                        $fullAddress = implode(', ', array_filter([
+                            $addr['house']   ?? null,
+                            $addr['street']  ?? null,
+                            $addr['loc']     ?? null,
+                            $addr['vtc']     ?? null,
+                            $addr['po']      ?? null,
+                            $addr['subdist'] ?? null,
+                            $addr['dist']    ?? null,
+                            $addr['state']   ?? null,
+                            $addr['country'] ?? null,
+                        ]));
+                        $city = $addr['vtc'] ?? $addr['city'] ?? $d['city'] ?? null;
+                        $state = $addr['state'] ?? $d['state'] ?? null;
+                    } else {
+                        $fullAddress = (string) $d['address'];
+                        $city = $d['city'] ?? $d['vtc'] ?? null;
+                        $state = $d['state'] ?? null;
+                    }
+                } else {
+                    $city = $d['city'] ?? $d['vtc'] ?? null;
+                    $state = $d['state'] ?? null;
+                }
+
+                $dobFormatted = null;
+                if (!empty($d['dob'])) {
+                    try {
+                        $dobRaw = trim($d['dob']);
+                        if (preg_match('/^\d{2}-\d{2}-\d{4}$/', $dobRaw)) {
+                            $dobFormatted = \Carbon\Carbon::createFromFormat('d-m-Y', $dobRaw)->format('Y-m-d');
+                        } else {
+                            $dobFormatted = \Carbon\Carbon::parse($dobRaw)->format('Y-m-d');
+                        }
+                    } catch (\Throwable $e) {}
+                }
+
+                \Illuminate\Support\Facades\DB::transaction(function () use ($client, $d, $fullAddress, $city, $state, $pincode, $dobFormatted) {
+                    $client->update([
+                        'client_name' => $d['full_name'] ?? $client->client_name,
+                        'gender' => strtolower($d['gender'] ?? $client->gender ?? ''),
+                        'date_of_birth' => $dobFormatted ?? $client->date_of_birth,
+                        'address' => $fullAddress ?: $client->address,
+                        'city' => $city ?: $client->city,
+                        'state' => $state ?: $client->state,
+                        'pincode' => $pincode ?: $client->pincode,
+                    ]);
+
+                    $kyc = $client->kycDetail;
+                    if ($kyc) {
+                        $kyc->update([
+                            'aadhaar_name' => $d['full_name'] ?? $kyc->aadhaar_name,
+                            'pan_name' => $d['full_name'] ?? $kyc->pan_name,
+                            'aadhaar_verified' => true
+                        ]);
+                    } else {
+                        // Create KYC if it doesn't exist
+                        \App\Models\KycDetail::create([
+                            'client_id' => $client->id,
+                            'aadhaar_number' => $d['aadhaar_number'] ?? $client->aadhaar_number,
+                            'aadhaar_name' => $d['full_name'] ?? null,
+                            'aadhaar_verified' => true
+                        ]);
+                    }
+                });
+            }
+        }
 
         return response()->json($result);
     }
@@ -67,13 +154,21 @@ class VerificationControllerApi extends Controller
         $user = Auth::user();
         $client = Client::where('user_id', $user->id)->first();
 
+        if (!$client) {
+            return response()->json([
+                'status' => false,
+                'message' => 'Client profile not found.'
+            ], 404);
+        }
+
         $validated = $request->validate([
-            'pan_number' => ['required', new KycRule('pan')],
-            'aadhaar_number' => ['required', new KycRule('aadhaar')]
+            'pan_number' => ['required', new KycRule('pan')]
         ]);
 
+        $panNumber = strtoupper(preg_replace('/\s+/', '', $validated['pan_number']));
+
         // Check PAN already linked with another client
-        $exists = KycDetail::where('pan_number', $validated['pan_number'])
+        $exists = KycDetail::where('pan_number', $panNumber)
             ->where('client_id', '!=', $client->id)
             ->exists();
 
@@ -84,43 +179,34 @@ class VerificationControllerApi extends Controller
             ], 409);
         }
 
-        // Hardcoded values
-        $entity = "in.co.sandbox.kyc.pan_aadhaar.status";
-        $consent = "Y";
-        $reason = "FOR KYC";
-
         // Call verification service
-        $result = $curlService->verifyPan(
-            $validated['pan_number'],
-            $validated['aadhaar_number']
-        );
+        $result = $curlService->verifyPan($panNumber);
 
-        $data = $result->getData(true);
+        if (isset($result['status']) && $result['status'] === true) {
+            $panData = $result['data'] ?? [];
 
-        $aadhaarLinkData = $data['pan_aadhaar_link_status']['data']['data'] ?? [];
-
-        $isAadhaarLinked = ($aadhaarLinkData['aadhaar_seeding_status'] ?? 'n') === 'y';
-
-        if ($isAadhaarLinked) {
-
-            KycDetail::updateOrCreate(
+            // PAN is verified at field level only.
+            // Overall KYC stays pending until an admin verifies/approves it.
+            $client->kycDetail()->updateOrCreate(
                 ['client_id' => $client->id],
                 [
-                    'pan_number' => $validated['pan_number']
+                    'pan_number' => $panNumber,
+                    'pan_name'   => $panData['full_name'] ?? null,
+                    'pan_verified' => true,
                 ]
             );
 
             return response()->json([
                 'status' => true,
                 'message' => 'PAN verified and saved successfully.',
-                'data' => $data
+                'data' => $panData
             ], 200);
         }
 
         return response()->json([
             'status' => false,
-            'message' => $aadhaarLinkData['message'] ?? 'PAN verification failed.',
-            'data' => $data
+            'message' => $result['message'] ?? 'PAN verification failed.',
+            'data' => $result
         ], 422);
     }
 
@@ -207,15 +293,67 @@ class VerificationControllerApi extends Controller
 
     public function verifyBank(Request $request, VerificationCurlService $curlService)
     {
+        $user = Auth::user();
+        $client = Client::where('user_id', $user->id)->first();
+
+        if (!$client) {
+            return response()->json([
+                'status' => false,
+                'message' => 'Client profile not found.'
+            ], 404);
+        }
+
         $validated = $request->validate([
             'account_number' => ['required', new KycRule('bank')],
             'ifsc' => ['required', new KycRule('ifsc')],
             'file_front' => 'required|file|mimes:pdf|max:5120',
         ]);
 
-        $result = $curlService->verifyBankDetails($validated);
+        $accountNumber = preg_replace('/\s+/', '', $validated['account_number']);
+        $ifsc = strtoupper(preg_replace('/\s+/', '', $validated['ifsc']));
 
-        return $result; // return directly
+        $exists = KycDetail::where('account_number', $accountNumber)
+            ->where('client_id', '!=', $client->id)
+            ->exists();
+        if ($exists) {
+            return response()->json([
+                'status' => false,
+                'message' => 'This bank account is already registered with another client.'
+            ], 409);
+        }
+
+        $result = $curlService->verifyBank($accountNumber, $ifsc);
+
+        if (isset($result['status']) && $result['status'] === true) {
+            $file = $request->file('file_front');
+            $storedPath = $file->store('kyc/bank_statement/' . $client->id, 'public');
+
+            // Bank is verified at field level only.
+            // Overall KYC stays pending until an admin verifies/approves it.
+            KycDetail::updateOrCreate(
+                ['client_id' => $client->id],
+                [
+                    'account_holder_name' => $result['data']['full_name'] ?? $result['data']['data']['full_name'] ?? null,
+                    'account_number' => $accountNumber,
+                    'ifsc_code' => $ifsc,
+                    'bank_name' => $result['data']['bank_name'] ?? $result['data']['data']['bank_name'] ?? null,
+                    'bank_statement' => $storedPath,
+                    'bank_verified' => true,
+                ]
+            );
+
+            return response()->json([
+                'status' => true,
+                'message' => 'Bank details verified and statement uploaded successfully.',
+                'data' => $result
+            ]);
+        }
+
+        return response()->json([
+            'status' => false,
+            'message' => $result['message'] ?? 'Bank verification failed.',
+            'data' => $result
+        ], 422);
     }
 
     public function sendEmailOtp(Request $request)

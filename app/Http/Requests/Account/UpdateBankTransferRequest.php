@@ -27,7 +27,7 @@ class UpdateBankTransferRequest extends FormRequest
     public function messages()
     {
         return [
-            'to_account_id.different' => __('Destination account must be different from source account.'),
+            'to_account_id.different' => __('Source and Destination bank accounts cannot be the same account.'),
             'transfer_amount.min' => __('Transfer amount must be greater than 0.'),
         ];
     }

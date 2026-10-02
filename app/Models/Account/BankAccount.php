@@ -18,11 +18,14 @@ class BankAccount extends Model
         'branch_name',
         'account_type',
         'payment_gateway',
+        'upi_id',
+        'qr_code',
         'opening_balance',
         'current_balance',
         'iban',
         'swift_code',
         'routing_number',
+        'ifsc_code',
         'is_active',
         'gl_account_id',
         'creator_id',
@@ -38,7 +41,13 @@ class BankAccount extends Model
         ];
     }
 
-
+    /**
+     * Prefer dedicated IFSC; fall back to legacy routing_number / iban.
+     */
+    public function getEffectiveIfscAttribute(): string
+    {
+        return (string) ($this->ifsc_code ?: $this->routing_number ?: $this->iban ?: '');
+    }
 
     public function glAccount()
     {

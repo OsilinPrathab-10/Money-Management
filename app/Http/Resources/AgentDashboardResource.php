@@ -29,6 +29,7 @@ class AgentDashboardResource extends JsonResource
         $totalRecovered = $agent->recoveries()->sum('amount');
         $totalAssigned = $agent->emiAssignments()
             ->join('emis', 'emi_agent_assignments.emi_id', '=', 'emis.id')
+            ->whereNull('emis.deleted_at')
             ->sum('emis.total_amount');
         $recoveryRate = $totalAssigned > 0 ? ($totalRecovered / $totalAssigned) * 100 : 0;
 
@@ -78,7 +79,7 @@ class AgentDashboardResource extends JsonResource
                         // DPD > 15 (calculate days past due in database)
                         $sq->whereRaw('DATEDIFF(NOW(), due_date) > 15')
                             // OR 2+ overdue EMIs in same loan account
-                            ->orWhereRaw('(SELECT COUNT(*) FROM emis e2 WHERE e2.loan_account_id = emis.loan_account_id AND e2.status = "overdue") >= 2');
+                            ->orWhereRaw('(SELECT COUNT(*) FROM emis e2 WHERE e2.loan_account_id = emis.loan_account_id AND e2.status = "overdue" AND e2.deleted_at IS NULL) >= 2');
                     });
             })
             ->distinct('emi_id')
@@ -155,7 +156,7 @@ class AgentDashboardResource extends JsonResource
                         // DPD > 15 (calculate days past due in database)
                         $sq->whereRaw('DATEDIFF(NOW(), due_date) > 15')
                             // OR 2+ overdue EMIs in same loan account
-                            ->orWhereRaw('(SELECT COUNT(*) FROM emis e2 WHERE e2.loan_account_id = emis.loan_account_id AND e2.status = "overdue") >= 2');
+                            ->orWhereRaw('(SELECT COUNT(*) FROM emis e2 WHERE e2.loan_account_id = emis.loan_account_id AND e2.status = "overdue" AND e2.deleted_at IS NULL) >= 2');
                     });
             })
             ->join('emis', 'emi_agent_assignments.emi_id', '=', 'emis.id')
@@ -178,6 +179,13 @@ class AgentDashboardResource extends JsonResource
             'today_visit' => $todayVisitCount,
             'recovered_this_month' => $recoveredThisMonth,
             'today_at_risk' => $todayAtRiskCount,
+
+            // address details
+            'address' => $agent->address,
+            'city' => $agent->city,
+            'district' => $agent->district,
+            'state' => $agent->state,
+            'pincode' => $agent->pincode,
         ];
     }
 }

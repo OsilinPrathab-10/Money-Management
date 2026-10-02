@@ -134,13 +134,13 @@
                     'sort' => $sortOption,
                 ]);
               @endphp
-              <li><a class="dropdown-item" href="{{ route('reports-clients-export', array_merge(['format' => 'csv'], request()->only(['status','from_date','to_date','sort','location_id']))) }}">
+              <li><a class="dropdown-item export-link" data-format="csv" href="{{ route('reports-clients-export', array_merge(['format' => 'csv'], request()->only(['status','from_date','to_date','date_preset','sort','location_id']))) }}">
                 <i class="ri-file-text-line me-2"></i>CSV
               </a></li>
-              <li><a class="dropdown-item" href="{{ route('reports-clients-export', array_merge(['format' => 'excel'], request()->only(['status','from_date','to_date','sort','location_id']))) }}">
+              <li><a class="dropdown-item export-link" data-format="excel" href="{{ route('reports-clients-export', array_merge(['format' => 'excel'], request()->only(['status','from_date','to_date','date_preset','sort','location_id']))) }}">
                 <i class="ri-file-excel-2-line me-2"></i>Excel
               </a></li>
-              <li><a class="dropdown-item" href="{{ route('reports-clients-export', array_merge(['format' => 'pdf'], request()->only(['status','from_date','to_date','sort','location_id']))) }}">
+              <li><a class="dropdown-item export-link" data-format="pdf" href="{{ route('reports-clients-export', array_merge(['format' => 'pdf'], request()->only(['status','from_date','to_date','date_preset','sort','location_id']))) }}">
                 <i class="ri-file-pdf-line me-2"></i>PDF
               </a></li>
             </ul>
@@ -169,14 +169,6 @@
               @endforeach
             </select>
           </div>
-          <div class="col-md-2">
-            <label class="form-label">From Date</label>
-            <input type="date" name="from_date" value="{{ $fromDate }}" class="form-control" data-auto-submit="true">
-          </div>
-          <div class="col-md-2">
-            <label class="form-label">To Date</label>
-            <input type="date" name="to_date" value="{{ $toDate }}" class="form-control" data-auto-submit="true">
-          </div>
           <div class="col-md-3">
             <label class="form-label">Sort By</label>
             <select name="sort" class="form-select" data-auto-submit="true">
@@ -186,7 +178,21 @@
               <option value="status_desc" {{ $sortOption === 'status_desc' ? 'selected' : '' }}>Status Z-A</option>
             </select>
           </div>
-          <div class="col-12 d-flex flex-wrap gap-2 justify-content-end">
+          <div class="col-md-auto d-flex align-items-end">
+            @include('partials.date-range-filter', [
+              'fromId' => 'clientsReportDateFrom',
+              'toId' => 'clientsReportDateTo',
+              'presetId' => 'clientsReportDatePreset',
+              'fromName' => 'from_date',
+              'toName' => 'to_date',
+              'fromValue' => $fromDate,
+              'toValue' => $toDate,
+              'presetValue' => request('date_preset', 'all'),
+              'dataAutoSubmit' => true,
+              'size' => 'sm',
+            ])
+          </div>
+          <div class="col-md-auto d-flex align-items-end">
             <a href="{{ route('reports-clients') }}" class="btn btn-outline-secondary" id="resetFiltersBtn"><i class="ri-refresh-line me-1"></i>Reset</a>
           </div>
         </form>
@@ -413,6 +419,7 @@
       autoSubmitFields.forEach(field => {
         field.addEventListener('change', debouncedSubmit);
       });
+      filterForm.addEventListener('date-range:change', debouncedSubmit);
 
       filterForm.addEventListener('submit', event => {
         event.preventDefault();
@@ -426,6 +433,21 @@
           submitFilters(baseUrl);
         });
       }
+
+      document.querySelectorAll('.export-link').forEach(link => {
+        link.addEventListener('click', function (e) {
+          e.preventDefault();
+          const formData = new FormData(filterForm);
+          const params = new URLSearchParams();
+          params.append('format', this.getAttribute('data-format') || 'csv');
+          for (const [key, value] of formData.entries()) {
+            if (key === 'date_preset' || (value !== null && String(value).trim() !== '')) {
+              params.append(key, String(value).trim());
+            }
+          }
+          window.location.href = `{{ route('reports-clients-export') }}?${params.toString()}`;
+        });
+      });
 
       // Handle pagination via AJAX
       reportsAnalyticsContent.addEventListener('click', event => {

@@ -100,6 +100,7 @@
     <div class="card-header border-bottom d-flex justify-content-between align-items-center">
       <h5 class="card-title mb-0">Staff Information</h5>
       <div class="d-flex gap-2">
+        {{-- Commented out as requested
         <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addStaffModal">
           <i class="icon-base ri ri-add-line me-1"></i>
           Add Staff
@@ -108,6 +109,7 @@
           <i class="icon-base ri ri-add-line me-1"></i>
           Add Agent
         </button>
+        --}}
       </div>
     </div>
     <div class="card-datatable table-responsive">

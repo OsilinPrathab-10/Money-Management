@@ -12,22 +12,86 @@ document.addEventListener('DOMContentLoaded', function (e) {
   bodyBg = config.colors.bodyBg;
   headingColor = config.colors.headingColor;
 
-  // Prevent multiple form submissions
+  // AJAX form submission for Create Loan Product
   const createProductForm = document.getElementById('createProductForm');
   const submitProductBtn = document.getElementById('submitProductBtn');
   let isSubmitting = false;
 
   if (createProductForm && submitProductBtn) {
     createProductForm.addEventListener('submit', function (e) {
-      if (isSubmitting) {
-        e.preventDefault();
-        e.stopPropagation();
-        return false;
-      }
+      e.preventDefault(); // Always prevent default — we submit via AJAX
+
+      if (isSubmitting) return;
+
+      // Clear previous field errors
+      createProductForm.querySelectorAll('.is-invalid').forEach(el => el.classList.remove('is-invalid'));
+      createProductForm.querySelectorAll('.invalid-feedback').forEach(el => {
+        el.textContent = '';
+        el.style.display = 'none';
+      });
 
       isSubmitting = true;
       submitProductBtn.disabled = true;
       submitProductBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>Saving...';
+
+      const formData = new FormData(createProductForm);
+
+      fetch(createProductForm.getAttribute('action'), {
+        method: 'POST',
+        headers: {
+          'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content,
+          'Accept': 'application/json'
+        },
+        body: formData
+      })
+        .then(async response => {
+          const data = await response.json();
+
+          if (response.ok && data.success) {
+            // Close modal
+            const modalEl = document.getElementById('createProductModal');
+            const modal = bootstrap.Modal.getInstance(modalEl) || (typeof bootstrap.Modal.getOrCreateInstance === 'function' ? bootstrap.Modal.getOrCreateInstance(modalEl) : null);
+            if (modal) modal.hide();
+
+            // Show success toast
+            showToast('success', data.message || 'Loan product created successfully.');
+
+            // Refresh datatable
+            if (typeof dt_loan_products !== 'undefined') {
+              dt_loan_products.draw(false);
+            } else {
+              setTimeout(() => window.location.reload(), 1200);
+            }
+          } else if (response.status === 422 && data.errors) {
+            // Show field-level validation errors inside the modal
+            Object.keys(data.errors).forEach(field => {
+              const input = createProductForm.querySelector(`[name="${field}"]`);
+              if (input) {
+                input.classList.add('is-invalid');
+                let feedback = input.parentElement.querySelector('.invalid-feedback');
+                if (!feedback) {
+                  feedback = document.createElement('div');
+                  feedback.className = 'invalid-feedback';
+                  input.parentElement.appendChild(feedback);
+                }
+                feedback.textContent = data.errors[field][0];
+                feedback.style.display = 'block';
+              }
+            });
+            showToast('danger', 'Please fix the errors in the form.');
+          } else {
+            showToast('danger', data.message || 'Failed to save loan product.');
+          }
+        })
+        .catch(error => {
+          console.error('Create loan product error:', error);
+          showToast('danger', 'An unexpected error occurred. Please try again.');
+        })
+        .finally(() => {
+          isSubmitting = false;
+          submitProductBtn.disabled = false;
+          submitProductBtn.innerHTML = '<i class="icon-base ri ri-save-line me-1"></i> Save Product';
+        });
     });
 
     // Reset on modal close
@@ -77,6 +141,7 @@ document.addEventListener('DOMContentLoaded', function (e) {
   // Variable declaration for table
   const dt_loan_products_table = document.querySelector('.datatables-loan-products');
   const alertContainer = document.querySelector('.alert-container');
+  let dt_loan_products; // hoisted so AJAX handlers can access it
 
   // Loan Products datatable
   if (dt_loan_products_table) {
@@ -103,7 +168,7 @@ document.addEventListener('DOMContentLoaded', function (e) {
       }
     }
 
-    const dt_loan_products = new DataTable(dt_loan_products_table, {
+    dt_loan_products = new DataTable(dt_loan_products_table, {
       processing: true,
       serverSide: true,
       ajax: {
@@ -131,12 +196,29 @@ document.addEventListener('DOMContentLoaded', function (e) {
           targets: 2,
           responsivePriority: 4,
           render: function (data, type, full, meta) {
-            return `<span class="text-heading">${full.name}</span>`;
+            const name = full.name || '';
+            const icon = full.icon;
+            let imageHtml = '';
+            if (icon) {
+              imageHtml = `<img src="${icon}" alt="Icon" class="rounded-circle me-3" style="width: 32px; height: 32px; object-fit: cover; border: 1px solid #e0e0e0;" />`;
+            } else {
+              const initial = name.charAt(0).toUpperCase() || 'P';
+              imageHtml = `<div class="avatar avatar-sm me-3"><span class="avatar-initial rounded-circle bg-label-primary fs-6">${initial}</span></div>`;
+            }
+            return `<div class="d-flex align-items-center">${imageHtml}<span class="text-heading fw-medium">${name}</span></div>`;
+          }
+        },
+        {
+          // Loan Type
+          targets: 3,
+          render: function (data, type, full, meta) {
+            const loanType = full.loan_type || 'N/A';
+            return `<span class="badge bg-label-primary rounded-pill">${loanType}</span>`;
           }
         },
         {
           // Status
-          targets: 3,
+          targets: 4,
           render: function (data, type, full, meta) {
             const status = full.status;
             const checked = status === 'Active' ? 'checked' : '';

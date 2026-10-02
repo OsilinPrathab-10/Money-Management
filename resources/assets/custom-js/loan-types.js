@@ -341,8 +341,18 @@ $(function () {
           // Name
           targets: 2,
           render: function (data, type, full) {
-            var $name = full['name'];
-            return '<span class="fw-medium">' + $name + '</span>';
+            var $name = full['name'] || '';
+            var $icon = full['icon'];
+            var $imageHtml = '';
+
+            if ($icon) {
+              $imageHtml = '<img src="' + $icon + '" alt="Icon" class="rounded-circle me-3" style="width: 32px; height: 32px; object-fit: cover; border: 1px solid #e0e0e0;" />';
+            } else {
+              var $initial = $name.charAt(0).toUpperCase() || 'L';
+              $imageHtml = '<div class="avatar avatar-sm me-3"><span class="avatar-initial rounded-circle bg-label-primary fs-6">' + $initial + '</span></div>';
+            }
+
+            return '<div class="d-flex align-items-center">' + $imageHtml + '<span class="fw-medium text-heading">' + $name + '</span></div>';
           }
         },
         {
@@ -444,6 +454,11 @@ $(function () {
       success: function (response) {
         // Update modal with fresh data from server
         $('#viewLoanTypeName').text(response.name);
+        if (response.icon) {
+          $('#viewNameIcon').attr('src', response.icon).show();
+        } else {
+          $('#viewNameIcon').hide();
+        }
         $('#viewLoanTypeDescription').text(response.description || 'No description');
         $('#viewLoanTypeStatus').html('<span class="badge ' + (response.status == 1 ? 'bg-label-success' : 'bg-label-secondary') + '">' + (response.status == 1 ? 'Active' : 'Inactive') + '</span>');
 

@@ -57,6 +57,19 @@ class PermissionSeeder extends Seeder
             // EMI
             'emi.view',
 
+            // Fixed Deposit
+            'fd.scheme.view',
+            'fd.scheme.create',
+            'fd.scheme.update',
+            'fd.scheme.delete',
+            'fd.deposit.view',
+            'fd.deposit.create',
+            'fd.deposit.maturity',
+            'fd.deposit.premature',
+            'fd.deposit.close',
+            'fd.reports.view',
+            'fd.wallet.view',
+
             // Agent
             'agent.view',
             'agent.update',
@@ -96,6 +109,15 @@ class PermissionSeeder extends Seeder
 
             'emi.view',
 
+            'fd.scheme.view',
+            'fd.deposit.view',
+            'fd.deposit.create',
+            'fd.deposit.maturity',
+            'fd.deposit.premature',
+            'fd.deposit.close',
+            'fd.reports.view',
+            'fd.wallet.view',
+
             'agent.view',
             'support.view', 'support.update',
         ]);
@@ -109,6 +131,8 @@ class PermissionSeeder extends Seeder
             'loan-account.view',
             'emi.view',
             'agent.view',
+            'fd.deposit.view',
+            'fd.deposit.create',
         ]);
     }
 }

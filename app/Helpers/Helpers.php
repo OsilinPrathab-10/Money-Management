@@ -120,15 +120,17 @@ class Helpers
     $colorPrefCookieName = $isAdmin ? 'admin-colorPref' : 'front-colorPref';
     $primaryColorCookieName = $isAdmin ? 'admin-primaryColor' : 'front-primaryColor';
 
-    // Get primary color from custom.php if explicitly set
-    $primaryColor = null;
-    if (array_key_exists('primaryColor', $data)) {
-      $primaryColor = $data['primaryColor'];
-    }
+    $savedPrimaryColor = SettingsHelper::get('primary_color', null);
 
-    // Check for primary color in cookie
-    if (isset($_COOKIE[$primaryColorCookieName])) {
+    $primaryColor = null;
+    if (isset($_COOKIE[$primaryColorCookieName]) && $_COOKIE[$primaryColorCookieName]) {
       $primaryColor = $_COOKIE[$primaryColorCookieName];
+    }
+    if (!$primaryColor) {
+      $primaryColor = $savedPrimaryColor;
+    }
+    if (!$primaryColor && array_key_exists('primaryColor', $data)) {
+      $primaryColor = $data['primaryColor'];
     }
 
     // Determine style based on cookies, only if not 'blank-layout'
@@ -177,14 +179,11 @@ class Helpers
     // Get Header type from cookie or fall back to config
     $headerTypeFromCookie = isset($_COOKIE['headerType']) ? $_COOKIE['headerType'] : $data['headerType'];
 
-    // Get layout type from cookie or fall back to config
-    $layoutFromCookie = isset($_COOKIE['customize_layout']) ? $_COOKIE['customize_layout'] : $data['myLayout'];
-
     $directionVal = isset($_COOKIE['direction']) ? ($_COOKIE['direction'] === 'true' ? 'rtl' : 'ltr') : $data['myRTLMode'];
 
     //layout classes
     $layoutClasses = [
-      'layout' => $layoutFromCookie,
+      'layout' => $data['myLayout'],
       'skins' => $data['mySkins'],
       'skinName' => $skinName,
       'semiDark' => $semiDarkEnabled,
@@ -310,5 +309,17 @@ class Helpers
   --bs-primary-contrast: {$contrastColor};
 }
 CSS;
+  }
+
+  /**
+   * Same-origin web base path (no scheme/host) so AJAX never triggers mixed content.
+   */
+  public static function appWebBasePath(): string
+  {
+    $base = str_replace('\\', '/', (string) request()->getBaseUrl());
+    $base = preg_replace('#/index\.php$#i', '', $base) ?? '';
+    $base = trim($base, '/');
+
+    return $base === '' ? '/' : '/' . $base . '/';
   }
 }

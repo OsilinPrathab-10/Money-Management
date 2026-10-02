@@ -9,19 +9,21 @@
         use App\Helpers\SettingsHelper;
 
         $adminFavicon = SettingsHelper::get('admin_favicon');
-        $primaryColor = SettingsHelper::get('primary_color', '#00BFFF');
+        $primaryColor = SettingsHelper::get('primary_color', '#7100e2');
     @endphp
     
-    <!-- Favicon -->
     @if($adminFavicon)
         <link rel="icon" type="image/x-icon" href="{{ asset('storage/' . $adminFavicon) }}" />
-        <link rel="shortcut icon" href="{{ asset('storage/' . $adminFavicon) }}" />
     @else
         <link rel="icon" type="image/x-icon" href="{{ asset('assets/img/favicon/favicon.ico') }}" />
-        <link rel="shortcut icon" href="{{ asset('assets/img/favicon/favicon.ico') }}" />
     @endif
 
     <style>
+        @page {
+            size: A4;
+            margin: 0;
+        }
+
         :root {
             --primary-color: {{ $primaryColor }};
         }
@@ -33,456 +35,626 @@
         }
 
         body {
-            font-family: Arial, sans-serif;
+            font-family: 'DejaVu Sans', Arial, sans-serif;
             font-size: 11px;
-            line-height: 1.3;
-            color: #000;
-            background: white;
-            padding: 0;
+            line-height: 1.4;
+            color: #1e293b;
+            background: #ffffff;
+            padding: 15px;
         }
 
         .receipt-container {
-            width: 210mm;
+            width: 100%;
+            max-width: 800px;
             margin: 0 auto;
-            background: white;
-            border: 2px solid var(--primary-color);
-            position: relative;
+            background: #ffffff;
+            border: 2px solid {{ $primaryColor }};
+            border-radius: 8px;
+            overflow: hidden;
         }
 
-        /* Top Blue Bar */
+        /* Top Accent Bar */
         .top-bar {
-            height: 15px;
-            background: var(--primary-color);
+            height: 8px;
+            background: {{ $primaryColor }};
             width: 100%;
         }
 
         /* Header Section */
-        .header {
-            padding: 15px 20px 10px 20px;
-            border-bottom: 1px solid #ddd;
+        .header-table {
+            width: 100%;
+            border-collapse: collapse;
+            padding: 16px 20px 12px 20px;
+            border-bottom: 1px solid #e2e8f0;
         }
 
-        .header-row {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            margin-bottom: 10px;
+        .header-table td {
+            vertical-align: middle;
         }
 
-        .logo-section {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-        }
-
-        .logo {
-            width: 48px;
-            height: 48px;
+        .logo-img {
+            max-height: 48px;
+            max-width: 160px;
             object-fit: contain;
         }
 
-        .company-info {
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-        }
-
         .company-name {
-            font-size: 18px;
+            font-size: 20px;
+            font-weight: 800;
+            color: {{ $primaryColor }};
+            letter-spacing: -0.5px;
+            line-height: 1.2;
+        }
+
+        .company-subtitle {
+            font-size: 11px;
+            color: #64748b;
+            font-weight: 500;
+            margin-top: 2px;
+        }
+
+        .header-title-cell {
+            text-align: right;
+        }
+
+        .receipt-title-badge {
+            display: inline-block;
+            background: {{ $primaryColor }};
+            color: #ffffff;
+            font-size: 12px;
             font-weight: 700;
-            color: var(--primary-color);
-            letter-spacing: 0.5px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            padding: 6px 16px;
+            border-radius: 20px;
         }
 
-        .company-tagline {
+        .receipt-no-sub {
             font-size: 10px;
-            color: #555;
-            letter-spacing: 0.3px;
+            color: #64748b;
+            margin-top: 4px;
+            font-weight: 600;
         }
 
-        .details-box {
-            margin: 0 20px 15px 20px;
-            border: 1px solid #cfd3d9;
-            background: #f5f8fb;
+        /* Title banner when not in badge */
+        .banner-title {
+            text-align: center;
+            font-size: 14px;
+            font-weight: 800;
+            color: {{ $primaryColor }};
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            padding: 12px 20px 8px 20px;
+        }
+
+        /* Metadata Details Grid / Box */
+        .details-container {
+            margin: 12px 20px 16px 20px;
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 6px;
             padding: 12px 16px;
-            font-size: 10px;
         }
 
-        .details-box table {
+        .details-table {
             width: 100%;
             border-collapse: collapse;
         }
 
-        .details-box tr + tr td {
-            padding-top: 4px;
-        }
-
-        .details-box td {
-            padding: 2px 6px;
+        .details-table td {
+            padding: 4px 6px;
+            font-size: 10.5px;
             vertical-align: top;
         }
 
-        .details-box td.label {
+        .details-table td.label {
             font-weight: 600;
-            color: #3d4146;
-            width: 40%;
+            color: #475569;
+            width: 38%;
         }
 
-        .details-box td.value {
-            color: #000;
-        }
-
-        .receipt-title {
-            text-align: center;
-            font-size: 14px;
-            font-weight: bold;
-            color: var(--primary-color);
-            letter-spacing: 2px;
-            margin: 15px 0;
-        }
-
-        /* Table Section */
-        .table-section {
-            padding: 0 20px;
-            margin-bottom: 20px;
-        }
-
-        .payment-table {
-            width: 100%;
-            border-collapse: collapse;
-            border: 1px solid #000;
-            font-size: 10px;
-        }
-
-        .payment-table th {
-            background: #f0f0f0;
-            border: 1px solid #000;
-            padding: 6px 8px;
-            text-align: left;
-            font-weight: bold;
-        }
-
-        .payment-table td {
-            border: 1px solid #000;
-            padding: 6px 8px;
-            text-align: left;
-        }
-
-        .amount-cell {
-            text-align: right;
-        }
-
-        .total-row {
-            background: #f8f9fa;
-            font-weight: bold;
-        }
-
-        /* Footer Section */
-        .footer {
-            padding: 15px 20px;
-            border-top: 1px solid #ddd;
-            margin-top: 20px;
-        }
-
-        .footer-content {
-            display: flex;
-            justify-content: space-between;
-            align-items: flex-end;
-        }
-
-        .digital-signature {
-            text-align: right;
-            font-size: 10px;
-            color: #333;
-            line-height: 1.5;
-        }
-
-        .digital-signature .label {
-            color: var(--primary-color);
-            font-weight: 600;
-            letter-spacing: 0.4px;
-            display: block;
-            margin-bottom: 4px;
-        }
-
-        .generated-line {
-            text-align: center;
-            font-size: 9px;
-            color: #666;
-            margin-top: 2px;
-            font-style: italic;
-        }
-
-        /* Print Button */
-        .print-button {
-            position: fixed;
-            top: 20px;
-            right: 20px;
-            background: var(--primary-color);
-            color: white;
-            border: none;
-            padding: 12px 24px;
-            border-radius: 25px;
-            cursor: pointer;
-            font-size: 14px;
-            font-weight: 600;
-            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.15);
-            transition: all 0.3s ease;
-            z-index: 1000;
-        }
-
-        .print-button:hover {
-            background: var(--primary-color);
-            filter: brightness(0.92);
-            transform: translateY(-2px);
-            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15);
-        }
-
-        /* Print Styles */
-        @media print {
-            @page {
-                size: A4;
-                margin: 10mm 12mm 12mm 12mm;
-            }
-
-            body {
-                padding: 0;
-                background: white;
-            }
-
-            .receipt-container {
-                border: 2px solid var(--primary-color);
-                box-shadow: none;
-                max-width: none;
-                margin: 0;
-                width: 100%;
-            }
-
-            .print-button {
-                display: none;
-            }
-
-            .no-print {
-                display: none !important;
-            }
-
-            .print-footer-mask {
-                display: block;
-                position: fixed;
-                left: -2cm;
-                right: -2cm;
-                bottom: -2cm;
-                height: 3cm;
-                background: #fff;
-            }
-
-            .print-header-mask {
-                display: block;
-                position: fixed;
-                left: -2cm;
-                right: -2cm;
-                top: -2cm;
-                height: 3cm;
-                background: #fff;
-            }
-        }
-
-        .print-footer-mask {
-            display: none;
-        }
-
-        .print-header-mask {
-            display: none;
+        .details-table td.value {
+            font-weight: 700;
+            color: #0f172a;
         }
 
         /* Status Badge */
         .status-badge {
             display: inline-block;
-            padding: 4px 10px;
-            border-radius: 4px;
-            font-size: 10px;
-            font-weight: 700;
+            padding: 3px 10px;
+            border-radius: 12px;
+            font-size: 9.5px;
+            font-weight: 800;
             text-transform: uppercase;
             letter-spacing: 0.5px;
         }
 
-        .status-paid {
-            background-color: #e8fadf;
-            color: #71dd37;
-            border: 1px solid #71dd37;
+        .status-verified, .status-paid, .status-approved, .status-successful {
+            background-color: #dcfce7;
+            color: #15803d;
+            border: 1px solid #86efac;
         }
 
         .status-partial {
-            background-color: #e7e7ff;
-            color: #696cff;
-            border: 1px solid #696cff;
+            background-color: #f3e8ff;
+            color: #7e22ce;
+            border: 1px solid #d8b4fe;
         }
 
-        .status-pending {
-            background-color: #fff2e2;
-            color: #ffab00;
-            border: 1px solid #ffab00;
+        .status-pending, .status-in_progress {
+            background-color: #fef3c7;
+            color: #b45309;
+            border: 1px solid #fcd34d;
         }
 
-        .status-overdue {
-            background-color: #ffe5e5;
-            color: #ff3e1d;
-            border: 1px solid #ff3e1d;
+        .status-overdue, .status-rejected {
+            background-color: #fee2e2;
+            color: #b91c1c;
+            border: 1px solid #fca5a5;
+        }
+
+        /* Type Tag */
+        .type-tag {
+            display: inline-block;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 9px;
+            font-weight: 700;
+            text-transform: uppercase;
+        }
+
+        .type-tag-loan {
+            background: #e0f2fe;
+            color: #0369a1;
+        }
+
+        .type-tag-chit {
+            background: #ecfdf5;
+            color: #047857;
+        }
+
+        /* Table Section */
+        .table-section {
+            padding: 0 20px;
+            margin-bottom: 16px;
+        }
+
+        .payment-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 10.5px;
+            border: 1px solid #cbd5e1;
+            border-radius: 6px;
+            overflow: hidden;
+        }
+
+        .payment-table th {
+            background-color: #f1f5f9;
+            color: #334155;
+            font-weight: 700;
+            text-transform: uppercase;
+            font-size: 9.5px;
+            letter-spacing: 0.5px;
+            padding: 8px 10px;
+            border: 1px solid #cbd5e1;
+            text-align: left;
+        }
+
+        .payment-table td {
+            padding: 7px 10px;
+            border: 1px solid #e2e8f0;
+            color: #1e293b;
+            vertical-align: middle;
+        }
+
+        .payment-table tr:nth-child(even) td {
+            background-color: #f8fafc;
+        }
+
+        .amount-cell {
+            text-align: right;
+            font-weight: 600;
+            font-family: 'DejaVu Sans', sans-serif;
+        }
+
+        .total-row td {
+            background-color: #f1f5f9 !important;
+            font-weight: 800;
+            color: #0f172a;
+            border-top: 2px solid #cbd5e1;
+            font-size: 11px;
+        }
+
+        /* Footer Section */
+        .footer {
+            padding: 12px 20px 16px 20px;
+            border-top: 1px solid #e2e8f0;
+            margin-top: 10px;
+        }
+
+        .footer-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .footer-table td {
+            vertical-align: bottom;
+        }
+
+        .digital-signature {
+            text-align: right;
+            font-size: 9.5px;
+            color: #475569;
+            line-height: 1.4;
+        }
+
+        .digital-signature .sig-label {
+            color: {{ $primaryColor }};
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            display: block;
+            margin-bottom: 2px;
+        }
+
+        .generated-line {
+            text-align: center;
+            font-size: 9px;
+            color: #94a3b8;
+            margin-top: 10px;
+            font-style: italic;
+        }
+
+        /* Screen Preview Toolbar and Container */
+        @media screen {
+            body {
+                background: #f1f5f9;
+                padding: 24px 15px 48px;
+            }
+            .screen-toolbar {
+                max-width: 800px;
+                margin: 0 auto 16px auto;
+                background: #ffffff;
+                border: 1px solid #e2e8f0;
+                border-radius: 8px;
+                padding: 10px 16px;
+                box-shadow: 0 2px 6px rgba(0,0,0,0.05);
+            }
+            .toolbar-inner {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                flex-wrap: wrap;
+                gap: 12px;
+            }
+            .toolbar-badge {
+                display: inline-block;
+                background: #ede9fe;
+                color: #5b21b6;
+                font-size: 11px;
+                font-weight: 700;
+                padding: 3px 8px;
+                border-radius: 4px;
+                margin-right: 8px;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+            }
+            .toolbar-id {
+                font-weight: 700;
+                color: #0f172a;
+                font-size: 13px;
+                font-family: monospace;
+            }
+            .toolbar-right {
+                display: flex;
+                gap: 8px;
+            }
+            .btn-action {
+                border: none;
+                cursor: pointer;
+                font-weight: 600;
+                font-size: 12px;
+                padding: 7px 16px;
+                border-radius: 6px;
+                transition: all 0.2s ease;
+                display: inline-flex;
+                align-items: center;
+                gap: 6px;
+            }
+            .btn-print {
+                background: var(--primary-color);
+                color: #ffffff;
+            }
+            .btn-print:hover {
+                opacity: 0.92;
+                transform: translateY(-1px);
+            }
+            .btn-close-win {
+                background: #e2e8f0;
+                color: #334155;
+            }
+            .btn-close-win:hover {
+                background: #cbd5e1;
+            }
+            .receipt-container {
+                box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.08);
+            }
+        }
+
+        /* Print Hide */
+        @media print {
+            body {
+                padding: 0;
+                background: #ffffff;
+            }
+            .receipt-container {
+                border: none;
+                max-width: 100%;
+            }
+            .no-print {
+                display: none !important;
+            }
         }
     </style>
 </head>
 <body>
-    <!-- Print Button -->
-    <button class="print-button no-print" onclick="window.print()">
-        Print Receipt
-    </button>
 
     @php
-        $brandLogo = $adminLogo
+        $brandLogo = !empty($adminLogo)
             ? asset('storage/' . $adminLogo)
             : asset('assets/img/branding/logo.png');
-        $brandTitle = $adminTitle ?? config('variables.templateName', 'Loan App');
-        $brandSubtitle = $adminSubtitle ?? config('variables.templateSuffix', 'Loan Management System');
+        $brandTitle = $adminTitle ?? config('variables.templateName', 'Codepluse');
+        $brandSubtitle = $adminSubtitle ?? config('variables.templateSuffix', 'Chitfund & Finance');
+        $statusKey = strtolower($receiptData['status'] ?? 'verified');
     @endphp
 
+    <!-- Screen Preview Toolbar (Hidden in Print) -->
+    <div class="no-print screen-toolbar">
+        <div class="toolbar-inner">
+            <div class="toolbar-left">
+                <span class="toolbar-badge">Official Receipt</span>
+                <span class="toolbar-id">{{ $receiptData['receipt_number'] }}</span>
+            </div>
+            <div class="toolbar-right">
+                <button type="button" onclick="window.print()" class="btn-action btn-print">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
+                    Print Receipt
+                </button>
+                <button type="button" onclick="window.close()" class="btn-action btn-close-win">
+                    Close
+                </button>
+            </div>
+        </div>
+    </div>
+
     <div class="receipt-container">
-        <!-- Top Blue Bar -->
+        <!-- Top Accent Bar -->
         <div class="top-bar"></div>
 
-        <!-- Header -->
-        <div class="header">
-            <div class="header-row">
-                <div class="logo-section">
-                    <img src="{{ $brandLogo }}" alt="{{ $brandTitle }} Logo" class="logo">
-                    <div class="company-info">
-                        <div class="company-name">{{ $brandTitle }}</div>
-                        <div class="company-tagline">{{ $brandSubtitle }}</div>
+        <!-- Header Table -->
+        <table class="header-table">
+            <tr>
+                <td style="width: 60%;">
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <img src="{{ $brandLogo }}" alt="{{ $brandTitle }}" class="logo-img" onerror="this.style.display='none'">
+                        <div>
+                            <div class="company-name">{{ $brandTitle }}</div>
+                            <div class="company-subtitle">{{ $brandSubtitle }}</div>
+                        </div>
                     </div>
-                </div>
-            </div>
-            
-            <div class="receipt-title">STATEMENT / PAYMENT RECEIPT</div>
-        </div>
+                </td>
+                <td class="header-title-cell" style="width: 40%;">
+                    <div class="receipt-title-badge">PAYMENT RECEIPT</div>
+                    <div class="receipt-no-sub">{{ $receiptData['receipt_number'] }}</div>
+                </td>
+            </tr>
+        </table>
 
-        <div class="details-box">
-            <table>
+        <!-- Receipt Banner Title -->
+        <div class="banner-title">{{ $receiptData['receipt_title'] ?? 'PAYMENT RECEIPT' }}</div>
+
+        <!-- Details Grid Container -->
+        <div class="details-container">
+            <table class="details-table">
                 <tr>
-                    <td class="label">Receipt No:</td>
-                    <td class="value">{{ $receiptData['receipt_number'] }}</td>
-                </tr>
-                <tr>
-                    <td class="label">Payment Date &amp; Time:</td>
-                    <td class="value">{{ $receiptData['paid_date'] }}</td>
-                </tr>
-                <tr>
-                    <td class="label">Transaction ID:</td>
-                    <td class="value">{{ $receiptData['payment_reference'] }}</td>
-                </tr>
-                <tr>
-                    <td class="label">Mode of Payment:</td>
-                    <td class="value">{{ $receiptData['payment_method'] }}</td>
-                </tr>
-                <tr>
-                    <td class="label">Loan ID:</td>
-                    <td class="value">{{ $receiptData['application_number'] }}</td>
-                </tr>
-                <tr>
-                    <td class="label">Disbursement Date:</td>
-                    <td class="value">{{ $receiptData['disbursed_date'] }}</td>
-                </tr>
-                @if(isset($receiptData['status']))
-                <tr>
-                    <td class="label">Payment Status:</td>
-                    <td class="value">
-                        <span class="status-badge status-{{ strtolower($receiptData['status']) }}">
-                            {{ $receiptData['status_label'] ?? ucfirst($receiptData['status']) }}
-                        </span>
+                    <td style="width: 50%; padding-right: 12px;">
+                        <table class="details-table">
+                            <tr>
+                                <td class="label">Receipt No:</td>
+                                <td class="value">{{ $receiptData['receipt_number'] }}</td>
+                            </tr>
+                            @if(!empty($receiptData['client_name']))
+                            <tr>
+                                <td class="label">Customer Name:</td>
+                                <td class="value">{{ $receiptData['client_name'] }}</td>
+                            </tr>
+                            @endif
+                            @php
+                                $paidDateOnly = $receiptData['paid_date_only'] ?? (!empty($receiptData['paid_date']) ? explode(' ', $receiptData['paid_date'])[0] : 'N/A');
+                                $displayTime = $receiptData['paid_time'] ?? '';
+                                if (!$displayTime && !empty($receiptData['paid_date']) && str_contains($receiptData['paid_date'], ' ')) {
+                                    $displayTime = trim(substr($receiptData['paid_date'], 10));
+                                }
+                            @endphp
+                            <tr>
+                                <td class="label">Payment Date:</td>
+                                <td class="value">{{ $paidDateOnly }}</td>
+                            </tr>
+                            @if(!empty($displayTime))
+                            <tr>
+                                <td class="label">Payment Time:</td>
+                                <td class="value">
+                                    <span style="font-family: monospace; font-size: 11px; font-weight: 700; color: {{ $primaryColor }};">{{ $displayTime }}</span>
+                                    <span style="font-size: 8.5px; font-weight: 600; color: #64748b; background: #e2e8f0; padding: 1px 4px; border-radius: 3px; margin-left: 2px;">IST</span>
+                                </td>
+                            </tr>
+                            @endif
+                            <tr>
+                                <td class="label">Transaction ID:</td>
+                                <td class="value">{{ $receiptData['payment_reference'] }}</td>
+                            </tr>
+                            <tr>
+                                <td class="label">Mode of Payment:</td>
+                                <td class="value" style="text-transform: uppercase;">{{ $receiptData['payment_method'] }}</td>
+                            </tr>
+                        </table>
+                    </td>
+                    <td style="width: 50%; padding-left: 12px; border-left: 1px solid #e2e8f0;">
+                        <table class="details-table">
+                            <tr>
+                                <td class="label">{{ $receiptData['account_label'] ?? 'Account / Ref' }}:</td>
+                                <td class="value">{{ $receiptData['application_number'] }}</td>
+                            </tr>
+                            <tr>
+                                <td class="label">{{ $receiptData['start_date_label'] ?? 'Start Date' }}:</td>
+                                <td class="value">{{ $receiptData['disbursed_date'] }}</td>
+                            </tr>
+                            @php $splitLabel = $receiptData['split_item_label'] ?? 'EMI'; @endphp
+                            @if(!empty($receiptData['instalment_label']))
+                            <tr>
+                                <td class="label">{{ $splitLabel }}:</td>
+                                <td class="value">{{ $receiptData['instalment_label'] }}</td>
+                            </tr>
+                            @endif
+                            @if(!empty($receiptData['collector_name']))
+                            <tr>
+                                <td class="label">Collected By:</td>
+                                <td class="value">{{ $receiptData['collector_name'] }}</td>
+                            </tr>
+                            @endif
+                            <tr>
+                                <td class="label">Payment Status:</td>
+                                <td class="value">
+                                    <span class="status-badge status-{{ $statusKey }}">
+                                        {{ $receiptData['status_label'] ?? ucfirst($statusKey) }}
+                                    </span>
+                                </td>
+                            </tr>
+                        </table>
                     </td>
                 </tr>
-                @endif
             </table>
         </div>
 
-        <!-- Payment Table -->
+        <!-- Payment Table Section -->
         <div class="table-section">
+            @if(!empty($receiptData['items']) && count($receiptData['items']) > 1)
             <table class="payment-table">
                 <thead>
                     <tr>
-                        <th>Description</th>
-                        <th class="amount-cell">Amount</th>
+                        <th style="width: 5%; text-align: center;">#</th>
+                        <th style="width: 22%;">Type / Acc Ref</th>
+                        <th style="width: 25%;">Customer / Item</th>
+                        <th style="width: 18%;">Installment / EMI</th>
+                        <th style="width: 15%;" class="amount-cell">Total Due</th>
+                        <th style="width: 15%;" class="amount-cell">Amount Paid</th>
                     </tr>
                 </thead>
                 <tbody>
+                    @foreach($receiptData['items'] as $index => $item)
+                    @php $itemType = strtolower($item['type'] ?? 'loan'); @endphp
                     <tr>
-                        <td>Principal Amount (Paid)</td>
-                        <td class="amount-cell">₹ {{ number_format($receiptData['principal_amount'], 2) }}</td>
+                        <td style="text-align: center; font-weight: 600;">{{ $index + 1 }}</td>
+                        <td>
+                            <span class="type-tag type-tag-{{ $itemType }}">{{ strtoupper($itemType) }}</span>
+                            <div style="font-weight: 700; margin-top: 2px;">{{ $item['account_number'] }}</div>
+                        </td>
+                        <td>{{ $item['client_name'] }}</td>
+                        <td style="font-weight: 600;">{{ $item['instalment_no'] }}</td>
+                        <td class="amount-cell">Rs. {{ number_format($item['due_amount'], 2) }}</td>
+                        <td class="amount-cell">Rs. {{ number_format($item['paid_amount'], 2) }}</td>
+                    </tr>
+                    @endforeach
+                    @if(!empty($receiptData['show_overdue']) && $receiptData['show_overdue'])
+                    <tr>
+                        <td colspan="5" style="text-align: right; font-weight: 700; color: #b91c1c;">Penalty / Overdue Charges</td>
+                        <td class="amount-cell" style="color: #b91c1c; font-weight: 700;">Rs. {{ number_format($receiptData['overdue_amount'], 2) }}</td>
+                    </tr>
+                    @endif
+                    <tr class="total-row">
+                        <td colspan="5" style="text-align: right;">Total Payable Amount</td>
+                        <td class="amount-cell">Rs. {{ number_format($receiptData['total_amount_display'] ?? $receiptData['emi_amount'], 2) }}</td>
+                    </tr>
+                    <tr class="total-row" style="background-color: #e2e8f0 !important;">
+                        <td colspan="5" style="text-align: right; color: {{ $primaryColor }};">Total Amount Paid</td>
+                        <td class="amount-cell" style="color: {{ $primaryColor }}; font-size: 12px;">Rs. {{ number_format($receiptData['paid_amount'], 2) }}</td>
+                    </tr>
+                </tbody>
+            </table>
+            @else
+            <table class="payment-table">
+                <thead>
+                    <tr>
+                        <th style="width: 70%;">Description</th>
+                        <th style="width: 30%;" class="amount-cell">Amount</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @if(($receiptData['module'] ?? '') === 'chit')
+                    <tr>
+                        <td style="font-weight: 600;">Installment Amount (Paid)</td>
+                        <td class="amount-cell">Rs. {{ number_format($receiptData['principal_amount'] ?? $receiptData['paid_amount'], 2) }}</td>
                     </tr>
                     <tr>
-                        <td>Interest Payment</td>
-                        <td class="amount-cell">₹ {{ number_format($receiptData['interest_amount'], 2) }}</td>
+                        <td>Dividend / Discount Applied</td>
+                        <td class="amount-cell">Nil</td>
+                    </tr>
+                    @else
+                    <tr>
+                        <td style="font-weight: 600;">Principal Amount (Paid)</td>
+                        <td class="amount-cell">Rs. {{ number_format($receiptData['principal_amount'], 2) }}</td>
+                    </tr>
+                    <tr>
+                        <td>Interest / Charges Paid</td>
+                        <td class="amount-cell">Rs. {{ number_format($receiptData['interest_amount'], 2) }}</td>
                     </tr>
                     <tr>
                         <td>Adjustment of Fees</td>
                         <td class="amount-cell">Nil</td>
                     </tr>
-                    <tr>
-                        <td>Thanking You</td>
-                        <td class="amount-cell"></td>
-                    </tr>
+                    @endif
                     @if(!empty($receiptData['show_overdue']) && $receiptData['show_overdue'])
                     <tr>
-                        <td>Overdue Amount</td>
-                        <td class="amount-cell">₹ {{ number_format($receiptData['overdue_amount'], 2) }}</td>
+                        <td style="color: #b91c1c; font-weight: 600;">Penalty / Overdue Amount</td>
+                        <td class="amount-cell" style="color: #b91c1c; font-weight: 600;">Rs. {{ number_format($receiptData['overdue_amount'], 2) }}</td>
                     </tr>
                     @endif
                     <tr class="total-row">
-                        <td><strong>Total Amount</strong></td>
-                        <td class="amount-cell"><strong>₹ {{ number_format($receiptData['total_amount_display'] ?? $receiptData['emi_amount'], 2) }}</strong></td>
+                        <td style="text-align: right;">Total Amount Payable</td>
+                        <td class="amount-cell">Rs. {{ number_format($receiptData['total_amount_display'] ?? $receiptData['emi_amount'], 2) }}</td>
                     </tr>
-                    <tr class="total-row">
-                        <td><strong>Total Amount Paid</strong></td>
-                        <td class="amount-cell"><strong>₹ {{ number_format($receiptData['paid_amount'], 2) }}</strong></td>
+                    <tr class="total-row" style="background-color: #e2e8f0 !important;">
+                        <td style="text-align: right; color: {{ $primaryColor }};">Total Amount Paid</td>
+                        <td class="amount-cell" style="color: {{ $primaryColor }}; font-size: 12px;">Rs. {{ number_format($receiptData['paid_amount'], 2) }}</td>
                     </tr>
                 </tbody>
             </table>
+            @endif
         </div>
 
-        <!-- Footer -->
+        <!-- Footer Section -->
         <div class="footer">
-            <div class="footer-content">
-                <div></div>
-                <div class="digital-signature">
-                    <span class="label">Digitally Signed</span>
-                    <span>{{ now()->format('d-m-Y h:i A') }}</span>
-                </div>
-            </div>
+            <table class="footer-table">
+                <tr>
+                    <td style="width: 60%;">
+                        <div style="font-size: 9px; color: #64748b;">
+                            Thank you for your payment.<br>
+                            This is a system generated document. No physical signature is required.
+                        </div>
+                    </td>
+                    <td style="width: 40%;">
+                        <div class="digital-signature">
+                            <span class="sig-label">&#10004; Digitally Verified</span>
+                            <span>{{ now()->format('d-m-Y h:i A') }}</span>
+                        </div>
+                    </td>
+                </tr>
+            </table>
             <div class="generated-line">
                 Receipt generated automatically on {{ now()->format('d-m-Y h:i A') }}.
             </div>
         </div>
     </div>
 
-    <div class="print-footer-mask"></div>
-
-    <script>
-        // Auto-trigger print dialog when page loads
-        window.addEventListener('load', function() {
-            // Small delay to ensure page is fully rendered
-            setTimeout(function() {
-                window.print();
-            }, 500);
-        });
-
-        // Handle print button click
-        function printReceipt() {
-            window.print();
-        }
-
-        // Close window after printing (optional)
-        window.addEventListener('afterprint', function() {
-            // Uncomment the line below if you want to close the window after printing
-            // window.close();
-        });
-    </script>
 </body>
 </html>

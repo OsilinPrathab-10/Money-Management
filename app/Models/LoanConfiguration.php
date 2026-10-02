@@ -25,7 +25,9 @@ class LoanConfiguration extends Model
         'minimum_partial_percentage',
         'partial_payment_timing',
         'penalty_calculation_method',
+        'penalty_charge_type',
         'is_active',
+        'prefix',
     ];
 
     protected $casts = [
@@ -43,6 +45,7 @@ class LoanConfiguration extends Model
         'minimum_partial_percentage' => 'decimal:2',
         'partial_payment_timing' => 'string',
         'penalty_calculation_method' => 'string',
+        'penalty_charge_type' => 'string',
         'is_active' => 'boolean',
     ];
 
@@ -76,6 +79,51 @@ class LoanConfiguration extends Model
     public static function getPenaltyConfig()
     {
         return self::where('type', 'penalty')->first();
+    }
+
+    /**
+     * Get loan account prefix configuration
+     */
+    public static function getAccountPrefixConfig()
+    {
+        return self::firstOrCreate(
+            ['type' => 'account_prefix'],
+            [
+                'prefix' => 'SDS',
+                'is_active' => true
+            ]
+        );
+    }
+
+    /**
+     * Resolve the penalty payable on an overdue EMI using this penalty configuration.
+     *
+     * A percentage penalty is charged on the principal portion of the overdue EMI.
+     * Interest-only cycles carry no principal, so those fall back to the loan's
+     * remaining principal balance to keep the penalty from collapsing to zero.
+     */
+    public function calculatePenaltyForEmi(Emi $emi, ?LoanAccount $loanAccount = null): float
+    {
+        $loanAccount = $loanAccount ?: $emi->loanAccount;
+
+        if (($this->penalty_charge_type ?? 'fixed') !== 'percentage') {
+            $fixed = ((float) $this->charge_value > 0)
+                ? (float) $this->charge_value
+                : (float) ($loanAccount->penalty ?? 0);
+
+            return round($fixed, 2);
+        }
+
+        $rate = ((float) $this->charge_value > 0)
+            ? (float) $this->charge_value
+            : (float) ($loanAccount->penalty ?? 0);
+
+        $base = (float) ($emi->principal_amount ?? 0);
+        if ($base <= 0 && $loanAccount) {
+            $base = (float) $loanAccount->remaining_principal_balance;
+        }
+
+        return round(($base * $rate) / 100, 2);
     }
 
     /**

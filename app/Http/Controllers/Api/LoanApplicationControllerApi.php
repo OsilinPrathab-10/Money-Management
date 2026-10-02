@@ -44,6 +44,7 @@ class LoanApplicationControllerApi extends Controller
                 'loan_amount_max' => $loanProduct->loan_amount_max,
                 'interest_rate' => $loanProduct->interest_rate,
                 'tenure' => $loanProduct->tenure,
+                'status' => 'pending',
             ]);
 
             // 2. Prepare loan application details
@@ -75,7 +76,10 @@ class LoanApplicationControllerApi extends Controller
             DB::commit();
 
             // Fire event
-            event(new \App\Events\NewLoanApplicationEvent($application));
+            event(new \App\Events\NewLoanApplicationEvent(
+                $application,
+                \App\Services\AppNotificationService::detectSource()
+            ));
 
             return response()->json([
                 'success' => true,
@@ -131,29 +135,41 @@ class LoanApplicationControllerApi extends Controller
         $user = Auth::user();
         $client = $user->client;
 
+        $application = LoanApplication::where('id', $request->input('application_id'))
+            ->where('client_id', $client->id)
+            ->first();
+
+        if (! $application) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Loan application not found.',
+            ], 404);
+        }
+
+        $emiDayMax = LoanApplication::maxEmiDayFor(
+            $application->term_unit,
+            $application->emi_start_date
+        );
+
         $validated = $request->validate([
             'application_id' => 'required|exists:loan_applications,id',
             'loan_amount' => 'required|numeric|min:0',
             'tenure' => 'required|integer|min:1',
-            'emi_day' => 'required|integer|min:1|max:28',
-            'payment_gateway' => 'required|in:razor-pay,cash-free,pay-U',
-            'payment_method' => 'required|in:e-nach,manual',
+            'emi_day' => 'required|integer|min:1|max:' . $emiDayMax,
             'verification_video' => 'required|file|mimetypes:video/mp4,video/mpeg,video/quicktime|max:51200',
             'loan_agreement_pdf' => 'required|file|mimetypes:application/pdf|max:10240',
+        ], [
+            'emi_day.max' => 'EMI day cannot be greater than ' . $emiDayMax . ' for the selected start month.',
         ]);
 
-        DB::transaction(function () use ($request, $client) {
-
-            $application = LoanApplication::where('id', $request->application_id)
-                ->where('client_id', $client->id)
-                ->firstOrFail();
+        DB::transaction(function () use ($request, $client, $application) {
 
             $updateData = [
                 'loan_amount' => $request->loan_amount,
                 'tenure' => $request->tenure,
                 'emi_day' => $request->emi_day,
-                'payment_method' => $request->payment_method,
-                'payment_gateway' => $request->payment_gateway,
+                'payment_method' => 'manual',
+                'payment_gateway' => null,
                 'status' => 'in_progress',
             ];
 
@@ -198,13 +214,23 @@ class LoanApplicationControllerApi extends Controller
         $user = Auth::user();
         $client = $user->client;
 
-        $activeLoans = LoanAccount::with(['emis.loanAccount.loanApplication', 'loanApplication.product'])
+        $activeLoans = LoanAccount::with([
+                'emis.loanAccount.loanApplication',
+                'loanApplication.product',
+                'loanApplication.disbursementDetail',
+                'clientLoanDocuments',
+            ])
             ->where('client_id', $client->id)
             ->where('status', 'active')
             ->orderByDesc('created_at')
             ->get();
 
-        $closedLoans = LoanAccount::with(['emis.loanAccount.loanApplication', 'loanApplication.product'])
+        $closedLoans = LoanAccount::with([
+                'emis.loanAccount.loanApplication',
+                'loanApplication.product',
+                'loanApplication.disbursementDetail',
+                'clientLoanDocuments',
+            ])
             ->where('client_id', $client->id)
             ->where('status', 'closed')
             ->orderByDesc('created_at')
@@ -220,7 +246,13 @@ class LoanApplicationControllerApi extends Controller
 
     public function loanDetail($account_id)
     {
-        $loan = LoanAccount::with(['client', 'emis.loanAccount.loanApplication', 'loanApplication.product'])
+        $loan = LoanAccount::with([
+                        'client',
+                        'emis.loanAccount.loanApplication',
+                        'loanApplication.product',
+                        'loanApplication.disbursementDetail',
+                        'clientLoanDocuments',
+                    ])
                     ->where('id', $account_id)
                     ->first();
 

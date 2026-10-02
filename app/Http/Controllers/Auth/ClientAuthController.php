@@ -45,14 +45,6 @@ class ClientAuthController extends Controller
         
         // Find user by phone in users table
         $user = User::where('phone', $phone)->first();
-        
-        // If not found in users table, check clients table
-        if (!$user) {
-            $client = Client::where('mobile_no', $phone)->first();
-            if ($client && $client->user_id) {
-                $user = User::find($client->user_id);
-            }
-        }
 
         if (!$user) {
             Log::warning("OTP Request: Phone number $phone not registered.");
@@ -162,30 +154,13 @@ class ClientAuthController extends Controller
         Log::info("User lookup result", ['found' => $user ? 'Yes' : 'No', 'user_id' => $user->id ?? 'N/A']);
 
         if (!$user) {
-            // Check clients table as fallback
+            // Check clients table as fallback (only to find user if user_id was set, do not create)
             $client = Client::where('client_email', $login)
                             ->orWhere('client_phone', $login)
                             ->first();
             
-            if ($client) {
-                // If client exists but user doesn't, or user_id is missing, find/create user
-                if ($client->user_id) {
-                    $user = User::find($client->user_id);
-                }
-                
-                if (!$user) {
-                    // Create user for the client
-                    $user = User::firstOrCreate(
-                        ['phone' => $client->client_phone],
-                        [
-                            'name' => $client->client_name,
-                            'email' => $client->client_email,
-                            'password' => Hash::make($client->client_phone),
-                        ]
-                    );
-                    $client->user_id = $user->id;
-                    $client->save();
-                }
+            if ($client && $client->user_id) {
+                $user = User::find($client->user_id);
             }
         }
 

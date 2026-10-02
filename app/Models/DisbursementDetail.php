@@ -21,10 +21,25 @@ class DisbursementDetail extends Model
         'bank_name',
         'disbursement_amount',
         'disburse_at',
+        'internal_bank_account_id',
+        'collateral_document',
+        'other_document',
+        'additional_documents',
+    ];
+
+    protected $casts = [
+        'disbursement_amount' => 'decimal:2',
+        'disburse_at' => 'datetime',
+        'additional_documents' => 'array',
     ];
 
     public function application()
     {
         return $this->belongsTo(LoanApplication::class);
+    }
+
+    public function internalBankAccount()
+    {
+        return $this->belongsTo(\App\Models\Account\BankAccount::class, 'internal_bank_account_id');
     }
 }

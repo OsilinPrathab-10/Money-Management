@@ -2,43 +2,56 @@
 
 namespace App\Services;
 
-use GuzzleHttp\Client;
+use App\Models\Agent;
+use App\Models\Client;
+use App\Models\User;
+use App\Models\UserDevice;
+use GuzzleHttp\Client as HttpClient;
 use Google\Client as GoogleClient;
+use Illuminate\Support\Facades\Log;
 
 class PushNotificationService
 {
-    protected Client $http;
+    protected HttpClient $http;
+
     protected GoogleClient $gclient;
+
     protected string $projectId;
- 
-    
+
+    protected bool $credentialsLoaded = false;
+
     public function __construct()
     {
-        $this->http = new Client(['http_errors' => false, 'timeout' => 15]);
-
-        // 1. Get the path
-        $credentialsPath = storage_path('app/firebase/companynameop-firebase-adminsdk-fbsvc-0bc81559d6.json');
-        
+        $this->http = new HttpClient(['http_errors' => false, 'timeout' => 5, 'connect_timeout' => 3]);
         $this->gclient = new GoogleClient();
+        $this->projectId = (string) config('firebase.project_id', config('services.firebase.project_id', ''));
 
-        // 2. ONLY attempt to set AuthConfig if the file actually exists
-        if (file_exists($credentialsPath) && is_readable($credentialsPath)) {
+        $credentialsPath = $this->resolveCredentialsPath();
+        if ($credentialsPath) {
             $this->gclient->setAuthConfig($credentialsPath);
-            $this->gclient->setScopes(['https://www.googleapis.com/auth/firebase.messaging']);
-        }
+            $this->gclient->addScope('https://www.googleapis.com/auth/firebase.messaging');
+            $this->credentialsLoaded = true;
 
-        // 3. Use config() instead of env() for better performance/caching
-        $this->projectId = (string) env('FIREBASE_PROJECT_ID', '');
+            if ($this->projectId === '') {
+                $json = json_decode((string) file_get_contents($credentialsPath), true);
+                $this->projectId = (string) ($json['project_id'] ?? '');
+            }
+        }
+    }
+
+    public function isConfigured(): bool
+    {
+        return $this->credentialsLoaded && $this->projectId !== '';
     }
 
     /**
      * Send notifications via FCM HTTP v1.
-     * $deviceToken: string token OR array of tokens. v1 requires one token per request (we loop).
+     * $deviceToken: string token OR array of tokens.
      */
     public function sendPushNotification($deviceToken, string $title, string $body, array $data = []): array
     {
-        if ($this->projectId === '') {
-            return ['success' => false, 'status' => 0, 'error' => 'Missing FIREBASE_PROJECT_ID'];
+        if (! $this->isConfigured()) {
+            return ['success' => false, 'status' => 0, 'error' => 'Firebase is not configured. Check FIREBASE_CREDENTIALS and FIREBASE_PROJECT_ID.'];
         }
 
         $tokens = $this->sanitizeTokens($deviceToken);
@@ -47,8 +60,8 @@ class PushNotificationService
         }
 
         $accessToken = $this->getAccessToken();
-        if (!$accessToken) {
-            return ['success' => false, 'status' => 0, 'error' => 'Failed to acquire OAuth2 access token (check FIREBASE_CREDENTIALS path and JSON)'];
+        if (! $accessToken) {
+            return ['success' => false, 'status' => 0, 'error' => 'Failed to acquire OAuth2 access token'];
         }
 
         $url = "https://fcm.googleapis.com/v1/projects/{$this->projectId}/messages:send";
@@ -76,6 +89,7 @@ class PushNotificationService
                     'apns' => [
                         'payload' => [
                             'aps' => [
+                                'sound' => 'default',
                                 'content-available' => 1,
                             ],
                         ],
@@ -86,7 +100,7 @@ class PushNotificationService
                 ],
             ];
 
-            if (!empty($data)) {
+            if (! empty($data)) {
                 $payload['message']['data'] = $this->stringifyData($data);
             }
 
@@ -95,13 +109,17 @@ class PushNotificationService
             $json = json_decode((string) $res->getBody(), true);
 
             $ok = $status === 200 && isset($json['name']);
-            if (!$ok) {
+            if (! $ok) {
                 $err = $json['error']['status'] ?? ($json['error']['message'] ?? '');
-                // UNREGISTERED/INVALID_ARGUMENT/NOT_FOUND => stale/bad token (prune)
                 if ($status === 404 || in_array($err, ['UNREGISTERED', 'INVALID_ARGUMENT', 'NOT_FOUND'], true)) {
                     $invalid[] = $t;
                 }
                 $allOk = false;
+                Log::warning('FCM send failed', [
+                    'status' => $status,
+                    'error' => $err,
+                    'token_suffix' => substr($t, -8),
+                ]);
             }
 
             $statuses[] = $status;
@@ -113,6 +131,8 @@ class PushNotificationService
             ];
         }
 
+        $this->forgetInvalidTokens($invalid);
+
         return [
             'success' => $allOk,
             'status' => end($statuses) ?: 0,
@@ -121,14 +141,10 @@ class PushNotificationService
         ];
     }
 
-    /**
-     * Send high-priority data messages via FCM HTTP v1.
-     * $deviceToken: string token OR array of tokens.
-     */
     public function sendDataMessage($deviceToken, array $data = []): array
     {
-        if ($this->projectId === '') {
-            return ['success' => false, 'status' => 0, 'error' => 'Missing FIREBASE_PROJECT_ID'];
+        if (! $this->isConfigured()) {
+            return ['success' => false, 'status' => 0, 'error' => 'Firebase is not configured'];
         }
 
         $tokens = $this->sanitizeTokens($deviceToken);
@@ -137,7 +153,7 @@ class PushNotificationService
         }
 
         $accessToken = $this->getAccessToken();
-        if (!$accessToken) {
+        if (! $accessToken) {
             return ['success' => false, 'status' => 0, 'error' => 'Failed to acquire OAuth2 access token'];
         }
 
@@ -174,9 +190,8 @@ class PushNotificationService
             $res = $this->http->post($url, ['headers' => $headers, 'json' => $payload]);
             $status = $res->getStatusCode();
             $json = json_decode((string) $res->getBody(), true);
-
             $ok = $status === 200 && isset($json['name']);
-            if (!$ok) {
+            if (! $ok) {
                 $allOk = false;
             }
 
@@ -194,13 +209,159 @@ class PushNotificationService
         ];
     }
 
+    public function sendToUser(int $userId, string $title, string $body, string $type = 'general', array $data = []): array
+    {
+        $user = User::with(['userDevice', 'client', 'agent'])->find($userId);
+        if (! $user) {
+            return ['success' => false, 'error' => 'User not found'];
+        }
+
+        $tokens = $this->tokensForUser($user);
+        if (empty($tokens)) {
+            Log::info('No FCM tokens for user push notification', ['user_id' => $userId, 'type' => $type]);
+
+            return ['success' => false, 'error' => 'No devices registered'];
+        }
+
+        return $this->sendPushNotification($tokens, $title, $body, array_merge($data, [
+            'type' => $type,
+            'user_id' => (string) $userId,
+        ]));
+    }
+
+    public function sendToCustomer(Client $client, string $title, string $body, string $type = 'general', array $data = []): array
+    {
+        $client->loadMissing('user.userDevice');
+        $tokens = [(string) $client->fcm_token];
+
+        if ($client->user) {
+            $tokens = array_merge($tokens, $this->tokensForUser($client->user));
+        }
+
+        $tokens = $this->sanitizeTokens($tokens);
+        if (empty($tokens)) {
+            Log::info('No FCM tokens for customer push notification', [
+                'client_id' => $client->id,
+                'user_id' => $client->user_id,
+                'type' => $type,
+            ]);
+
+            return ['success' => false, 'error' => 'No devices registered'];
+        }
+
+        return $this->sendPushNotification($tokens, $title, $body, array_merge($data, [
+            'type' => $type,
+            'audience' => 'customer',
+            'client_id' => (string) $client->id,
+        ]));
+    }
+
+    public static function isLikelyFcmToken(?string $token): bool
+    {
+        $token = trim((string) $token);
+        if ($token === '' || preg_match('/\s/', $token) || strlen($token) < 40) {
+            return false;
+        }
+
+        // Sanctum personal access tokens look like "12|abc..." — not FCM.
+        if (preg_match('/^\d+\|/', $token)) {
+            return false;
+        }
+
+        return true;
+    }
+
+    public function sendToAgent(Agent $agent, string $title, string $body, string $type = 'general', array $data = []): array
+    {
+        $user = $agent->user;
+        if ($user) {
+            return $this->sendToUser($user->id, $title, $body, $type, array_merge($data, [
+                'audience' => 'agent',
+                'agent_id' => (string) $agent->id,
+            ]));
+        }
+
+        return ['success' => false, 'error' => 'Agent user not found'];
+    }
+
+    /**
+     * @return list<string>
+     */
+    public function tokensForUser(User $user): array
+    {
+        $deviceTokens = UserDevice::where('user_id', $user->id)
+            ->whereNull('logout_at')
+            ->whereNotNull('device_token')
+            ->where('device_token', '!=', '')
+            ->orderByDesc('updated_at')
+            ->pluck('device_token')
+            ->all();
+
+        $tokens = [];
+        if (! empty($deviceTokens)) {
+            $tokens[] = $deviceTokens[0];
+        }
+
+        if (! empty($user->fcm_token)) {
+            $tokens[] = $user->fcm_token;
+        }
+
+        if (! empty(optional($user->client)->fcm_token)) {
+            $tokens[] = $user->client->fcm_token;
+        }
+
+        return $this->sanitizeTokens($tokens);
+    }
+
+    protected function resolveCredentialsPath(): ?string
+    {
+        $configured = (string) config('firebase.credentials', config('services.firebase.credentials', ''));
+        $candidates = array_filter([
+            $configured,
+            storage_path('app/firebase/fintronixmicrofinance-c2656-firebase-adminsdk-fbsvc-7d456d1b6f.json'),
+            base_path('fintronixmicrofinance-c2656-firebase-adminsdk-fbsvc-7d456d1b6f.json'),
+            storage_path('app/firebase/codepluse-gen-pvt-ltd-firebase-adminsdk-fbsvc-0bc81559d6.json'),
+        ]);
+
+        foreach ($candidates as $path) {
+            if ($path === '') {
+                continue;
+            }
+            if (! str_starts_with($path, '/') && ! preg_match('/^[A-Za-z]:[\\\\\\/]/', $path)) {
+                $path = base_path($path);
+            }
+            if (is_file($path) && is_readable($path)) {
+                return $path;
+            }
+        }
+
+        Log::error('Firebase Admin SDK credentials file not found');
+
+        return null;
+    }
+
+    protected function forgetInvalidTokens(array $tokens): void
+    {
+        $tokens = array_values(array_unique(array_filter($tokens)));
+        if ($tokens === []) {
+            return;
+        }
+
+        UserDevice::whereIn('device_token', $tokens)->update(['device_token' => null]);
+        User::whereIn('fcm_token', $tokens)->update(['fcm_token' => null]);
+        Client::whereIn('fcm_token', $tokens)->update(['fcm_token' => null]);
+    }
+
     private function getAccessToken(): ?string
     {
         try {
             $this->gclient->fetchAccessTokenWithAssertion();
             $token = $this->gclient->getAccessToken();
+
             return $token['access_token'] ?? null;
         } catch (\Throwable $e) {
+            Log::error('Firebase OAuth token failed: ' . $e->getMessage());
+
             return null;
         }
     }
@@ -210,20 +371,18 @@ class PushNotificationService
         $arr = is_array($deviceToken) ? $deviceToken : [$deviceToken];
         $out = [];
         foreach ($arr as $t) {
-            if (!is_string($t))
+            if (! is_string($t)) {
                 continue;
+            }
             $t = trim($t);
-            if ($t === '')
+            if (! self::isLikelyFcmToken($t)) {
                 continue;
-            if (preg_match('/\s/', $t))
-                continue;  // no spaces
-            if (strlen($t) < 80)
-                continue;         // simple length heuristic
-            $out[$t] = true;                       // dedup
+            }
+            $out[$t] = true;
         }
+
         return array_keys($out);
     }
-    // In PushNotificationService
 
     private function stringifyData(array $data): array
     {
@@ -234,11 +393,11 @@ class PushNotificationService
             } elseif (is_bool($v)) {
                 $v = $v ? 'true' : 'false';
             } elseif ($v === null) {
-                $v = ''; // or omit the key instead of empty string
+                $v = '';
             }
             $out[(string) $k] = (string) $v;
         }
+
         return $out;
     }
-
 }

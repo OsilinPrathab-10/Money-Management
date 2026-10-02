@@ -95,7 +95,7 @@ class ClientLoanDocument extends Model
     public function isVisible(): bool
     {
         // Non-NOC documents are always visible
-        if ($this->document_type !== 'noc') {
+        if (strtolower((string) $this->document_type) !== 'noc') {
             return true;
         }
 

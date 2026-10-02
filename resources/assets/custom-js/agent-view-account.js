@@ -9,26 +9,64 @@
     const enableAccountEditBtn = document.querySelector('#enableAccountEditBtn');
     const accountFormActions = document.querySelector('#accountFormActions');
 
+    function setAccountFieldsEditable(editable) {
+        if (!formAccountSettings) return;
+
+        const editableFields = formAccountSettings.querySelectorAll('[data-editable="true"]');
+        editableFields.forEach(field => {
+            if (field.tagName === 'SELECT') {
+                field.disabled = !editable;
+            } else {
+                if (editable) {
+                    field.removeAttribute('readonly');
+                    field.readOnly = false;
+                } else {
+                    field.setAttribute('readonly', 'readonly');
+                    field.readOnly = true;
+                }
+            }
+
+            if (editable) {
+                field.classList.add('is-editable');
+            } else {
+                field.classList.remove('is-editable');
+            }
+        });
+
+        // Password fields must be fully writable in edit mode
+        document.querySelectorAll('.password-edit-section').forEach(section => {
+            section.classList.toggle('d-none', !editable);
+        });
+
+        ['password', 'password_confirmation'].forEach(id => {
+            const el = document.getElementById(id);
+            if (!el) return;
+            el.removeAttribute('readonly');
+            el.removeAttribute('disabled');
+            el.readOnly = false;
+            el.disabled = false;
+            if (!editable) {
+                el.value = '';
+            }
+        });
+    }
+
     // Enable edit mode
     if (enableAccountEditBtn) {
         enableAccountEditBtn.addEventListener('click', function () {
-            // Get all editable fields
-            const editableFields = formAccountSettings.querySelectorAll('[data-editable="true"]');
-
-            editableFields.forEach(field => {
-                if (field.tagName === 'SELECT') {
-                    field.disabled = false;
-                } else {
-                    field.readOnly = false;
-                }
-                field.classList.add('is-editable');
-            });
+            setAccountFieldsEditable(true);
 
             // Show form actions
             accountFormActions.classList.remove('d-none');
 
             // Hide edit button
             enableAccountEditBtn.style.display = 'none';
+
+            // Focus new password so user can type immediately
+            const passwordInput = document.getElementById('password');
+            if (passwordInput) {
+                setTimeout(() => passwordInput.focus(), 50);
+            }
         });
     }
 
@@ -42,16 +80,7 @@
                 // Reset form
                 formAccountSettings.reset();
 
-                // Disable all editable fields
-                const editableFields = formAccountSettings.querySelectorAll('[data-editable="true"]');
-                editableFields.forEach(field => {
-                    if (field.tagName === 'SELECT') {
-                        field.disabled = true;
-                    } else {
-                        field.readOnly = true;
-                    }
-                    field.classList.remove('is-editable');
-                });
+                setAccountFieldsEditable(false);
 
                 // Hide form actions
                 accountFormActions.classList.add('d-none');
@@ -67,6 +96,57 @@
         formAccountSettings.addEventListener('submit', function (e) {
             e.preventDefault();
 
+            const passwordInput = document.getElementById('password');
+            const confirmInput = document.getElementById('password_confirmation');
+            const passwordError = document.getElementById('passwordError');
+            const confirmError = document.getElementById('passwordConfirmationError');
+
+            if (passwordError) passwordError.textContent = '';
+            if (confirmError) confirmError.textContent = '';
+            if (passwordInput) passwordInput.classList.remove('is-invalid');
+            if (confirmInput) confirmInput.classList.remove('is-invalid');
+
+            const password = passwordInput ? passwordInput.value : '';
+            const confirmPassword = confirmInput ? confirmInput.value : '';
+
+            if (password || confirmPassword) {
+                let passwordInvalid = false;
+                if (!password) {
+                    if (passwordInput) passwordInput.classList.add('is-invalid');
+                    if (passwordError) passwordError.textContent = 'New password is required';
+                    passwordInvalid = true;
+                } else if (password.length < 8) {
+                    if (passwordInput) passwordInput.classList.add('is-invalid');
+                    if (passwordError) passwordError.textContent = 'Password must be at least 8 characters';
+                    passwordInvalid = true;
+                }
+
+                if (!confirmPassword) {
+                    if (confirmInput) confirmInput.classList.add('is-invalid');
+                    if (confirmError) confirmError.textContent = 'Please confirm the new password';
+                    passwordInvalid = true;
+                } else if (password !== confirmPassword) {
+                    if (confirmInput) confirmInput.classList.add('is-invalid');
+                    if (confirmError) confirmError.textContent = 'Passwords do not match';
+                    passwordInvalid = true;
+                }
+
+                if (passwordInvalid) {
+                    return;
+                }
+            }
+
+            const ifscInput = document.getElementById('ifsc_code');
+            if (ifscInput) ifscInput.classList.remove('is-invalid');
+            const ifscValue = ifscInput ? ifscInput.value.trim().toUpperCase() : '';
+            if (ifscValue && !/^[A-Z]{4}0[A-Z0-9]{6}$/.test(ifscValue)) {
+                ifscInput.classList.add('is-invalid');
+                if (typeof showAlert === 'function') {
+                    showAlert('danger', 'Please enter a valid IFSC code (e.g. SBIN0001234)');
+                }
+                return;
+            }
+
             const formData = new FormData(this);
             const submitBtn = this.querySelector('button[type="submit"]');
             const originalBtnText = submitBtn.innerHTML;
@@ -79,10 +159,30 @@
                 method: 'POST',
                 body: formData,
                 headers: {
-                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
+                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').getAttribute('content'),
+                    'Accept': 'application/json'
                 }
             })
-                .then(response => response.json())
+                .then(async response => {
+                    const data = await response.json().catch(() => ({}));
+                    if (!response.ok) {
+                        const firstError = data.errors
+                            ? Object.values(data.errors).flat()[0]
+                            : (data.message || 'Failed to update agent profile');
+
+                        if (data.errors?.password?.[0] && passwordError) {
+                            passwordInput?.classList.add('is-invalid');
+                            passwordError.textContent = data.errors.password[0];
+                        }
+                        if (data.errors?.password_confirmation?.[0] && confirmError) {
+                            confirmInput?.classList.add('is-invalid');
+                            confirmError.textContent = data.errors.password_confirmation[0];
+                        }
+
+                        throw new Error(firstError);
+                    }
+                    return data;
+                })
                 .then(data => {
                     if (data.success) {
                         // Show success alert
@@ -108,16 +208,11 @@
                             statusBadge.textContent = 'Inactive';
                         }
 
-                        // Disable all editable fields
-                        const editableFields = formAccountSettings.querySelectorAll('[data-editable="true"]');
-                        editableFields.forEach(field => {
-                            if (field.tagName === 'SELECT') {
-                                field.disabled = true;
-                            } else {
-                                field.readOnly = true;
-                            }
-                            field.classList.remove('is-editable');
-                        });
+                        // Clear password fields after successful save
+                        if (passwordInput) passwordInput.value = '';
+                        if (confirmInput) confirmInput.value = '';
+
+                        setAccountFieldsEditable(false);
 
                         // Hide form actions
                         accountFormActions.classList.add('d-none');
@@ -134,7 +229,7 @@
                 })
                 .catch(error => {
                     console.error('Error:', error);
-                    showAlert('danger', 'An error occurred while updating the profile');
+                    showAlert('danger', error.message || 'An error occurred while updating the profile');
 
                     // Re-enable submit button
                     submitBtn.disabled = false;

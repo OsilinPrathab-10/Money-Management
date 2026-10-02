@@ -212,8 +212,13 @@ document.addEventListener('DOMContentLoaded', function () {
     });
   });
 
-  // Apply primary color
+  // Apply primary color using shared helper when available
   function applyPrimaryColor(color) {
+    if (window.Helpers && typeof window.Helpers.setColor === 'function') {
+      window.Helpers.setColor(color, false);
+      return;
+    }
+
     const r = parseInt(color.substr(1, 2), 16);
     const g = parseInt(color.substr(3, 2), 16);
     const b = parseInt(color.substr(5, 2), 16);
@@ -326,7 +331,25 @@ document.addEventListener('DOMContentLoaded', function () {
           if (data.success) {
             showToast('success', data.message || 'Settings saved successfully!');
 
-            // Reload after 1.5 seconds to apply changes
+            const primaryColor = data.primary_color || formData.get('primary_color');
+            if (primaryColor) {
+              const layoutName = document.documentElement.getAttribute('data-template') || '';
+              try {
+                if (layoutName) {
+                  localStorage.setItem(`templateCustomizer-${layoutName}--Color`, primaryColor);
+                  localStorage.setItem(`templateCustomizer-${layoutName}--PrimaryColor`, primaryColor);
+                }
+              } catch (e) {}
+
+              if (window.Helpers && typeof window.Helpers.setColor === 'function') {
+                window.Helpers.setColor(primaryColor, true);
+              }
+              if (window.templateCustomizer && typeof window.templateCustomizer.setColor === 'function') {
+                window.templateCustomizer.setColor(primaryColor, true);
+              }
+            }
+
+            // Reload after 1.5 seconds to apply changes everywhere
             setTimeout(() => {
               window.location.reload();
             }, 1500);

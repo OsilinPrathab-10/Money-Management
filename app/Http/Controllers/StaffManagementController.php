@@ -9,6 +9,9 @@ use App\Models\StaffExpense;
 use App\Models\StaffAdvance;
 use App\Models\Branch;
 use App\Models\Holiday;
+use App\Models\Agent;
+use App\Services\AgentProfileService;
+use App\Services\MenuAccessService;
 use Spatie\Permission\Models\Role;
 use Illuminate\Http\Request;
 use Carbon\Carbon;
@@ -16,12 +19,16 @@ use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Response;
+use InvalidArgumentException;
 
 class StaffManagementController extends Controller
 {
     public function index(Request $request)
     {
-        $allStaffs = Staff::with(['branch', 'user.roles'])
+        // Auto-create missing agents rows for staff already given the Agent role
+        app(AgentProfileService::class)->backfillMissingProfiles();
+
+        $allStaffs = Staff::with(['branch', 'user.roles', 'user.agent', 'user.menuAssignments'])
             ->where(function ($q) {
                 $q->whereHas('user', function ($query) {
                     $query->whereDoesntHave('roles', function ($qr) {
@@ -36,12 +43,24 @@ class StaffManagementController extends Controller
             return !($s->user && $s->user->hasRole('Agent'));
         });
 
+        $agentProfileService = app(AgentProfileService::class);
         $agents = $allStaffs->filter(function ($s) {
             return $s->user && $s->user->hasRole('Agent');
+        })->map(function ($s) use ($agentProfileService) {
+            $profile = $s->user?->agent;
+            $s->setAttribute('agent_profile_id', $profile?->id);
+            $s->setAttribute(
+                'assigned_clients_count',
+                $profile ? $agentProfileService->assignedClientCount($profile) : 0
+            );
+            return $s;
         });
 
         $branches = Branch::all();
         $roles = Role::whereNotIn('name', ['Client'])->get();
+        $handoverAgents = Agent::where('status', 'active')
+            ->orderBy('agent_name')
+            ->get(['id', 'agent_name', 'agent_code', 'agent_phone']);
         $holidays = Holiday::orderBy('date', 'desc')->get();
 
         // Attendance data for the "Daily Marking" sub-tab
@@ -67,10 +86,28 @@ class StaffManagementController extends Controller
 
         // For Roles summary
         $rolesSummary = Role::withCount('users')->get();
+        $menuAccess = app(MenuAccessService::class);
+        $menuCatalog = $menuAccess->catalog();
+
+        $staffs = $staffs->map(function ($s) use ($menuAccess) {
+            $keys = $s->user ? $menuAccess->keysForUser($s->user) : [];
+            $s->setAttribute('assigned_menu_keys', $keys);
+            $s->setAttribute('assigned_menu_labels', $menuAccess->labelsForKeys($keys));
+            $s->setAttribute('menu_source', $s->user && $s->user->use_custom_menus ? 'custom' : 'role');
+            return $s;
+        });
+
+        $agents = $agents->map(function ($s) use ($menuAccess) {
+            $keys = $s->user ? $menuAccess->keysForUser($s->user) : [];
+            $s->setAttribute('assigned_menu_keys', $keys);
+            $s->setAttribute('assigned_menu_labels', $menuAccess->labelsForKeys($keys));
+            $s->setAttribute('menu_source', $s->user && $s->user->use_custom_menus ? 'custom' : 'role');
+            return $s;
+        });
 
         return view('admin.staff-management.index', compact(
-            'staffs', 'agents', 'branches', 'roles', 'holidays', 'rolesSummary', 'month', 'year',
-            'date', 'dailyStaffs', 'dailyAttendances', 'daysInMonth', 'monthlyAttendances'
+            'staffs', 'agents', 'branches', 'roles', 'handoverAgents', 'holidays', 'rolesSummary', 'month', 'year',
+            'date', 'dailyStaffs', 'dailyAttendances', 'daysInMonth', 'monthlyAttendances', 'menuCatalog'
         ));
     }
 
@@ -92,6 +129,9 @@ class StaffManagementController extends Controller
             'role' => 'nullable|exists:roles,name',
             'profile_photo' => 'nullable|image|max:2048',
             'password' => 'nullable|string|min:8|confirmed',
+            'menu_mode' => 'nullable|in:inherit,custom',
+            'menus' => 'nullable|array',
+            'menus.*' => 'string',
         ], [
             'name.regex' => 'Name must contain only alphabets and spaces.',
             'phone.digits' => 'Mobile number must be exactly 10 digits.',
@@ -110,38 +150,64 @@ class StaffManagementController extends Controller
             $data['profile_photo'] = $request->file('profile_photo')->store('staff/profiles', 'public');
         }
 
-        // Create User account if Role is selected
-        if ($request->role) {
-            $userEmail = $request->email ?: ($request->phone . '');
-            $user = User::firstOrNew(['phone' => $request->phone]);
-            $user->name = $request->name;
-            if (!$user->exists || !$user->email) {
-                $user->email = $userEmail;
-            }
-            if (!$user->exists) {
-                $user->password = Hash::make($request->password ?: $request->phone); // Default password is phone if empty
-            }
-            $user->status = 'active';
-            $user->save();
+        try {
+            DB::beginTransaction();
 
-            $user->syncRoles([$request->role]);
-            $data['user_id'] = $user->id;
+            // Create User account if Role is selected
+            if ($request->role) {
+                $userEmail = $request->email ?: ($request->phone . '');
+                $user = User::firstOrNew(['phone' => $request->phone]);
+                $user->name = $request->name;
+                if (!$user->exists || !$user->email) {
+                    $user->email = $userEmail;
+                }
+                if (!$user->exists) {
+                    $user->password = Hash::make($request->password ?: $request->phone); // Default password is phone if empty
+                }
+                $user->status = 'active';
+                $user->save();
+
+                $user->syncRoles([$request->role]);
+                $data['user_id'] = $user->id;
+
+                $this->syncStaffMenuAccess($user, $request);
+            }
+
+            $staff = Staff::create($data);
+
+            // Agent role requires an operational agents profile (shown in Agent Management)
+            if ($request->role === 'Agent' && !empty($data['user_id'])) {
+                $user = User::findOrFail($data['user_id']);
+                app(AgentProfileService::class)->ensureAgentProfile($user, $staff);
+            }
+
+            DB::commit();
+        } catch (InvalidArgumentException $e) {
+            DB::rollBack();
+            return back()->withInput()->with('error', $e->getMessage());
+        } catch (\Throwable $e) {
+            DB::rollBack();
+            return back()->withInput()->with('error', 'Failed to create staff: ' . $e->getMessage());
         }
 
-        Staff::create($data);
-
-        return back()->with('success', 'Staff created successfully');
+        $label = $request->role === 'Agent' ? 'Agent' : 'Staff';
+        return back()->with('success', "{$label} created successfully");
     }
 
     public function update(Request $request, $id)
     {
-        $staff = Staff::findOrFail($id);
+        $staff = Staff::with('user.agent')->findOrFail($id);
         
         if ($request->branch_id == '0' || $request->branch_id === '') {
             $request->merge(['branch_id' => null]);
         }
         if ($request->role == '0' || $request->role === '') {
             $request->merge(['role' => null]);
+        }
+
+        // Only Admin may change system roles
+        if (!auth()->user()->hasRole('Admin')) {
+            return back()->with('error', 'Only Admin can change staff roles.');
         }
 
         $request->validate([
@@ -152,9 +218,17 @@ class StaffManagementController extends Controller
             'branch_id' => 'nullable|exists:branches,id',
             'role' => 'nullable|exists:roles,name',
             'status' => 'required|in:active,inactive',
+            'password' => 'nullable|string|min:8|confirmed',
+            'handover_agent_id' => 'nullable|exists:agents,id',
+            'handover_remarks' => 'nullable|string|max:500',
+            'menu_mode' => 'nullable|in:inherit,custom',
+            'menus' => 'nullable|array',
+            'menus.*' => 'string',
         ], [
             'name.regex' => 'Name must contain only alphabets and spaces.',
             'phone.digits' => 'Mobile number must be exactly 10 digits.',
+            'password.min' => 'Password must be at least 8 characters.',
+            'password.confirmed' => 'Passwords do not match.',
         ]);
 
         $data = $request->only(['name', 'email', 'phone', 'salary_amount', 'status', 'branch_id']);
@@ -171,35 +245,146 @@ class StaffManagementController extends Controller
             $data['profile_photo'] = $request->file('profile_photo')->store('staff/profiles', 'public');
         }
 
-        // Update/Create User account
-        if ($request->role) {
-            $userEmail = $request->email ?: ($request->phone . '@shanmugafinance.local');
-            $user = User::firstOrNew(['phone' => $request->phone]);
-            $user->name = $request->name;
-            if (!$user->exists || !$user->email) {
-                $user->email = $userEmail;
-            }
-            if (!$user->exists) {
-                $user->password = Hash::make($request->phone);
-            }
-            $user->status = $request->status == 'active' ? 'active' : 'inactive';
-            $user->save();
+        $previousRole = $staff->user ? ($staff->user->getRoleNames()->first() ?? null) : null;
+        $newRole = $request->role; // null means No Login Rights
+        $wasAgent = $previousRole === 'Agent';
+        $becomesAgent = $newRole === 'Agent';
+        $leavesAgentRole = $wasAgent && !$becomesAgent;
 
-            $user->syncRoles([$request->role]);
-            $data['user_id'] = $user->id;
-        } else if ($staff->user_id) {
-            // Remove role if they had one but now it's "No Login Rights"
-            $user = User::find($staff->user_id);
-            if ($user) {
-                $user->roles()->detach();
-                $user->status = 'inactive';
-                $user->save();
+        $agentProfileService = app(AgentProfileService::class);
+        $existingAgent = $staff->user?->agent;
+
+        // Leaving Agent role with assigned clients requires handover
+        if ($leavesAgentRole && $existingAgent) {
+            $clientCount = $agentProfileService->assignedClientCount($existingAgent);
+            if ($clientCount > 0) {
+                $request->validate([
+                    'handover_agent_id' => [
+                        'required',
+                        'exists:agents,id',
+                        function ($attribute, $value, $fail) use ($existingAgent) {
+                            if ((int) $value === (int) $existingAgent->id) {
+                                $fail('Please select a different agent to hand over clients.');
+                            }
+                        },
+                    ],
+                ], [
+                    'handover_agent_id.required' => "This agent has {$clientCount} assigned client(s). Select another agent for handover before changing the role.",
+                ]);
             }
         }
 
-        $staff->update($data);
+        try {
+            DB::beginTransaction();
 
-        return back()->with('success', 'Staff updated successfully');
+            // Update/Create User account
+            if ($newRole) {
+                $userEmail = $request->email ?: ($request->phone . '@shanmugafinance.local');
+                $user = User::firstOrNew(['phone' => $request->phone]);
+                // Prefer existing linked user if phone changed
+                if ($staff->user_id && (!$user->exists || $user->id === $staff->user_id)) {
+                    $user = User::find($staff->user_id) ?: $user;
+                    $user->phone = $request->phone;
+                }
+                $user->name = $request->name;
+                if (!$user->exists || !$user->email) {
+                    $user->email = $userEmail;
+                } elseif ($request->email) {
+                    $user->email = $request->email;
+                }
+                if (!$user->exists) {
+                    $user->password = Hash::make($request->password ?: $request->phone);
+                } elseif ($request->password) {
+                    $user->password = Hash::make($request->password);
+                }
+                $user->status = $request->status == 'active' ? 'active' : 'inactive';
+                $user->save();
+
+                $user->syncRoles([$newRole]);
+                $data['user_id'] = $user->id;
+
+                $this->syncStaffMenuAccess($user, $request);
+
+                if ($becomesAgent) {
+                    // Profile synced after staff->update below
+                }
+
+                if ($leavesAgentRole && $existingAgent) {
+                    if ($request->filled('handover_agent_id')) {
+                        $toAgent = Agent::where('status', 'active')->findOrFail($request->handover_agent_id);
+                        $agentProfileService->handoverClients(
+                            $existingAgent,
+                            $toAgent,
+                            $request->handover_remarks
+                        );
+                    }
+                    $agentProfileService->deactivateAgentProfile($existingAgent);
+                }
+            } else if ($staff->user_id) {
+                // Remove role if they had one but now it's "No Login Rights"
+                $user = User::find($staff->user_id);
+                if ($user) {
+                    if ($wasAgent && $existingAgent) {
+                        $clientCount = $agentProfileService->assignedClientCount($existingAgent);
+                        if ($clientCount > 0) {
+                            if (!$request->filled('handover_agent_id')) {
+                                throw new InvalidArgumentException(
+                                    "This agent has {$clientCount} assigned client(s). Select another agent for handover before removing login rights."
+                                );
+                            }
+                            $toAgent = Agent::where('status', 'active')->findOrFail($request->handover_agent_id);
+                            if ((int) $toAgent->id === (int) $existingAgent->id) {
+                                throw new InvalidArgumentException('Please select a different agent to hand over clients.');
+                            }
+                            $agentProfileService->handoverClients(
+                                $existingAgent,
+                                $toAgent,
+                                $request->handover_remarks
+                            );
+                        }
+                        $agentProfileService->deactivateAgentProfile($existingAgent);
+                    }
+
+                    $user->roles()->detach();
+                    $user->status = 'inactive';
+                    app(MenuAccessService::class)->syncUserMenus($user, false, []);
+                    if ($request->password) {
+                        $user->password = Hash::make($request->password);
+                    }
+                    $user->save();
+                }
+            }
+
+            $staff->update($data);
+
+            // Sync agent profile details when remaining an agent
+            if ($becomesAgent && $staff->user_id) {
+                $user = User::find($staff->user_id);
+                if ($user) {
+                    $agentProfileService->ensureAgentProfile($user, $staff->fresh());
+                }
+            }
+
+            DB::commit();
+        } catch (InvalidArgumentException $e) {
+            DB::rollBack();
+            return back()->withInput()->with('error', $e->getMessage());
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            DB::rollBack();
+            throw $e;
+        } catch (\Throwable $e) {
+            DB::rollBack();
+            return back()->withInput()->with('error', 'Failed to update staff: ' . $e->getMessage());
+        }
+
+        $message = 'Staff updated successfully';
+        if ($leavesAgentRole && $request->filled('handover_agent_id')) {
+            $message = 'Role updated and clients handed over successfully';
+        } elseif (!$wasAgent && $becomesAgent) {
+            $message = 'Staff converted to Agent and added to the agent list successfully';
+        }
+
+        return back()->with('success', $message);
     }
 
     public function destroy($id)
@@ -673,5 +858,24 @@ class StaffManagementController extends Controller
         }
 
         return ['logo' => asset('storage/' . $logoPath), 'is_base64' => false];
+    }
+
+    protected function syncStaffMenuAccess(User $user, Request $request): void
+    {
+        if (! auth()->user()?->hasRole('Admin')) {
+            return;
+        }
+
+        // Only apply when menu_mode is present (staff forms that include the section)
+        if (! $request->filled('menu_mode') && ! $request->has('menus')) {
+            return;
+        }
+
+        $useCustom = $request->input('menu_mode') === 'custom';
+        app(MenuAccessService::class)->syncUserMenus(
+            $user,
+            $useCustom,
+            $request->input('menus', [])
+        );
     }
 }

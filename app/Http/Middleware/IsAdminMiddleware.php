@@ -2,28 +2,34 @@
 
 namespace App\Http\Middleware;
 
+use App\Services\MenuAccessService;
 use Closure;
 use Illuminate\Http\Request;
-use Symfony\Component\HttpFoundation\Response;
 use Illuminate\Support\Facades\Auth;
+use Symfony\Component\HttpFoundation\Response;
 
 class IsAdminMiddleware
 {
     /**
-     * Handle an incoming request.
-     *
-     * @param  \Closure(\Illuminate\Http\Request): (\Symfony\Component\HttpFoundation\Response)  $next
+     * Admin always passes. Staff/Agent may pass when the current page
+     * was dynamically assigned to them via Menu Access / personal override.
      */
     public function handle(Request $request, Closure $next): Response
     {
-      if (!Auth::check()) {
-          return redirect('/'); // redirect to login page
-      }
+        if (! Auth::check()) {
+            return redirect('/');
+        }
 
-      if (!Auth::user()->hasRole('Admin')) {
-          abort(403, 'Only Admin can access this section.');
-      }
+        $user = Auth::user();
 
-      return $next($request);
+        if ($user->hasRole('Admin')) {
+            return $next($request);
+        }
+
+        if (app(MenuAccessService::class)->userCanAccessRequest($user, $request)) {
+            return $next($request);
+        }
+
+        abort(403, 'You do not have access to this section. Ask Admin to assign the menu for your login.');
     }
 }

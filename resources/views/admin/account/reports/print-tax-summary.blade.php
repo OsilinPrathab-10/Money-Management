@@ -97,7 +97,7 @@
 @endsection
 
 @section('content')
-<div class="container-xxl flex-grow-1 container-p-y">
+<div class="account-module">
   
   <!-- Header Section -->
   <div class="card report-header-card mb-4">
@@ -113,18 +113,27 @@
       </div>
       <div class="d-flex flex-column align-items-md-end gap-3">
         <form method="GET" action="{{ route('account.reports.tax-summary.print') }}" class="m-0">
-          <div class="report-date-badge d-inline-flex align-items-center gap-2 p-1 pe-3">
+          <div class="report-date-badge d-inline-flex align-items-center gap-2 p-2 pe-3 flex-wrap">
             <i class="ri-calendar-event-line ms-2"></i>
-            <span class="small">{{ __('Period') }}:</span>
-            <input type="date" name="from_date" class="form-control form-control-sm bg-transparent text-white border-0 shadow-none p-0 m-0" style="color-scheme: dark; width: auto; font-weight: 600; cursor: pointer; outline: none;" value="{{ $filters['from_date'] ?? '' }}" onchange="this.form.submit()">
-            <span class="small text-white-50 mx-1">{{ __('to') }}</span>
-            <input type="date" name="to_date" class="form-control form-control-sm bg-transparent text-white border-0 shadow-none p-0 m-0" style="color-scheme: dark; width: auto; font-weight: 600; cursor: pointer; outline: none;" value="{{ $filters['to_date'] ?? '' }}" onchange="this.form.submit()">
+            @include('partials.date-range-filter', [
+              'fromId' => 'taxSummaryFrom',
+              'toId' => 'taxSummaryTo',
+              'presetId' => 'taxSummaryPreset',
+              'fromName' => 'from_date',
+              'toName' => 'to_date',
+              'fromValue' => $filters['from_date'] ?? '',
+              'toValue' => $filters['to_date'] ?? '',
+              'presetValue' => request('date_preset'),
+              'autoSubmit' => true,
+              'size' => 'sm',
+              'wrapperClass' => 'text-white',
+            ])
           </div>
         </form>
         <div class="d-flex align-items-center gap-2">
           @include('admin.account.reports._export-toolbar', [
             'exportRoute' => 'account.reports.tax-summary.export',
-            'query' => ['from_date' => $filters['from_date'] ?? '', 'to_date' => $filters['to_date'] ?? ''],
+            'query' => ['from_date' => $filters['from_date'] ?? '', 'to_date' => $filters['to_date'] ?? '', 'date_preset' => request('date_preset', 'all')],
           ])
           <a href="{{ route('account.reports.index') }}" class="btn btn-outline-light rounded-pill px-3">
             <i class="ri-arrow-left-line me-1"></i> {{ __('Back to Hub') }}

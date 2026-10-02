@@ -45,6 +45,7 @@ class AccountModuleServiceProvider extends ServiceProvider
             'view-credit-notes', 'approve-credit-notes', 'delete-credit-notes',
             'manage-revenue-categories', 'create-revenue-categories', 'edit-revenue-categories', 'delete-revenue-categories',
             'manage-expense-categories', 'create-expense-categories', 'edit-expense-categories', 'delete-expense-categories',
+            'manage-account-categories', 'create-account-categories', 'edit-account-categories', 'delete-account-categories',
             'manage-revenues', 'manage-any-revenues', 'manage-own-revenues',
             'create-revenues', 'edit-revenues', 'delete-revenues', 'approve-revenues', 'post-revenues',
             'manage-expenses', 'manage-any-expenses', 'manage-own-expenses',

@@ -48,7 +48,7 @@
 </head>
 <body>
 
-<div class="title">PAYMENT RECEIPT</div>
+<div class="title">{{ $receiptData['receipt_title'] ?? 'LOAN PAYMENT RECEIPT' }}</div>
 
 <table>
     <tr>
@@ -72,6 +72,16 @@
         <td>{{ $receiptData['disbursed_date'] }}</td>
     </tr>
 </table>
+
+@if(!empty($receiptData['instalment_label']))
+@php $splitLabel = $receiptData['split_item_label'] ?? 'EMI'; @endphp
+<table>
+    <tr>
+        <td class="label">{{ $splitLabel }}</td>
+        <td>{{ $receiptData['instalment_label'] }}</td>
+    </tr>
+</table>
+@endif
 
 <div class="section-title">Payment Details</div>
 

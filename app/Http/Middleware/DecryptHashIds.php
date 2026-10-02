@@ -33,7 +33,9 @@ class DecryptHashIds
         } else {
             // Decrypt all parameters that look like HashIds
             foreach ($parameters as $name => $value) {
-                // If it's a string and doesn't look like a numeric ID, try to decrypt it
+                if (in_array($name, ['documentType', 'format', 'type', 'status'], true)) {
+                    continue;
+                }
                 if (is_string($value) && !ctype_digit($value)) {
                     $this->decryptParameter($request, $name, $value);
                 }

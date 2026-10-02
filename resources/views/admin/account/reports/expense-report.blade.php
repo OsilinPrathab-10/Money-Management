@@ -19,7 +19,7 @@
 @endphp
 
 @section('content')
-<div class="container-xxl flex-grow-1 container-p-y">
+<div class="account-module">
   <div class="d-flex flex-wrap justify-content-between align-items-center mb-4">
     <h4 class="fw-bold mb-0">
       <i class="ri-arrow-right-up-line text-danger me-2"></i>{{ $pageTitle ?? __('Expense Report') }}
@@ -32,16 +32,22 @@
   <!-- Filters Card -->
   <div class="card shadow-sm border-0 rounded-4 mb-4">
     <div class="card-body">
-      <form method="GET" action="{{ url()->current() }}" class="row g-3 align-items-end">
-        <div class="col-md-4">
-          <label class="form-label fw-bold small text-muted text-uppercase">{{ __('Start Date') }}</label>
-          <input type="date" name="start_date" class="form-control" value="{{ $startDate }}" onchange="this.form.submit()">
+      <form method="GET" action="{{ url()->current() }}" class="row g-3 align-items-center">
+        <div class="col-12 col-lg">
+          @include('partials.date-range-filter', [
+            'fromId' => 'accReportExpStart',
+            'toId' => 'accReportExpEnd',
+            'presetId' => 'accReportExpPreset',
+            'fromName' => 'start_date',
+            'toName' => 'end_date',
+            'fromValue' => $startDate,
+            'toValue' => $endDate,
+            'presetValue' => request('date_preset', 'all'),
+            'autoSubmit' => true,
+            'size' => 'sm',
+          ])
         </div>
-        <div class="col-md-4">
-          <label class="form-label fw-bold small text-muted text-uppercase">{{ __('End Date') }}</label>
-          <input type="date" name="end_date" class="form-control" value="{{ $endDate }}" onchange="this.form.submit()">
-        </div>
-        <div class="col-md-4 text-md-end">
+        <div class="col-auto text-lg-end ms-lg-auto">
           <div class="text-muted small mb-1">{{ __('Total Records') }}</div>
           <h5 class="mb-0 fw-bold">{{ $expenses->count() }}</h5>
         </div>

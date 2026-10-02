@@ -12,6 +12,7 @@ use App\Models\Account\BankAccount;
 use App\Models\Account\BankTransfer;
 use App\Services\Account\AccountExportService;
 use App\Services\Account\BankTransactionsService;
+use App\Services\Account\ChitAccountingService;
 use App\Services\Account\JournalService;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
@@ -63,6 +64,10 @@ class BankTransferController extends Controller
         if(Auth::user()->can('create-bank-transfers')){
             $validated = $request->validated();
 
+            if ((int) $validated['from_account_id'] === (int) $validated['to_account_id']) {
+                return back()->with('error', __('Source and Destination bank accounts cannot be the same account.'));
+            }
+
             // Validate sufficient balance
             $fromAccount = BankAccount::find($validated['from_account_id']);
             $totalAmount = $validated['transfer_amount'] + ($validated['transfer_charges'] ?? 0);
@@ -102,6 +107,10 @@ class BankTransferController extends Controller
             }
 
             $validated = $request->validated();
+
+            if ((int) $validated['from_account_id'] === (int) $validated['to_account_id']) {
+                return back()->with('error', __('Source and Destination bank accounts cannot be the same account.'));
+            }
 
             // Validate sufficient balance
             $fromAccount = BankAccount::find($validated['from_account_id']);
@@ -159,17 +168,27 @@ class BankTransferController extends Controller
                 $bankTransactionsService = new BankTransactionsService();
                 $bankTransactionsService->createTransferBankTransactions($banktransfer);
 
-                // Create journal entries
-                $journalService = new JournalService();
-                $journalEntry = $journalService->createBankTransferJournal($banktransfer);
+                // Create journal entry if GL accounts are configured
+                try {
+                    $journalService = new JournalService();
+                    $journalEntry = $journalService->createBankTransferJournal($banktransfer);
+                    if ($journalEntry) {
+                        $banktransfer->journal_entry_id = $journalEntry->id;
+                    }
+                } catch (\Exception $e) {
+                    // Continue even if GL account is missing, log warning
+                    \Illuminate\Support\Facades\Log::warning('Bank transfer journal creation skipped: ' . $e->getMessage());
+                }
 
-                // Update bank account balances
+                // Update bank account balances (deducting transfer_amount + transfer_charges from source bank account)
                 $bankTransactionsService->updateBankBalance($banktransfer->from_account_id, -$banktransfer->total_debit);
                 $bankTransactionsService->updateBankBalance($banktransfer->to_account_id, $banktransfer->transfer_amount);
 
+                // Transfer charges are a company cost — post them to the Expense module.
+                app(ChitAccountingService::class)->recordInternalTransferCharges($banktransfer);
+
                 // Update status to completed
                 $banktransfer->status = 'completed';
-                $banktransfer->journal_entry_id = $journalEntry->id;
                 $banktransfer->save();
 
                 ProcessBankTransfer::dispatch($banktransfer);
@@ -232,6 +251,8 @@ class BankTransferController extends Controller
 
         $banktransfers = $query->get();
         $totalAmount = (float) ($banktransfers->sum('transfer_amount') ?? 0);
+        $totalCharges = (float) ($banktransfers->sum('transfer_charges') ?? 0);
+        $totalDebitSum = (float) ($banktransfers->sum('total_debit') ?? 0);
 
         $rows = $banktransfers->map(function ($tr) {
             return [
@@ -240,6 +261,8 @@ class BankTransferController extends Controller
                 'from' => $tr->fromAccount?->account_name ?? '—',
                 'to' => $tr->toAccount?->account_name ?? '—',
                 'amount' => '₹' . number_format((float) ($tr->transfer_amount ?? 0), 2),
+                'charges' => '₹' . number_format((float) ($tr->transfer_charges ?? 0), 2),
+                'total_debit' => '₹' . number_format((float) ($tr->total_debit ?? 0), 2),
                 'status' => $tr->status ?? '—',
             ];
         })->values()->all();
@@ -250,6 +273,8 @@ class BankTransferController extends Controller
             'from' => '',
             'to' => '',
             'amount' => '₹' . number_format($totalAmount, 2),
+            'charges' => '₹' . number_format($totalCharges, 2),
+            'total_debit' => '₹' . number_format($totalDebitSum, 2),
             'status' => '',
         ];
 
@@ -259,6 +284,8 @@ class BankTransferController extends Controller
             ['key' => 'from', 'label' => __('From')],
             ['key' => 'to', 'label' => __('To')],
             ['key' => 'amount', 'label' => __('Amount'), 'class' => 'text-end'],
+            ['key' => 'charges', 'label' => __('Transfer Charges'), 'class' => 'text-end'],
+            ['key' => 'total_debit', 'label' => __('Total Debit'), 'class' => 'text-end'],
             ['key' => 'status', 'label' => __('Status')],
         ];
 

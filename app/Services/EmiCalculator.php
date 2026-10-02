@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Support\CalendarWeek;
 use Carbon\Carbon;
 
 class EmiCalculator
@@ -31,6 +32,10 @@ class EmiCalculator
         $start = $startDate ? Carbon::parse($startDate) : Carbon::today();
         $dueDate = clone $start;
 
+        if ($frequency === 'weekly' && $emiDay !== null && $emiDay >= 1 && $emiDay <= 7) {
+            $dueDate = CalendarWeek::alignToIsoWeekday($dueDate, (int) $emiDay);
+        }
+
         if ($interestType === 'reducing' || $interestType === 'declining_balance') {
             $ratePerPeriod = 0;
             if ($frequency === 'daily') {
@@ -52,21 +57,7 @@ class EmiCalculator
             $currentBalance = $principal;
 
             for ($i = 1; $i <= $intervals; $i++) {
-                // Calculate next due date based on frequency
-                if ($frequency === 'daily') {
-                    $dueDate->addDay();
-                } elseif ($frequency === 'weekly') {
-                    $dueDate->addWeek();
-                    if ($emiDay !== null && $emiDay >= 1 && $emiDay <= 7) {
-                        // Set to specific day of week (1=Mon, 7=Sun)
-                        $dueDate->setISODate($dueDate->year, $dueDate->weekOfYear, $emiDay);
-                    }
-                } else {
-                    $dueDate->addMonth();
-                    if ($emiDay !== null) {
-                        $dueDate->day = min($emiDay, $dueDate->daysInMonth);
-                    }
-                }
+                $dueDate = $this->advanceDueDate($dueDate, $frequency, $emiDay);
 
                 $currentInterest = round($currentBalance * $ratePerPeriod);
                 $currentPrincipal = $emi - $currentInterest;
@@ -107,21 +98,7 @@ class EmiCalculator
             $remainingInterest = $totalInterest;
 
             for ($i = 1; $i <= $intervals; $i++) {
-                // Calculate next due date based on frequency
-                if ($frequency === 'daily') {
-                    $dueDate->addDay();
-                } elseif ($frequency === 'weekly') {
-                    $dueDate->addWeek();
-                    if ($emiDay !== null && $emiDay >= 1 && $emiDay <= 7) {
-                        // Set to specific day of week (1=Mon, 7=Sun)
-                        $dueDate->setISODate($dueDate->year, $dueDate->weekOfYear, $emiDay);
-                    }
-                } else {
-                    $dueDate->addMonth();
-                    if ($emiDay !== null) {
-                        $dueDate->day = min($emiDay, $dueDate->daysInMonth);
-                    }
-                }
+                $dueDate = $this->advanceDueDate($dueDate, $frequency, $emiDay);
 
                 $currentInterest = $interestPerEmi;
                 $currentPrincipal = $principalPerEmi;
@@ -167,5 +144,27 @@ class EmiCalculator
             'schedule' => $schedule,
             'schedule_by_year' => $grouped,
         ];
+    }
+
+    /**
+     * Step the due date by one collection period using calendar days/weeks
+     * so year-end never skips (2026 week 53 → 2027, not 2028).
+     */
+    protected function advanceDueDate(Carbon $dueDate, string $frequency, ?int $emiDay): Carbon
+    {
+        $previous = $dueDate->copy()->startOfDay();
+
+        if ($frequency === 'daily') {
+            $next = $dueDate->copy()->addDay();
+        } elseif ($frequency === 'weekly') {
+            $next = CalendarWeek::addWeeks($dueDate, 1);
+        } else {
+            $next = $dueDate->copy()->addMonth();
+            if ($emiDay !== null) {
+                $next->day = min($emiDay, $next->daysInMonth);
+            }
+        }
+
+        return CalendarWeek::fixSkippedYear($previous, $next);
     }
 }

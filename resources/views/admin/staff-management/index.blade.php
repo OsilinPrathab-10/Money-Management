@@ -224,7 +224,38 @@
                                             </td>
                                             <td>
                                                 <div class="d-flex justify-content-center gap-1">
-                                                 <button class="btn btn-sm btn-icon btn-label-primary shadow-sm" title="Edit" onclick="editStaff({{ json_encode($staff) }}, '{{ $staff->user ? ($staff->user->getRoleNames()->first() ?? '') : '' }}')">
+                                                    @php
+                                                        $staffEditPayload = [
+                                                            'id' => $staff->id,
+                                                            'name' => $staff->name,
+                                                            'phone' => $staff->phone,
+                                                            'email' => $staff->email,
+                                                            'salary_amount' => $staff->salary_amount,
+                                                            'branch_id' => $staff->branch_id,
+                                                            'status' => $staff->status,
+                                                            'agent_profile_id' => $staff->agent_profile_id ?? null,
+                                                            'assigned_clients_count' => $staff->assigned_clients_count ?? 0,
+                                                            'role' => $staff->user ? ($staff->user->getRoleNames()->first() ?? '') : '',
+                                                            'use_custom_menus' => (bool) ($staff->user->use_custom_menus ?? false),
+                                                            'menus' => $staff->user?->menuAssignments?->pluck('menu_key')->values()->all() ?? [],
+                                                        ];
+                                                        $staffMenusPayload = [
+                                                            'name' => $staff->name,
+                                                            'role' => $staff->user ? ($staff->user->getRoleNames()->first() ?? '—') : '—',
+                                                            'source' => $staff->menu_source ?? 'role',
+                                                            'menus' => $staff->assigned_menu_labels ?? [],
+                                                        ];
+                                                    @endphp
+                                                    <button type="button"
+                                                            class="btn btn-sm btn-icon btn-label-info shadow-sm btn-view-staff-menus"
+                                                            title="View assigned menus"
+                                                            data-menus="{{ base64_encode(json_encode($staffMenusPayload)) }}">
+                                                        <i class="ri-eye-line"></i>
+                                                    </button>
+                                                    <button type="button"
+                                                            class="btn btn-sm btn-icon btn-label-primary shadow-sm btn-edit-staff"
+                                                            title="Edit"
+                                                            data-staff="{{ base64_encode(json_encode($staffEditPayload)) }}">
                                                         <i class="ri-edit-2-line"></i>
                                                     </button>
                                                     <button type="button" class="btn btn-sm btn-icon btn-label-danger shadow-sm" onclick="deleteStaff({{ $staff->id }})" title="Delete">
@@ -246,6 +277,9 @@
                             <div class="card-header d-flex justify-content-between align-items-center border-bottom bg-label-success py-3">
                                 <h5 class="mb-0 text-success fw-bold">Agent Directory</h5>
                                 <div class="d-flex gap-2 align-items-center">
+                                    <a href="{{ route('roles.menus', ['role' => 'Agent']) }}" class="btn btn-sm btn-outline-success">
+                                        <i class="ri-menu-fold-line me-1"></i> Agent Menus
+                                    </a>
                                     <select class="form-select form-select-sm w-auto" onchange="$('#agentTable').DataTable().page.len(this.value).draw()">
                                         <option value="10" selected>10 per page</option>
                                         <option value="25">25 per page</option>
@@ -303,7 +337,38 @@
                                             </td>
                                             <td>
                                                 <div class="d-flex justify-content-center gap-1">
-                                                    <button class="btn btn-sm btn-icon btn-label-primary shadow-sm" title="Edit" onclick="editStaff({{ json_encode($agent) }}, 'Agent')">
+                                                    @php
+                                                        $agentEditPayload = [
+                                                            'id' => $agent->id,
+                                                            'name' => $agent->name,
+                                                            'phone' => $agent->phone,
+                                                            'email' => $agent->email,
+                                                            'salary_amount' => $agent->salary_amount,
+                                                            'branch_id' => $agent->branch_id,
+                                                            'status' => $agent->status,
+                                                            'agent_profile_id' => $agent->agent_profile_id ?? null,
+                                                            'assigned_clients_count' => $agent->assigned_clients_count ?? 0,
+                                                            'role' => 'Agent',
+                                                            'use_custom_menus' => (bool) ($agent->user->use_custom_menus ?? false),
+                                                            'menus' => $agent->user?->menuAssignments?->pluck('menu_key')->values()->all() ?? [],
+                                                        ];
+                                                        $agentMenusPayload = [
+                                                            'name' => $agent->name,
+                                                            'role' => 'Agent',
+                                                            'source' => $agent->menu_source ?? 'role',
+                                                            'menus' => $agent->assigned_menu_labels ?? [],
+                                                        ];
+                                                    @endphp
+                                                    <button type="button"
+                                                            class="btn btn-sm btn-icon btn-label-info shadow-sm btn-view-staff-menus"
+                                                            title="View assigned menus"
+                                                            data-menus="{{ base64_encode(json_encode($agentMenusPayload)) }}">
+                                                        <i class="ri-eye-line"></i>
+                                                    </button>
+                                                    <button type="button"
+                                                            class="btn btn-sm btn-icon btn-label-primary shadow-sm btn-edit-staff"
+                                                            title="Edit"
+                                                            data-staff="{{ base64_encode(json_encode($agentEditPayload)) }}">
                                                         <i class="ri-edit-2-line"></i>
                                                     </button>
                                                     <button type="button" class="btn btn-sm btn-icon btn-label-danger shadow-sm" onclick="deleteStaff({{ $agent->id }})" title="Delete">
@@ -593,6 +658,12 @@
                         </div>
                         <div class="mt-5 text-center p-4 border rounded bg-light">
                             <h6>Need to modify permissions?</h6>
+                            <a href="{{ route('roles.menus', ['role' => 'Staff']) }}" class="btn btn-primary btn-sm mt-2 px-4 shadow-sm me-2">
+                                <i class="ri-menu-fold-line me-1"></i> Staff Menus
+                            </a>
+                            <a href="{{ route('roles.menus', ['role' => 'Agent']) }}" class="btn btn-success btn-sm mt-2 px-4 shadow-sm me-2">
+                                <i class="ri-menu-fold-line me-1"></i> Agent Menus
+                            </a>
                             <a href="{{ route('role-users') }}" class="btn btn-label-primary btn-sm mt-2 px-4 shadow-sm">Manage Global Roles & Permissions</a>
                         </div>
                     </div>
@@ -643,7 +714,7 @@
 
 <!-- Modal: Add Staff -->
 <div class="modal fade" id="addStaffModal" tabindex="-1" aria-hidden="true">
-    <div class="modal-dialog modal-lg">
+    <div class="modal-dialog modal-xl">
         <div class="modal-content p-2">
             <div class="modal-header border-bottom">
                 <h5 class="modal-title fw-bold text-primary">Add New Employee</h5>
@@ -690,6 +761,20 @@
                             <input type="email" name="email" class="form-control shadow-sm" />
                         </div>
                         <div class="mb-3">
+                            <label class="form-label small">Login Password <small class="text-muted">(Defaults to Phone Number if empty)</small></label>
+                            <div class="input-group input-group-merge form-password-toggle">
+                                <input type="password" name="password" class="form-control shadow-sm" placeholder="Enter password" minlength="8" />
+                                <span class="input-group-text cursor-pointer"><i class="ri-eye-off-line"></i></span>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label small">Confirm Login Password <small class="text-muted">(Defaults to Phone Number if empty)</small></label>
+                            <div class="input-group input-group-merge form-password-toggle">
+                                <input type="password" name="password_confirmation" class="form-control shadow-sm" placeholder="Confirm password" minlength="8" />
+                                <span class="input-group-text cursor-pointer"><i class="ri-eye-off-line"></i></span>
+                            </div>
+                        </div>
+                        <div class="mb-3">
                             <label class="form-label small">Base Monthly Salary <span class="text-danger">*</span></label>
                             <div class="input-group input-group-merge shadow-sm">
                                 <span class="input-group-text">₹</span>
@@ -697,6 +782,12 @@
                             </div>
                         </div>
                     </div>
+                    @include('admin.staff-management.partials.menu-access-fields', [
+                        'menuCatalog' => $menuCatalog ?? collect(),
+                        'assignedKeys' => [],
+                        'menuMode' => 'inherit',
+                        'prefix' => 'add_staff',
+                    ])
                     <div class="col-12 text-end pt-3 border-top">
                         <button type="reset" class="btn btn-label-secondary me-2">Clear</button>
                         <button type="submit" class="btn btn-primary px-5 shadow">Save Profile</button>
@@ -709,7 +800,7 @@
 
 <!-- Modal: Add Agent -->
 <div class="modal fade" id="addAgentModal" tabindex="-1" aria-hidden="true">
-    <div class="modal-dialog modal-lg">
+    <div class="modal-dialog modal-xl">
         <div class="modal-content p-2">
             <div class="modal-header border-bottom">
                 <h5 class="modal-title fw-bold text-success">Add New Agent</h5>
@@ -748,6 +839,20 @@
                             <input type="email" name="email" class="form-control shadow-sm" />
                         </div>
                         <div class="mb-3">
+                            <label class="form-label small">Login Password <small class="text-muted">(Defaults to Phone Number if empty)</small></label>
+                            <div class="input-group input-group-merge form-password-toggle">
+                                <input type="password" name="password" class="form-control shadow-sm" placeholder="Enter password" minlength="8" />
+                                <span class="input-group-text cursor-pointer"><i class="ri-eye-off-line"></i></span>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label small">Confirm Login Password <small class="text-muted">(Defaults to Phone Number if empty)</small></label>
+                            <div class="input-group input-group-merge form-password-toggle">
+                                <input type="password" name="password_confirmation" class="form-control shadow-sm" placeholder="Confirm password" minlength="8" />
+                                <span class="input-group-text cursor-pointer"><i class="ri-eye-off-line"></i></span>
+                            </div>
+                        </div>
+                        <div class="mb-3">
                             <label class="form-label small">Base Monthly Salary <span class="text-danger">*</span></label>
                             <div class="input-group input-group-merge shadow-sm">
                                 <span class="input-group-text">₹</span>
@@ -755,6 +860,12 @@
                             </div>
                         </div>
                     </div>
+                    @include('admin.staff-management.partials.menu-access-fields', [
+                        'menuCatalog' => $menuCatalog ?? collect(),
+                        'assignedKeys' => [],
+                        'menuMode' => 'inherit',
+                        'prefix' => 'add_agent',
+                    ])
                     <div class="col-12 text-end pt-3 border-top">
                         <button type="reset" class="btn btn-label-secondary me-2">Clear</button>
                         <button type="submit" class="btn btn-success px-5 shadow">Save Agent Profile</button>
@@ -821,9 +932,33 @@
     </div>
 </div>
 
+<!-- Modal: View Assigned Menus -->
+<div class="modal fade" id="viewStaffMenusModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header border-bottom">
+                <div>
+                    <h5 class="modal-title fw-bold mb-0" id="viewMenusStaffName">Assigned Menus</h5>
+                    <small class="text-muted" id="viewMenusStaffMeta"></small>
+                </div>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body p-0">
+                <ul class="list-group list-group-flush" id="viewMenusList">
+                    <li class="list-group-item text-muted">No menus assigned.</li>
+                </ul>
+            </div>
+            <div class="modal-footer">
+                <a href="{{ route('roles.menus', ['role' => 'Staff']) }}" class="btn btn-sm btn-outline-primary me-auto">Edit Staff role menus</a>
+                <button type="button" class="btn btn-label-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Modal: Edit Staff -->
 <div class="modal fade" id="editStaffModal" tabindex="-1" aria-hidden="true">
-    <div class="modal-dialog modal-lg">
+    <div class="modal-dialog modal-xl">
         <div class="modal-content p-2">
             <div class="modal-header border-bottom">
                 <h5 class="modal-title fw-bold text-primary">Edit Employee Profile</h5>
@@ -842,11 +977,34 @@
                                 @foreach($branches as $branch) <option value="{{ $branch->id }}">{{ $branch->name }}</option> @endforeach
                             </select>
                             <label class="form-label small">System Role <span class="text-danger">*</span></label>
-                            <select name="role" id="edit_role" class="form-select mb-3 shadow-sm">
+                            <select name="role" id="edit_role" class="form-select mb-3 shadow-sm" @if(!auth()->user()->hasRole('Admin')) disabled @endif>
                                 <option value="">Select Role</option>
                                 <option value="0">No Login Rights</option>
                                 @foreach($roles as $role) <option value="{{ $role->name }}">{{ $role->name }}</option> @endforeach
                             </select>
+                            @unless(auth()->user()->hasRole('Admin'))
+                                <input type="hidden" name="role" id="edit_role_hidden" value="">
+                                <small class="text-muted d-block mb-3">Only Admin can change system roles.</small>
+                            @endunless
+                            <div id="handoverSection" class="d-none border rounded p-3 mb-3 bg-label-warning">
+                                <h6 class="fw-bold text-warning mb-2">
+                                    <i class="ri-user-shared-line me-1"></i> Client Handover Required
+                                </h6>
+                                <p class="small mb-2" id="handoverHelpText">
+                                    This agent has assigned clients. Select another agent to hand them over before changing the role.
+                                </p>
+                                <label class="form-label small">Hand over clients to <span class="text-danger">*</span></label>
+                                <select name="handover_agent_id" id="edit_handover_agent_id" class="form-select mb-2 shadow-sm">
+                                    <option value="">Select Agent</option>
+                                    @foreach(($handoverAgents ?? []) as $ha)
+                                        <option value="{{ $ha->id }}">
+                                            {{ $ha->agent_name }} @if($ha->agent_code)({{ $ha->agent_code }})@endif
+                                        </option>
+                                    @endforeach
+                                </select>
+                                <label class="form-label small">Handover remarks</label>
+                                <input type="text" name="handover_remarks" id="edit_handover_remarks" class="form-control shadow-sm" placeholder="Optional notes" maxlength="500">
+                            </div>
                             <label class="form-label small"> Employment Status</label>
                             <select name="status" id="edit_status" class="form-select shadow-sm">
                                 <option value="active">Active</option>
@@ -871,6 +1029,20 @@
                             <input type="email" name="email" id="edit_email" class="form-control shadow-sm" />
                         </div>
                         <div class="mb-3">
+                            <label class="form-label small">Login Password <small class="text-muted">(Leave empty to keep current)</small></label>
+                            <div class="input-group input-group-merge form-password-toggle">
+                                <input type="password" name="password" id="edit_password" class="form-control shadow-sm" placeholder="Enter new password" minlength="8" />
+                                <span class="input-group-text cursor-pointer"><i class="ri-eye-off-line"></i></span>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label small">Confirm Login Password <small class="text-muted">(Leave empty to keep current)</small></label>
+                            <div class="input-group input-group-merge form-password-toggle">
+                                <input type="password" name="password_confirmation" id="edit_password_confirmation" class="form-control shadow-sm" placeholder="Confirm new password" minlength="8" />
+                                <span class="input-group-text cursor-pointer"><i class="ri-eye-off-line"></i></span>
+                            </div>
+                        </div>
+                        <div class="mb-3">
                             <label class="form-label small">Base Monthly Salary <span class="text-danger">*</span></label>
                             <div class="input-group input-group-merge shadow-sm">
                                 <span class="input-group-text">₹</span>
@@ -878,6 +1050,12 @@
                             </div>
                         </div>
                     </div>
+                    @include('admin.staff-management.partials.menu-access-fields', [
+                        'menuCatalog' => $menuCatalog ?? collect(),
+                        'assignedKeys' => [],
+                        'menuMode' => 'inherit',
+                        'prefix' => 'edit_staff',
+                    ])
                     <div class="col-12 text-end pt-3 border-top">
                         <button type="button" class="btn btn-label-secondary me-2" data-bs-dismiss="modal">Cancel</button>
                         <button type="submit" class="btn btn-primary px-5 shadow">Update Profile</button>
@@ -1245,13 +1423,32 @@
         }
     }
 
-    window.editStaff = function(staff, role) {
+    window.editStaff = function(staff, role, menuMeta) {
         const form = document.getElementById('editStaffForm');
         form.action = `{{ url('staff') }}/${staff.id}/update`;
         document.getElementById('edit_name').value = staff.name || '';
         document.getElementById('edit_phone').value = staff.phone || '';
         document.getElementById('edit_email').value = staff.email || '';
         document.getElementById('edit_salary_amount').value = staff.salary_amount || 0;
+        
+        // Reset password fields
+        if (document.getElementById('edit_password')) {
+            document.getElementById('edit_password').value = '';
+            document.getElementById('edit_password').type = 'password';
+            const icon = document.querySelector('#edit_password').nextElementSibling.querySelector('i');
+            if (icon) {
+                icon.className = 'ri-eye-off-line';
+            }
+        }
+        if (document.getElementById('edit_password_confirmation')) {
+            document.getElementById('edit_password_confirmation').value = '';
+            document.getElementById('edit_password_confirmation').type = 'password';
+            const icon = document.querySelector('#edit_password_confirmation').nextElementSibling.querySelector('i');
+            if (icon) {
+                icon.className = 'ri-eye-off-line';
+            }
+        }
+
         // Set branch: null/undefined means no specific branch selected -> leave empty so Main Office is default fallback
         const branchSelect = document.getElementById('edit_branch_id');
         branchSelect.value = staff.branch_id != null ? staff.branch_id : '';
@@ -1261,13 +1458,175 @@
         if (roleSelect.value !== (role || '')) {
             roleSelect.value = ''; // Fallback to empty if value is not in the list
         }
+        const roleHidden = document.getElementById('edit_role_hidden');
+        if (roleHidden) {
+            roleHidden.value = role || '0';
+        }
         document.getElementById('edit_status').value = staff.status || 'active';
+
+        // Menu access override
+        menuMeta = menuMeta || {};
+        const useCustom = !!menuMeta.use_custom_menus;
+        const menus = Array.isArray(menuMeta.menus) ? menuMeta.menus : [];
+        const inheritRadio = document.getElementById('edit_staff_mode_inherit');
+        const customRadio = document.getElementById('edit_staff_mode_custom');
+        const customBox = document.getElementById('edit_staff_custom_box');
+        if (inheritRadio && customRadio) {
+            inheritRadio.checked = !useCustom;
+            customRadio.checked = useCustom;
+            if (customBox) {
+                customBox.classList.toggle('d-none', !useCustom);
+            }
+            const lookup = {};
+            menus.forEach(k => { lookup[k] = true; });
+            customBox?.querySelectorAll('.menu-access-checkbox').forEach(cb => {
+                cb.checked = !!lookup[cb.value];
+            });
+        }
+
+        // Handover state for Agent role changes
+        form.dataset.currentRole = role || '';
+        form.dataset.agentProfileId = staff.agent_profile_id || '';
+        form.dataset.assignedClientsCount = staff.assigned_clients_count || 0;
+        if (typeof window.refreshHandoverSection === 'function') {
+            window.refreshHandoverSection();
+        }
+
         // Destroy any existing modal instance to prevent stacking
         const modalEl = document.getElementById('editStaffModal');
         let existingModal = bootstrap.Modal.getInstance(modalEl);
         if (existingModal) existingModal.dispose();
         new bootstrap.Modal(modalEl).show();
     }
+
+    document.addEventListener('click', function (e) {
+        const btn = e.target.closest('.btn-edit-staff');
+        if (!btn) return;
+        e.preventDefault();
+        let payload = {};
+        try {
+            const raw = btn.getAttribute('data-staff') || '';
+            payload = JSON.parse(raw.indexOf('{') === 0 ? raw : atob(raw));
+        } catch (err) {
+            console.error('Invalid staff edit payload', err);
+            if (window.Swal) {
+                Swal.fire({ icon: 'error', title: 'Cannot open edit', text: 'Staff data could not be loaded. Refresh the page and try again.' });
+            }
+            return;
+        }
+        window.editStaff(payload, payload.role || '', {
+            use_custom_menus: !!payload.use_custom_menus,
+            menus: Array.isArray(payload.menus) ? payload.menus : [],
+        });
+    });
+
+    document.addEventListener('click', function (e) {
+        const btn = e.target.closest('.btn-view-staff-menus');
+        if (!btn) return;
+        e.preventDefault();
+        let data = { name: '', role: '', source: 'role', menus: [] };
+        try {
+            const raw = btn.getAttribute('data-menus') || '';
+            data = JSON.parse(raw.indexOf('{') === 0 ? raw : atob(raw));
+        } catch (err) {
+            console.error('Invalid menus payload', err);
+            return;
+        }
+        const nameEl = document.getElementById('viewMenusStaffName');
+        const metaEl = document.getElementById('viewMenusStaffMeta');
+        const listEl = document.getElementById('viewMenusList');
+        if (nameEl) nameEl.textContent = data.name || 'Employee';
+        if (metaEl) {
+            const sourceLabel = data.source === 'custom' ? 'Custom menus' : 'Inherited from role';
+            metaEl.textContent = `Role: ${data.role || '—'} · ${sourceLabel}`;
+        }
+        if (listEl) {
+            const menus = Array.isArray(data.menus) ? data.menus : [];
+            if (menus.length === 0) {
+                listEl.innerHTML = '<li class="list-group-item text-muted">No menus assigned.</li>';
+            } else {
+                listEl.innerHTML = menus.map(m => {
+                    const label = m.label || m.key || '';
+                    const parent = m.parent ? `<small class="text-muted d-block">${m.parent}</small>` : '';
+                    return `<li class="list-group-item"><span class="fw-medium">${label}</span>${parent}</li>`;
+                }).join('');
+            }
+        }
+        const modalEl = document.getElementById('viewStaffMenusModal');
+        if (modalEl) {
+            const existing = bootstrap.Modal.getInstance(modalEl);
+            if (existing) existing.dispose();
+            new bootstrap.Modal(modalEl).show();
+        }
+    });
+
+    window.refreshHandoverSection = function() {
+        const form = document.getElementById('editStaffForm');
+        const section = document.getElementById('handoverSection');
+        const roleSelect = document.getElementById('edit_role');
+        const handoverSelect = document.getElementById('edit_handover_agent_id');
+        const helpText = document.getElementById('handoverHelpText');
+        if (!form || !section || !roleSelect || !handoverSelect) return;
+
+        const currentRole = form.dataset.currentRole || '';
+        const agentProfileId = form.dataset.agentProfileId || '';
+        const clientCount = parseInt(form.dataset.assignedClientsCount || '0', 10);
+        const newRole = roleSelect.value;
+        const leavingAgent = currentRole === 'Agent' && newRole !== 'Agent';
+
+        // Exclude current agent from handover options
+        Array.from(handoverSelect.options).forEach((opt) => {
+            if (!opt.value) return;
+            opt.hidden = agentProfileId && String(opt.value) === String(agentProfileId);
+            if (opt.hidden && handoverSelect.value === opt.value) {
+                handoverSelect.value = '';
+            }
+        });
+
+        if (leavingAgent && clientCount > 0) {
+            section.classList.remove('d-none');
+            handoverSelect.required = true;
+            if (helpText) {
+                helpText.textContent = `This agent has ${clientCount} assigned client(s). Select another agent to hand them over before changing the role.`;
+            }
+        } else {
+            section.classList.add('d-none');
+            handoverSelect.required = false;
+            handoverSelect.value = '';
+            const remarks = document.getElementById('edit_handover_remarks');
+            if (remarks) remarks.value = '';
+        }
+    };
+
+    document.addEventListener('DOMContentLoaded', function () {
+        const roleSelect = document.getElementById('edit_role');
+        if (roleSelect) {
+            roleSelect.addEventListener('change', window.refreshHandoverSection);
+        }
+
+        document.querySelectorAll('.menu-mode-radio').forEach(radio => {
+            radio.addEventListener('change', function () {
+                const targetId = this.getAttribute('data-target');
+                const box = document.getElementById(targetId);
+                if (!box) return;
+                const form = this.closest('form');
+                const checked = form?.querySelector('input[name="menu_mode"]:checked');
+                box.classList.toggle('d-none', !(checked && checked.value === 'custom'));
+            });
+        });
+
+        document.querySelectorAll('#addStaffModal, #editStaffModal, #addAgentModal').forEach(modal => {
+            modal.querySelectorAll('[data-menu-parent]').forEach(parentCb => {
+                parentCb.addEventListener('change', function () {
+                    const key = this.getAttribute('data-menu-parent');
+                    const scope = this.closest('form') || modal;
+                    scope.querySelectorAll(`[data-menu-child-of="${key}"]`).forEach(child => {
+                        child.checked = parentCb.checked;
+                    });
+                });
+            });
+        });
+    });
 
     window.editBranch = function(branch) {
         const form = document.getElementById('editBranchForm');
@@ -1516,6 +1875,20 @@
             });
         });
 
+        // Password visibility toggle click handler
+        $(document).on('click', '.form-password-toggle .input-group-text', function() {
+            const group = $(this).closest('.form-password-toggle');
+            const input = group.find('input');
+            const icon = $(this).find('i');
+            if (input.attr('type') === 'password') {
+                input.attr('type', 'text');
+                icon.removeClass('ri-eye-off-line').addClass('ri-eye-line');
+            } else {
+                input.attr('type', 'password');
+                icon.removeClass('ri-eye-line').addClass('ri-eye-off-line');
+            }
+        });
+
         // Form Validation
         const forms = document.querySelectorAll('form');
         forms.forEach(form => {
@@ -1524,6 +1897,15 @@
                 if (phoneInput && phoneInput.value.length !== 10) {
                     e.preventDefault();
                     Swal.fire({ icon: 'error', title: 'Validation Error', text: 'Mobile number must be 10 digits.' });
+                    return;
+                }
+
+                const passwordInput = this.querySelector('input[name="password"]');
+                const passwordConfirmInput = this.querySelector('input[name="password_confirmation"]');
+                if (passwordInput && passwordConfirmInput && passwordInput.value !== passwordConfirmInput.value) {
+                    e.preventDefault();
+                    Swal.fire({ icon: 'error', title: 'Validation Error', text: 'Passwords do not match.' });
+                    return;
                 }
             });
         });

@@ -7,7 +7,8 @@
 document.addEventListener('DOMContentLoaded', function () {
   const $loanAccountsTable = $('#loanAccountsTable');
   const $statusFilter = $('#statusFilter');
-  const baseUrl = window.baseUrl || document.documentElement.getAttribute('data-base-url') + '/' || window.location.origin + '/';
+  const rawBaseUrl = window.baseUrl || document.documentElement.getAttribute('data-base-url') || window.location.origin || '';
+  const baseUrl = rawBaseUrl.endsWith('/') ? rawBaseUrl : rawBaseUrl + '/';
 
   if (!$loanAccountsTable.length) {
     return;
@@ -23,8 +24,11 @@ document.addEventListener('DOMContentLoaded', function () {
       type: 'GET',
       data: function (d) {
         d.status = $statusFilter.val();
+        d.loan_mode = $('#loanModeFilter').val();
+        d.loan_type_id = $('#loanTypeFilter').val();
         d.from_date = $('#fromDate').val();
         d.to_date = $('#toDate').val();
+        d.account_number = $('#accountNumberFilter').val();
       }
     },
     columns: [
@@ -37,8 +41,13 @@ document.addEventListener('DOMContentLoaded', function () {
           return meta.settings._iDisplayStart + meta.row + 1;
         }
       },
-      { data: 'account_number', title: 'Account Number' },
-      { data: 'customer_id', title: 'Customer ID' },
+      {
+        data: 'account_number',
+        title: 'Loan A/C No',
+        render: function (data, type, row) {
+          return `<a href="${baseUrl}loan/loan-account/${row.id}" class="fw-semibold text-primary loan-account-link">${data || 'N/A'}</a>`;
+        }
+      },
       { data: 'client_name', title: 'Client Name' },
       { 
         data: 'zone',
@@ -47,7 +56,19 @@ document.addEventListener('DOMContentLoaded', function () {
           return '<span class="badge bg-label-secondary">' + (data || 'N/A') + '</span>';
         }
       },
-      { data: 'loan_name', title: 'Loan Type' },
+      { 
+        data: 'loan_name',
+        title: 'Loan Type',
+        render: function (data, type, row) {
+          let html = '<span class="fw-medium text-heading">' + (data || 'N/A') + '</span>';
+          const isInterestOnly = row.loan_mode === 'interest_only';
+          html += `<span class="badge bg-label-${isInterestOnly ? 'info' : 'primary'} ms-1" style="font-size: 0.72rem;">${isInterestOnly ? 'Open Loan' : 'EMI'}</span>`;
+          if (row.loan_type_name) {
+            html += `<small class="text-muted d-block" style="font-size: 0.75rem;">${row.loan_type_name}</small>`;
+          }
+          return html;
+        }
+      },
       { data: 'loan_amount_formatted', title: 'Loan Amount', orderable: false },
       { data: 'tenure_formatted', title: 'Tenure', orderable: false },
       { data: 'emi_amount_formatted', title: 'EMI Amt/Cycle Inst', orderable: false },
@@ -84,11 +105,11 @@ document.addEventListener('DOMContentLoaded', function () {
         className: 'text-nowrap'
       },
       {
-        targets: [1], // Account Number
+        targets: [1], // Loan A/C No
         width: '180px'
       },
       {
-        targets: [3], // Client Name
+        targets: [2], // Client Name
         width: '220px'
       },
       {
@@ -133,28 +154,28 @@ document.addEventListener('DOMContentLoaded', function () {
             title: 'Loan Accounts',
             text: '<i class="icon-base ri ri-printer-line me-2"></i>Print',
             className: 'dropdown-item',
-            exportOptions: { columns: [0, 1, 2, 3, 4, 5, 6, 7] }
+            exportOptions: { columns: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9] }
           },
           {
             extend: 'csv',
             title: 'Loan Accounts',
             text: '<i class="icon-base ri ri-file-text-line me-2"></i>Csv',
             className: 'dropdown-item',
-            exportOptions: { columns: [0, 1, 2, 3, 4, 5, 6, 7] }
+            exportOptions: { columns: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9] }
           },
           {
             extend: 'excel',
             title: 'Loan Accounts',
             text: '<i class="icon-base ri ri-file-excel-2-line me-2"></i>Excel',
             className: 'dropdown-item',
-            exportOptions: { columns: [0, 1, 2, 3, 4, 5, 6, 7] }
+            exportOptions: { columns: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9] }
           },
           {
             extend: 'pdf',
             title: 'Loan Accounts',
             text: '<i class="icon-base ri ri-file-pdf-line me-2"></i>Pdf',
             className: 'dropdown-item',
-            exportOptions: { columns: [0, 1, 2, 3, 4, 5, 6, 7] },
+            exportOptions: { columns: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9] },
             orientation: 'landscape',
             pageSize: 'A4'
           },
@@ -162,7 +183,7 @@ document.addEventListener('DOMContentLoaded', function () {
             extend: 'copy',
             text: '<i class="icon-base ri ri-file-copy-line me-2"></i>Copy',
             className: 'dropdown-item',
-            exportOptions: { columns: [0, 1, 2, 3, 4, 5, 6, 7] }
+            exportOptions: { columns: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9] }
           }
         ]
       }
@@ -180,6 +201,10 @@ document.addEventListener('DOMContentLoaded', function () {
   const $fromDate = $('#fromDate');
   const $toDate = $('#toDate');
 
+  $('#statusFilter, #loanModeFilter, #loanTypeFilter').on('change', function () {
+    loanAccountsTable.ajax.reload();
+  });
+
   if ($fromDate.length) {
     $fromDate.on('change', function () {
       loanAccountsTable.ajax.reload();
@@ -188,6 +213,13 @@ document.addEventListener('DOMContentLoaded', function () {
 
   if ($toDate.length) {
     $toDate.on('change', function () {
+      loanAccountsTable.ajax.reload();
+    });
+  }
+
+  const $accountNumberFilter = $('#accountNumberFilter');
+  if ($accountNumberFilter.length) {
+    $accountNumberFilter.on('keyup change', function () {
       loanAccountsTable.ajax.reload();
     });
   }

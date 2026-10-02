@@ -34,7 +34,7 @@ class SMSUtility
         // 3. Prepare SMS body
         $body = $template->sms_body;
         $allVariables = array_merge([
-            'site_name' => config('app.name', 'Shanmuga Finance'),
+            'site_name' => \App\Models\CompanyDetail::first()->company_name ?? config('app.name', 'Codepluse Gen PVT Ltd'),
         ], $variables);
 
         foreach ($allVariables as $key => $value) {
@@ -54,11 +54,12 @@ class SMSUtility
     }
 
     /**
-     * Send OTP SMS
+     * Send OTP SMS via MSG91 (template: basic_otp).
+     * Body: ##var1## is your verification code for ##var2##.
      */
     public static function otp($phone, $otp)
     {
-        return self::send($phone, 'otp', ['code' => $otp]);
+        return app(\App\Services\SmsCommunicationService::class)->sendOtp($phone, $otp);
     }
 
     /**

@@ -91,7 +91,7 @@ class PageSeeder extends Seeder
 
 <h3>Contact Information</h3>
 <p><strong>App Name:</strong> Loan Management System</p>
-<p><strong>Email:</strong> <a href="mailto:support@example.com">support@example.com</a></p>
+<p><strong>Email:</strong> <a href="mailto:codeplusetech@gmail.com">codeplusetech@gmail.com</a></p>
 <p><strong>Phone:</strong> +91 9840697692</p>',
         ]);
 
@@ -167,7 +167,7 @@ class PageSeeder extends Seeder
 <h3>13. Contact Us</h3>
 <p>If you have any questions or concerns, please contact us:</p>
 <p><strong>App Name:</strong> Loan Management System</p>
-<p><strong>Email:</strong> <a href="mailto:support@example.com">support@example.com</a></p>
+<p><strong>Email:</strong> <a href="mailto:codeplusetech@gmail.com">codeplusetech@gmail.com</a></p>
 <p><strong>Phone:</strong> +91 9840697692</p>',
         ]);
     }

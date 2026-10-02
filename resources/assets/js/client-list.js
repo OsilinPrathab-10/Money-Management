@@ -85,7 +85,7 @@ document.addEventListener('DOMContentLoaded', function (e) {
               // For Avatar image
               output = '<img src="' + assetsPath + 'img/avatars/' + image + '" alt="Avatar" class="rounded-circle">';
             } else {
-              // For Avatar badge
+              // For Avatar
               var stateNum = Math.floor(Math.random() * 6);
               var states = ['success', 'danger', 'warning', 'info', 'dark', 'primary', 'secondary'];
               var state = states[stateNum];
