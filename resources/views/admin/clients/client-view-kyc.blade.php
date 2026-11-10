@@ -40,9 +40,7 @@
 'resources/assets/js/app-user-view.js',
 'resources/assets/js/client-view-account.js',
 'resources/assets/custom-js/emi-calculator.js',
-'resources/assets/custom-js/loan-applications.js',
-'resources/assets/custom-js/chit-applications.js',
-'resources/assets/custom-js/chit-need-month.js'
+'resources/assets/custom-js/loan-applications.js'
 ])
 @endsection
 
@@ -73,7 +71,6 @@
       <li class="nav-item"><a class="nav-link" href="{{ url('/clients/view/account/'.$client->id) }}"><i class="icon-base ri ri-user-3-line me-1_5"></i>Account</a></li>
       <li class="nav-item"><a class="nav-link active" href="javascript:void(0);"><i class="icon-base ri ri-shield-check-line me-1_5"></i>KYC</a></li>
       <li class="nav-item"><a class="nav-link" href="{{ url('/client/view/loans/'.$client->id) }}"><i class="icon-base ri ri-file-list-3-line me-1_5"></i>Loans</a></li>
-      <li class="nav-item"><a class="nav-link" href="{{ url('/client/view/chits/'.$client->id) }}"><i class="icon-base ri ri-group-2-line me-1_5"></i>Chits</a></li>
       <li class="nav-item"><a class="nav-link" href="{{ url('/clients/view/ledger/'.$client->id) }}"><i class="icon-base ri ri-wallet-3-line me-1_5"></i>Ledger</a></li>
       <li class="nav-item"><a class="nav-link" href="{{ url('/clients/view/notifications/'.$client->id) }}"><i class="icon-base ri ri-notification-3-line me-1_5"></i>Notifications</a></li>
     </ul>
@@ -172,9 +169,6 @@
               <div class="d-flex flex-column flex-sm-row gap-2">
                 <button type="button" class="btn btn-primary w-100" data-bs-toggle="modal" data-bs-target="#modalApplyLoan">
                   <i class="ri-add-line me-1"></i> Apply for Loan
-                </button>
-                <button type="button" class="btn btn-outline-primary w-100" data-bs-toggle="modal" data-bs-target="#modalApplyChit">
-                  <i class="ri-add-line me-1"></i> Apply for Chit
                 </button>
               </div>
             </div>
@@ -461,7 +455,5 @@
 @include('admin.clients.modals.modal-edit-kyc')
 
 @include('admin.clients.modals.modal-apply-loan')
-
-@include('admin.clients.modals.modal-apply-chit')
 
 @endsection

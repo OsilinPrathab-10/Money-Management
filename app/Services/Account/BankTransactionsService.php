@@ -492,7 +492,7 @@ class BankTransactionsService
 
     public function createLoanDisbursementTransaction($bankAccountId, $amount, $referenceNumber, $description, $date = null, ?string $moduleTag = null, ?string $entryTag = null)
     {
-        return $this->createChitPayoutTransaction(
+        return $this->createDebitTransaction(
             $bankAccountId,
             $amount,
             $referenceNumber,
@@ -514,7 +514,7 @@ class BankTransactionsService
         $date = null,
         ?string $moduleTag = null
     ) {
-        return $this->createChitPayoutTransaction(
+        return $this->createDebitTransaction(
             $bankAccountId,
             $amount,
             $referenceNumber,
@@ -527,7 +527,7 @@ class BankTransactionsService
 
     public function createLoanCollectionTransaction($bankAccountId, $amount, $referenceNumber, $description, $date = null, ?string $moduleTag = null, ?string $entryTag = null)
     {
-        return $this->createChitCollectionTransaction(
+        return $this->createCreditTransaction(
             $bankAccountId,
             $amount,
             $referenceNumber,
@@ -540,7 +540,7 @@ class BankTransactionsService
 
     public function createFdDepositTransaction($bankAccountId, $amount, $referenceNumber, $description, $date = null, ?string $moduleTag = null, ?string $entryTag = null)
     {
-        return $this->createChitCollectionTransaction(
+        return $this->createCreditTransaction(
             $bankAccountId,
             $amount,
             $referenceNumber,
@@ -553,7 +553,7 @@ class BankTransactionsService
 
     public function createFdPayoutTransaction($bankAccountId, $amount, $referenceNumber, $description, $date = null, ?string $moduleTag = null, ?string $entryTag = null)
     {
-        return $this->createChitPayoutTransaction(
+        return $this->createDebitTransaction(
             $bankAccountId,
             $amount,
             $referenceNumber,
@@ -565,9 +565,9 @@ class BankTransactionsService
     }
 
     /**
-     * Credit company bank/cash for a chit installment collection.
+     * Credit company bank/cash account.
      */
-    public function createChitCollectionTransaction($bankAccountId, $amount, $referenceNumber, $description, $date = null, ?string $moduleTag = null, ?string $entryTag = null)
+    public function createCreditTransaction($bankAccountId, $amount, $referenceNumber, $description, $date = null, ?string $moduleTag = null, ?string $entryTag = null)
     {
         $date = $date ?: now();
         $lastTransaction = BankTransaction::where('bank_account_id', $bankAccountId)
@@ -581,8 +581,8 @@ class BankTransactionsService
         $bankTransaction->transaction_type = 'credit';
         $bankTransaction->reference_number = $referenceNumber;
         $bankTransaction->description = $description;
-        $bankTransaction->module_tag = $moduleTag ?? AccountingTags::MODULE_CHIT;
-        $bankTransaction->entry_tag = $entryTag ?? AccountingTags::ENTRY_INSTALLMENT;
+        $bankTransaction->module_tag = $moduleTag ?? AccountingTags::MODULE_OTHER;
+        $bankTransaction->entry_tag = $entryTag;
         $bankTransaction->amount = $amount;
         $bankTransaction->running_balance = $runningBalance;
         $bankTransaction->transaction_status = 'cleared';
@@ -596,9 +596,9 @@ class BankTransactionsService
     }
 
     /**
-     * Debit company bank/cash for a chit settlement payout.
+     * Debit company bank/cash account.
      */
-    public function createChitPayoutTransaction($bankAccountId, $amount, $referenceNumber, $description, $date = null, ?string $moduleTag = null, ?string $entryTag = null)
+    public function createDebitTransaction($bankAccountId, $amount, $referenceNumber, $description, $date = null, ?string $moduleTag = null, ?string $entryTag = null)
     {
         $date = $date ?: now();
         $lastTransaction = BankTransaction::where('bank_account_id', $bankAccountId)
@@ -612,8 +612,8 @@ class BankTransactionsService
         $bankTransaction->transaction_type = 'debit';
         $bankTransaction->reference_number = $referenceNumber;
         $bankTransaction->description = $description;
-        $bankTransaction->module_tag = $moduleTag ?? AccountingTags::MODULE_CHIT;
-        $bankTransaction->entry_tag = $entryTag ?? AccountingTags::ENTRY_SETTLEMENT;
+        $bankTransaction->module_tag = $moduleTag ?? AccountingTags::MODULE_OTHER;
+        $bankTransaction->entry_tag = $entryTag;
         $bankTransaction->amount = $amount;
         $bankTransaction->running_balance = $runningBalance;
         $bankTransaction->transaction_status = 'cleared';
@@ -625,6 +625,8 @@ class BankTransactionsService
 
         return $bankTransaction;
     }
+
+
 
     public function createLoanReversalTransaction($bankAccountId, $amount, $referenceNumber, $description, $date = null, ?string $moduleTag = null, ?string $entryTag = null)
     {
@@ -656,7 +658,7 @@ class BankTransactionsService
 
     /**
      * Remove (or partially reduce) an original collection credit from the cashbook.
-     * Used when EMI / chit payments are undone so Bank Transactions no longer show them.
+     * Used when EMI payments are undone so Bank Transactions no longer show them.
      *
      * Handles cascade payments: one bank credit for multiple EMIs/months can be reduced
      * when only the latest installment is undone.
@@ -804,12 +806,7 @@ class BankTransactionsService
                     ->where('transaction_type', 'credit')
                     ->where(function ($dq) {
                         $dq->where('description', 'like', 'Loan IC%')
-                            ->orWhere('description', 'like', 'Chit IC%')
-                            ->orWhere('description', 'like', 'Chit installment collection%')
-                            ->orWhereIn('entry_tag', [
-                                AccountingTags::ENTRY_EMI,
-                                AccountingTags::ENTRY_INSTALLMENT,
-                            ]);
+                            ->orWhere('entry_tag', AccountingTags::ENTRY_EMI);
                     })
                     ->where('description', 'not like', '%Rev%');
 
@@ -938,7 +935,6 @@ class BankTransactionsService
                             ->where(function ($tq) {
                                 $tq->where('entry_tag', AccountingTags::ENTRY_REVERSAL)
                                     ->orWhere('description', 'like', 'Loan IC Rev%')
-                                    ->orWhere('description', 'like', 'Chit IC Rev%')
                                     ->orWhere('reference_number', 'like', 'REV-%')
                                     ->orWhere('reference_number', 'like', 'UNDO-%');
                             });
@@ -954,8 +950,7 @@ class BankTransactionsService
                         $q->orWhere(function ($dq) use ($identity, $amount) {
                             $dq->whereRaw('ABS(amount - ?) < 0.02', [$amount])
                                 ->where(function ($d) {
-                                    $d->where('description', 'like', 'Loan IC Rev%')
-                                        ->orWhere('description', 'like', 'Chit IC Rev%');
+                                    $d->where('description', 'like', 'Loan IC Rev%');
                                 })
                                 ->where('description', 'like', '%' . $identity . '%');
                         });
@@ -1135,7 +1130,6 @@ class BankTransactionsService
 
     /**
      * Delete historical undo artifacts: REV/UNDO / "IC Rev" rows and their matching original credits.
-     * Also removes CHIT-COLL credits whose installment is unpaid / missing (left behind by older undos).
      */
     public function cleanupUndoneCollectionArtifacts(): array
     {
@@ -1143,7 +1137,6 @@ class BankTransactionsService
             ->where(function ($q) {
                 $q->where('entry_tag', AccountingTags::ENTRY_REVERSAL)
                     ->orWhere('description', 'like', 'Loan IC Rev%')
-                    ->orWhere('description', 'like', 'Chit IC Rev%')
                     ->orWhere('reference_number', 'like', 'REV-%')
                     ->orWhere('reference_number', 'like', 'UNDO-%');
             })
@@ -1170,16 +1163,9 @@ class BankTransactionsService
                             ->orWhere('reference_number', 'like', $baseRef . '-%');
                     }
                     $q->orWhere(function ($dq) {
-                        $dq->where(function ($d) {
-                            $d->where('description', 'like', 'Loan IC%')
-                                ->orWhere('description', 'like', 'Chit IC%')
-                                ->orWhere('description', 'like', 'Chit installment collection%')
-                                ->orWhereIn('entry_tag', [
-                                    AccountingTags::ENTRY_EMI,
-                                    AccountingTags::ENTRY_INSTALLMENT,
-                                ]);
-                        })->where('description', 'not like', '%Rev%');
-                    });
+                        $dq->where('description', 'like', 'Loan IC%')
+                            ->orWhere('entry_tag', AccountingTags::ENTRY_EMI);
+                    })->where('description', 'not like', '%Rev%');
                 })
                 ->orderByDesc('id');
 
@@ -1191,40 +1177,6 @@ class BankTransactionsService
 
             $reversal->delete();
             $removed++;
-        }
-
-        // Orphan installment credits left after older undos that never posted a reversal row.
-        $orphanCredits = BankTransaction::query()
-            ->where('transaction_type', 'credit')
-            ->where('module_tag', AccountingTags::MODULE_CHIT)
-            ->where('entry_tag', AccountingTags::ENTRY_INSTALLMENT)
-            ->where('reference_number', 'like', 'CHIT-COLL-%')
-            ->get();
-
-        foreach ($orphanCredits as $credit) {
-            if (! preg_match('/CHIT-COLL-(\d+)/', (string) $credit->reference_number, $m)) {
-                continue;
-            }
-
-            $installment = \App\Models\Installment::query()->find((int) $m[1]);
-            $isOrphan = ! $installment
-                || (float) $installment->paid_amount <= 0.009
-                || in_array((string) $installment->status, ['pending', 'overdue'], true);
-
-            if (! $isOrphan) {
-                continue;
-            }
-
-            $affectedAccounts[(int) $credit->bank_account_id] = true;
-            $reference = (string) $credit->reference_number;
-            $credit->delete();
-            $removed++;
-
-            if ($reference !== '') {
-                \App\Models\Account\Revenue::query()
-                    ->where('reference_number', $reference)
-                    ->delete();
-            }
         }
 
         foreach (array_keys($affectedAccounts) as $accountId) {

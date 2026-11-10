@@ -57,29 +57,11 @@ class EventServiceProvider extends ServiceProvider
         \App\Events\PaymentReceivedEvent::class => [
             \App\Listeners\CreateAdminNotificationForPayment::class,
         ],
-        \App\Events\NewChitApplicationEvent::class => [
-            \App\Listeners\SendNewChitApplicationNotification::class,
-        ],
         \App\Events\NewFdApplicationEvent::class => [
             \App\Listeners\SendNewFdApplicationNotification::class,
         ],
-        \App\Events\NewSettlementApplicationEvent::class => [
-            \App\Listeners\SendNewSettlementApplicationNotification::class,
-        ],
-        \App\Events\ChitInstallmentCollectedEvent::class => [
-            \App\Listeners\SendChitInstallmentCollectedNotification::class,
-        ],
-        \App\Events\ChitSettlementPaidEvent::class => [
-            \App\Listeners\SendChitSettlementPaidNotification::class,
-        ],
         \App\Events\ClientAssignedToAgentEvent::class => [
             \App\Listeners\SendClientAssignedNotification::class,
-        ],
-        \App\Events\ChitApplicationApproved::class => [
-            \App\Listeners\SendChitApplicationApprovedNotification::class,
-        ],
-        \App\Events\ChitApplicationRejected::class => [
-            \App\Listeners\SendChitApplicationRejectedNotification::class,
         ],
         \App\Events\FdApplicationApproved::class => [
             \App\Listeners\SendFdApplicationApprovedNotification::class,

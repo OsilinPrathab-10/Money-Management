@@ -19,9 +19,6 @@ use App\Models\AgentNotification;
 use App\Services\PushNotificationService;
 use App\Models\Emi;
 use App\Models\EmiCollection;
-use App\Models\ChitCollection;
-use App\Models\GroupMember;
-use App\Models\Installment;
 use App\Models\LoanAccount;
 use App\Models\FixedDeposit;
 use App\Models\FixedDepositApplication;
@@ -456,30 +453,7 @@ class AgentDashboardControllerApi extends Controller
             ->take(3)
             ->values();
 
-        $todayChitInstallments = Installment::with(['member.client', 'group'])
-            ->whereIn('status', ['pending', 'overdue', 'partial'])
-            ->whereDate('due_date', '=', now())
-            ->where(function ($q) use ($agentId) {
-                $this->applyAgentMemberScope($q, $agentId);
-            })
-            ->orderBy('due_date')
-            ->get()
-            ->map(function ($inst) {
-                $client = $inst->member?->client;
-                $dueDate = $inst->due_date ? Carbon::parse($inst->due_date) : null;
-                return [
-                    'client_name' => $client?->client_name,
-                    'client_phone' => $client?->client_phone,
-                    'group' => $inst->group?->group_code,
-                    'installment' => 'Inst #' . $inst->month_number,
-                    'due_date' => $dueDate ? $dueDate->format('d-m-Y') : null,
-                    'balance' => (float) $inst->balance,
-                    'status' => $inst->status,
-                ];
-            })
-            ->filter(fn ($row) => $row['balance'] > 0)
-            ->take(3)
-            ->values();
+        $todayChitInstallments = collect();
 
         $recentClients = Client::where(function ($q) use ($agentId) {
                 $q->where('assigned_to', $agentId);
@@ -496,37 +470,7 @@ class AgentDashboardControllerApi extends Controller
                 ];
             });
 
-        $recentChitMembers = GroupMember::with(['client', 'group'])
-            ->where(function ($q) use ($agentId) {
-                $q->whereHas('client', function ($cq) use ($agentId) {
-                    $cq->where('assigned_to', $agentId);
-                })
-                ->orWhereHas('shares.client', function ($cq) use ($agentId) {
-                    $cq->where('assigned_to', $agentId);
-                });
-            })
-            ->whereHas('group', function ($gq) {
-                $gq->whereIn('status', ['active', 'completed']);
-            })
-            ->latest()
-            ->limit(3)
-            ->get()
-            ->map(function ($member) {
-                $client = $member->client;
-        
-                return [
-                    'client_name' => $client?->client_name,
-                    'client_phone' => $client?->client_phone,
-                    'group' => $member->group?->group_code,
-                    'member_no' => $member->member_number,
-                    'status' => $member->status,
-                    'joined' => $member->joined_date
-                        ? Carbon::parse($member->joined_date)->format('d-m-Y')
-                        : ($member->created_at
-                            ? $member->created_at->format('d-m-Y')
-                            : null),
-                ];
-            });
+        $recentChitMembers = collect();
 
         $upcomingFdMaturities = FixedDeposit::with(['client'])
             ->whereHas('client', function ($q) use ($agentId) {
@@ -730,59 +674,13 @@ class AgentDashboardControllerApi extends Controller
 
     private function getChitStats(int $agentId, Carbon $today): array
     {
-        $memberScope = function ($q) use ($agentId) {
-            $q->whereHas('client', function ($cq) use ($agentId) {
-                $cq->where('assigned_to', $agentId);
-            })
-            ->orWhereHas('shares.client', function ($cq) use ($agentId) {
-                $cq->where('assigned_to', $agentId);
-            });
-        };
-        
-        $activeMembers = GroupMember::where($memberScope)
-            ->whereIn('status', ['active', 'approved'])
-            ->whereHas('group', fn ($gq) => $gq->where('status', 'active'))
-            ->count();
-        
-        $activeGroups = GroupMember::where($memberScope)
-            ->whereIn('status', ['active', 'approved'])
-            ->whereHas('group', fn ($gq) => $gq->where('status', 'active'))
-            ->distinct('group_id')
-            ->count('group_id');
-
-        $todayInstallments = Installment::whereIn('status', ['pending', 'overdue', 'partial'])
-            ->where(function ($q) use ($agentId) {
-                $this->applyAgentMemberScope($q, $agentId);
-            })
-            ->whereDate('due_date', '=', now())
-            ->whereRaw('(amount + penalty_amount - paid_amount) - 0.01 > (SELECT COALESCE(SUM(amount), 0) FROM chit_collections WHERE chit_collections.installment_id = installments.id AND chit_collections.status = "in_progress")')
-            ->whereHas('group', fn ($gq) => $gq->whereIn('status', ['active', 'completed']))
-            ->count();
-
-        $overdueInstallments = Installment::where(function ($q) use ($today) {
-                $q->where('status', 'overdue')
-                    ->orWhere(function ($sq) use ($today) {
-                        $sq->whereIn('status', ['pending', 'partial'])
-                            ->where('due_date', '<', $today);
-                    });
-            })
-            ->where(function ($q) use ($agentId) {
-                $this->applyAgentMemberScope($q, $agentId);
-            })
-            ->whereRaw('(amount + penalty_amount - paid_amount) - 0.01 > (SELECT COALESCE(SUM(amount), 0) FROM chit_collections WHERE chit_collections.installment_id = installments.id AND chit_collections.status = "in_progress")')
-            ->whereHas('group', fn ($gq) => $gq->whereIn('status', ['active', 'completed']))
-            ->count();
-
-        $todayCollected = $this->sumAgentCollections($agentId, $today->copy()->startOfDay(), $today->copy()->endOfDay());
-        $monthCollected = $this->sumAgentCollections($agentId, $today->copy()->startOfMonth(), $today->copy()->endOfMonth());
-
         return [
-            'active_members' => $activeMembers,
-            'active_groups' => $activeGroups,
-            'today_installments' => $todayInstallments,
-            'overdue_installments' => $overdueInstallments,
-            'collected_today' => $todayCollected['chit_amount'],
-            'collected_this_month' => $monthCollected['chit_amount'],
+            'active_members' => 0,
+            'active_groups' => 0,
+            'today_installments' => 0,
+            'overdue_installments' => 0,
+            'collected_today' => 0.0,
+            'collected_this_month' => 0.0,
         ];
     }
 
@@ -822,7 +720,7 @@ class AgentDashboardControllerApi extends Controller
     }
 
     /**
-     * Sum loan + chit collections recorded by this agent in the period.
+     * Sum loan collections recorded by this agent in the period.
      * Counts cash/direct collections as soon as they are submitted (in_progress),
      * plus verified/completed. Excludes rejected and unpaid payment links.
      */
@@ -842,20 +740,17 @@ class AgentDashboardControllerApi extends Controller
         };
 
         $emiQuery = $applyScope(EmiCollection::query());
-        $chitQuery = $applyScope(ChitCollection::query());
 
         $loanAmount = (float) (clone $emiQuery)->sum('amount');
-        $chitAmount = (float) (clone $chitQuery)->sum('amount');
         $loanCount = (int) (clone $emiQuery)->count();
-        $chitCount = (int) (clone $chitQuery)->count();
 
         return [
             'loan_count' => $loanCount,
-            'chit_count' => $chitCount,
-            'collected_count' => $loanCount + $chitCount,
+            'chit_count' => 0,
+            'collected_count' => $loanCount,
             'loan_amount' => round($loanAmount, 2),
-            'chit_amount' => round($chitAmount, 2),
-            'collection_amount' => round($loanAmount + $chitAmount, 2),
+            'chit_amount' => 0.0,
+            'collection_amount' => round($loanAmount, 2),
         ];
     }
 
@@ -884,26 +779,14 @@ class AgentDashboardControllerApi extends Controller
             return max(0, (float) $emi->pending_amount - $inProgress);
         });
 
-        $pendingChitInstallments = Installment::whereIn('status', ['pending', 'overdue', 'partial'])
-            ->whereBetween('due_date', [$from, $to])
-            ->where(function ($q) use ($agentId) {
-                $this->applyAgentMemberScope($q, $agentId);
-            })
-            ->whereHas('group', fn ($gq) => $gq->whereIn('status', ['active', 'completed']))
-            ->get();
-
-        $pendingChitCount = $pendingChitInstallments->count();
-        $pendingChitAmount = (float) $pendingChitInstallments->sum(function ($inst) {
-            $inProgress = (float) $inst->collections()->where('status', 'in_progress')->sum('amount');
-            $bal = (float) ($inst->amount + $inst->penalty_amount - $inst->paid_amount);
-            return max(0, $bal - $inProgress);
-        });
+        $pendingChitCount = 0;
+        $pendingChitAmount = 0.0;
 
         $collectedCount = (int) $collected['collected_count'];
         $collectedAmount = (float) $collected['collection_amount'];
 
-        $pendingCount = $pendingLoanCount + $pendingChitCount;
-        $pendingAmount = round($pendingLoanAmount + $pendingChitAmount, 2);
+        $pendingCount = $pendingLoanCount;
+        $pendingAmount = round($pendingLoanAmount, 2);
 
         $collectableCount = $collectedCount + $pendingCount;
         $collectableAmount = round($collectedAmount + $pendingAmount, 2);
@@ -920,22 +803,10 @@ class AgentDashboardControllerApi extends Controller
             ->pluck('emi.loanAccount.client_id')
             ->filter();
 
-        $collectedChitClients = ChitCollection::where('agent_id', $agentId)
-            ->whereBetween('collected_at', [$from, $to])
-            ->whereIn('status', ['in_progress', 'verified', 'completed'])
-            ->pluck('client_id')
-            ->filter();
-
         $pendingLoanClients = $pendingLoanEmis->pluck('loanAccount.client_id')->filter();
 
-        $pendingChitClients = $pendingChitInstallments->map(function ($inst) {
-            return $inst->member?->client_id;
-        })->filter();
-
         $totalCollectableClientCount = $collectedLoanClients
-            ->merge($collectedChitClients)
             ->merge($pendingLoanClients)
-            ->merge($pendingChitClients)
             ->unique()
             ->count();
 
@@ -978,24 +849,12 @@ class AgentDashboardControllerApi extends Controller
             return max(0, (float) $emi->pending_amount - $inProgress);
         });
 
-        // 2. Current Active Pending Overdue Chit Installments
-        $pendingOverdueInstallments = Installment::whereIn('status', ['pending', 'overdue', 'partial'])
-            ->whereDate('due_date', '<', $today)
-            ->where(function ($q) use ($agentId) {
-                $this->applyAgentMemberScope($q, $agentId);
-            })
-            ->whereHas('group', fn ($gq) => $gq->whereIn('status', ['active', 'completed']))
-            ->get();
+        // 2. Current Active Pending Overdue Chit Installments (Removed)
+        $overduePendingChitCount = 0;
+        $overduePendingChitAmount = 0.0;
 
-        $overduePendingChitCount = $pendingOverdueInstallments->count();
-        $overduePendingChitAmount = (float) $pendingOverdueInstallments->sum(function ($inst) {
-            $inProgress = (float) $inst->collections()->where('status', 'in_progress')->sum('amount');
-            $bal = (float) ($inst->amount + $inst->penalty_amount - $inst->paid_amount);
-            return max(0, $bal - $inProgress);
-        });
-
-        $overduePendingCount = $overduePendingLoanCount + $overduePendingChitCount;
-        $overduePendingRemaining = round($overduePendingLoanAmount + $overduePendingChitAmount, 2);
+        $overduePendingCount = $overduePendingLoanCount;
+        $overduePendingRemaining = round($overduePendingLoanAmount, 2);
 
         // 3. Overdue Collections made by this Agent
         $loanOverdueCollections = EmiCollection::where('agent_id', $agentId)
@@ -1012,22 +871,8 @@ class AgentDashboardControllerApi extends Controller
         $overdueRecoveredLoanTotal = (float) $loanOverdueCollections->sum('amount');
         $overdueClearedLoanCount = $loanOverdueCollections->pluck('emi_id')->unique()->count();
 
-        $chitOverdueCollections = ChitCollection::where('agent_id', $agentId)
-            ->whereIn('status', ['in_progress', 'verified', 'completed'])
-            ->where(function ($q) {
-                $q->where('payment_type', 'overdue')
-                  ->orWhereHas('installment', function ($iq) {
-                      $iq->whereDate('due_date', '<', DB::raw('chit_collections.collected_at'))
-                        ->orWhere('status', 'overdue');
-                  });
-            })
-            ->get();
-
-        $overdueRecoveredChitTotal = (float) $chitOverdueCollections->sum('amount');
-        $overdueClearedChitCount = $chitOverdueCollections->pluck('installment_id')->unique()->count();
-
-        $overdueRecoveredTotal = round($overdueRecoveredLoanTotal + $overdueRecoveredChitTotal, 2);
-        $overdueClearedCount = $overdueClearedLoanCount + $overdueClearedChitCount;
+        $overdueRecoveredTotal = round($overdueRecoveredLoanTotal, 2);
+        $overdueClearedCount = $overdueClearedLoanCount;
 
         $totalOverduePool = round($overdueRecoveredTotal + $overduePendingRemaining, 2);
         $totalOverdueItemsCount = $overdueClearedCount + $overduePendingCount;

@@ -11,7 +11,6 @@ use Illuminate\Support\Facades\Validator;
 use App\Models\AgentActivity;
 use App\Models\Emi;
 use App\Models\EmiCollection;
-use App\Models\ChitCollection;
 
 class AgentCaseControllerApi extends Controller
 {
@@ -468,10 +467,7 @@ class AgentCaseControllerApi extends Controller
             })
             ->sum('amount');
 
-        $todayCollected += (float) ChitCollection::where('agent_id', $agentId)
-            ->whereBetween('collected_at', [$todayStart, $todayEnd])
-            ->whereIn('status', ['in_progress', 'verified', 'completed'])
-            ->sum('amount');
+        
 
         $monthCollected = (float) EmiCollection::where('agent_id', $agentId)
             ->whereBetween('collected_at', [$startOfMonth, $endOfMonth])
@@ -482,10 +478,7 @@ class AgentCaseControllerApi extends Controller
             })
             ->sum('amount');
 
-        $monthCollected += (float) ChitCollection::where('agent_id', $agentId)
-            ->whereBetween('collected_at', [$startOfMonth, $endOfMonth])
-            ->whereIn('status', ['in_progress', 'verified', 'completed'])
-            ->sum('amount');
+        
 
         $todaySummary = [
             'total_due' => $todayTotalDue,

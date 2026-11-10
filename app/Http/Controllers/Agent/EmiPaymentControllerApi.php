@@ -1241,7 +1241,7 @@ class EmiPaymentControllerApi extends Controller
         }
 
         // Inbox order: unread first, then newest. Priority-first buried push
-        // rows (chit_approved, kyc, loan, ...) under hundreds of case_assigned.
+        // rows (kyc, loan, ...) under hundreds of case_assigned.
         $priorityOrder = ['high' => 1, 'medium' => 2, 'normal' => 2, 'low' => 3];
         usort($notifications, function ($a, $b) use ($priorityOrder) {
             $unreadA = ! empty($a['is_read']) ? 1 : 0;

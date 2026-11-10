@@ -129,13 +129,6 @@ class BackfillAccountingTags extends Command
     protected function inferFromCategoryCode(string $code): array
     {
         return match (true) {
-            str_starts_with($code, 'CHIT-COLL') => [AccountingTags::MODULE_CHIT, AccountingTags::ENTRY_INSTALLMENT],
-            str_starts_with($code, 'CHIT-PROC') => [AccountingTags::MODULE_CHIT, AccountingTags::ENTRY_PROC_FEE],
-            str_starts_with($code, 'CHIT-DOC') => [AccountingTags::MODULE_CHIT, AccountingTags::ENTRY_DOC_FEE],
-            str_starts_with($code, 'CHIT-OTHER') => [AccountingTags::MODULE_CHIT, AccountingTags::ENTRY_OTHER_FEE],
-            str_starts_with($code, 'CHIT-BANK') => [AccountingTags::MODULE_CHIT, AccountingTags::ENTRY_BANK_FEE],
-            str_starts_with($code, 'CHIT-FEE') => [AccountingTags::MODULE_CHIT, AccountingTags::ENTRY_OTHER_FEE],
-            str_starts_with($code, 'CHIT-COMM') => [AccountingTags::MODULE_CHIT, AccountingTags::ENTRY_FOREMAN_COMM],
             str_starts_with($code, 'LOAN-PROC') => [AccountingTags::MODULE_LOAN, AccountingTags::ENTRY_PROC_FEE],
             str_starts_with($code, 'LOAN-DOC') => [AccountingTags::MODULE_LOAN, AccountingTags::ENTRY_DOC_FEE],
             str_starts_with($code, 'LOAN-OTHER') => [AccountingTags::MODULE_LOAN, AccountingTags::ENTRY_OTHER_FEE],
@@ -163,9 +156,6 @@ class BackfillAccountingTags extends Command
         if (str_contains($text, 'loan interest') || str_contains($text, 'foreclosure interest')) {
             return [AccountingTags::MODULE_LOAN, AccountingTags::ENTRY_INTEREST];
         }
-        if (str_contains($text, 'foreman commission') || str_contains($text, 'chit foreman')) {
-            return [AccountingTags::MODULE_CHIT, AccountingTags::ENTRY_FOREMAN_COMM];
-        }
         if (str_contains($text, 'processing fee') || str_contains($text, 'processing fee retained') || str_contains($text, '-proc')) {
             $module = $this->moduleFromText($text);
 
@@ -189,21 +179,8 @@ class BackfillAccountingTags extends Command
         if (str_contains($text, 'wallet withdrawal')) {
             return [AccountingTags::MODULE_FD, AccountingTags::ENTRY_WALLET_WD];
         }
-        if (str_contains($text, 'member transfer')) {
-            return [AccountingTags::MODULE_CHIT, AccountingTags::ENTRY_TRANSFER];
-        }
-        if (str_contains($text, 'installment collection reversed') || str_contains($text, 'reversal:') || str_contains($text, 'chit ic rev') || str_contains($text, 'loan ic rev')) {
-            $module = (str_contains($text, 'chit') || str_contains($text, 'chit ic'))
-                ? AccountingTags::MODULE_CHIT
-                : AccountingTags::MODULE_LOAN;
-
-            return [$module, AccountingTags::ENTRY_REVERSAL];
-        }
-        if (str_contains($text, 'chit installment') || str_contains($text, 'chit ic')) {
-            return [AccountingTags::MODULE_CHIT, AccountingTags::ENTRY_INSTALLMENT];
-        }
-        if (str_contains($text, 'chit settlement')) {
-            return [AccountingTags::MODULE_CHIT, AccountingTags::ENTRY_SETTLEMENT];
+        if (str_contains($text, 'installment collection reversed') || str_contains($text, 'reversal:') || str_contains($text, 'loan ic rev')) {
+            return [AccountingTags::MODULE_LOAN, AccountingTags::ENTRY_REVERSAL];
         }
         if (str_contains($text, 'loan disbursement')) {
             return [AccountingTags::MODULE_LOAN, AccountingTags::ENTRY_DISBURSEMENT];
@@ -223,9 +200,6 @@ class BackfillAccountingTags extends Command
         if (str_contains($text, 'deposited by') || str_starts_with($text, 'deposited by')) {
             return [AccountingTags::MODULE_OTHER, AccountingTags::ENTRY_DEPOSIT];
         }
-        if (str_contains($text, 'chit')) {
-            return [AccountingTags::MODULE_CHIT, null];
-        }
         if (str_contains($text, 'loan')) {
             return [AccountingTags::MODULE_LOAN, null];
         }
@@ -238,9 +212,6 @@ class BackfillAccountingTags extends Command
 
     protected function moduleFromText(string $text): string
     {
-        if (str_contains($text, 'chit')) {
-            return AccountingTags::MODULE_CHIT;
-        }
         if (str_contains($text, 'loan')) {
             return AccountingTags::MODULE_LOAN;
         }

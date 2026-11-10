@@ -2,10 +2,8 @@
 
 namespace App\Console\Commands;
 
-use App\Models\ChitCollection;
 use App\Models\Emi;
 use App\Models\EmiCollection;
-use App\Models\Installment;
 use App\Support\BulkPaymentGroup;
 use Illuminate\Console\Command;
 use Illuminate\Support\Collection;
@@ -17,7 +15,7 @@ class BackfillBulkPaymentGroups extends Command
         {--dry-run : Show what would be grouped without writing}
         {--force : Skip the confirmation prompt}';
 
-    protected $description = 'Stamp Group: BULK-xxxxx on past loan/chit bulk payments so they list and print as one cumulative receipt';
+    protected $description = 'Stamp Group: BULK-xxxxx on past loan bulk payments so they list and print as one cumulative receipt';
 
     public function handle(): int
     {
@@ -28,23 +26,16 @@ class BackfillBulkPaymentGroups extends Command
             : 'Backfilling past bulk payment group keys...');
 
         $loanClusters = $this->loanClusters();
-        $chitCollectionClusters = $this->chitCollectionClusters();
-        $installmentClusters = $this->installmentClusters();
-
         $loanCount = $loanClusters->sum(fn (Collection $items) => $items->count());
-        $chitColCount = $chitCollectionClusters->sum(fn (Collection $items) => $items->count());
-        $instCount = $installmentClusters->sum(fn (Collection $items) => $items->count());
 
         $this->table(
             ['Type', 'Bulk groups (2+ items)', 'Rows to stamp'],
             [
                 ['Loan EMI collections', $loanClusters->count(), $loanCount],
-                ['Chit collections', $chitCollectionClusters->count(), $chitColCount],
-                ['Chit installments', $installmentClusters->count(), $instCount],
             ]
         );
 
-        if ($loanClusters->isEmpty() && $chitCollectionClusters->isEmpty() && $installmentClusters->isEmpty()) {
+        if ($loanClusters->isEmpty()) {
             $this->info('No past bulk payments need a group key. They may already have Group: BULK-… or they were single collections.');
 
             return self::SUCCESS;
@@ -56,18 +47,6 @@ class BackfillBulkPaymentGroups extends Command
                 $row->id,
                 $row->emi?->instalment_number ?? '?',
                 number_format((float) $row->amount, 2)
-            ));
-            $this->previewClusters('Chit collection', $chitCollectionClusters, fn (ChitCollection $row) => sprintf(
-                '#%s Inst %s ₹%s',
-                $row->id,
-                $row->installment?->month_number ?? '?',
-                number_format((float) $row->amount, 2)
-            ));
-            $this->previewClusters('Chit installment', $installmentClusters, fn (Installment $row) => sprintf(
-                '#%s Inst %s ₹%s',
-                $row->id,
-                $row->month_number,
-                number_format((float) $row->paid_amount, 2)
             ));
 
             $this->warn('Dry run only. To apply: php artisan bulk:backfill-groups');
@@ -82,10 +61,8 @@ class BackfillBulkPaymentGroups extends Command
         }
 
         $stamped = 0;
-        DB::transaction(function () use ($loanClusters, $chitCollectionClusters, $installmentClusters, &$stamped) {
+        DB::transaction(function () use ($loanClusters, &$stamped) {
             $stamped += $this->stampLoanClusters($loanClusters);
-            $stamped += $this->stampChitCollectionClusters($chitCollectionClusters);
-            $stamped += $this->stampInstallmentClusters($installmentClusters);
         });
 
         $this->info("Stamped {$stamped} past bulk payment row(s). Refresh Agent Collections and Payment Receipts to see cumulative totals.");
@@ -118,95 +95,6 @@ class BackfillBulkPaymentGroups extends Command
                 $row->payment_method ?? '',
             ]);
         }, fn (EmiCollection $row) => $row->created_at);
-    }
-
-    /**
-     * @return Collection<int, Collection<int, ChitCollection>>
-     */
-    private function chitCollectionClusters(): Collection
-    {
-        $rows = ChitCollection::with('installment')
-            ->orderBy('id')
-            ->get()
-            ->filter(function (ChitCollection $row) {
-                if (! BulkPaymentGroup::isBulkChit($row)) {
-                    return false;
-                }
-                $key = BulkPaymentGroup::extractExplicitKey($row->remarks, $row->payment_reference);
-
-                return ! $key || ! str_starts_with(strtoupper((string) $key), 'BULK-');
-            })
-            ->values();
-
-        return $this->clusterByGap($rows, function (ChitCollection $row) {
-            return implode(':', [
-                $row->group_id ?? 'x',
-                $row->member_id ?? 'x',
-                $row->agent_id ?: ('u' . ($row->verified_by ?? '0')),
-                $row->payment_method ?? '',
-            ]);
-        }, fn (ChitCollection $row) => $row->created_at);
-    }
-
-    /**
-     * @return Collection<int, Collection<int, Installment>>
-     */
-    private function installmentClusters(): Collection
-    {
-        $rows = Installment::with('group')
-            ->where(function ($q) {
-                $q->where('remarks', 'like', '%' . BulkPaymentGroup::CHIT_ADMIN_MARKER . '%')
-                    ->orWhere('remarks', 'like', '%' . BulkPaymentGroup::AGENT_MARKER . '%')
-                    ->orWhere('remarks', 'like', '%' . BulkPaymentGroup::FAMILY_MARKER . '%')
-                    ->orWhere('reference_no', 'like', 'BULK-%')
-                    ->orWhere('reference_no', 'like', 'FAM-%');
-            })
-            ->orderBy('id')
-            ->get()
-            ->filter(function (Installment $row) {
-                if (! BulkPaymentGroup::isBulkPayload($row->remarks, $row->reference_no)) {
-                    return false;
-                }
-                $key = BulkPaymentGroup::extractExplicitKey($row->remarks, $row->reference_no);
-
-                return ! $key || ! str_starts_with(strtoupper((string) $key), 'BULK-');
-            })
-            ->values();
-
-        $byReference = $rows->groupBy(function (Installment $row) {
-            $ref = trim((string) ($row->reference_no ?? ''));
-            if ($ref === '' || strcasecmp($ref, 'Bulk Payment') === 0) {
-                return 'nogroup-' . $row->id;
-            }
-
-            return $ref . ':m' . $row->member_id . ':g' . $row->group_id;
-        });
-
-        $clusters = collect();
-        foreach ($byReference as $key => $group) {
-            if (str_starts_with((string) $key, 'nogroup-')) {
-                continue;
-            }
-            if ($group->count() > 1) {
-                $clusters->push($group->values());
-            }
-        }
-
-        $ungrouped = $rows->filter(function (Installment $row) {
-            $ref = trim((string) ($row->reference_no ?? ''));
-
-            return $ref === '' || strcasecmp($ref, 'Bulk Payment') === 0;
-        })->values();
-
-        $timeClusters = $this->clusterByGap($ungrouped, function (Installment $row) {
-            return implode(':', [
-                $row->group_id ?? 'x',
-                $row->member_id ?? 'x',
-                $row->paid_date?->format('Y-m-d') ?? 'x',
-            ]);
-        }, fn (Installment $row) => $row->updated_at ?? $row->paid_date);
-
-        return $clusters->concat($timeClusters)->values();
     }
 
     /**
@@ -299,44 +187,6 @@ class BackfillBulkPaymentGroups extends Command
                         })
                         ->update(['payment_reference' => $groupKey]);
                 }
-                $stamped++;
-            }
-        }
-
-        return $stamped;
-    }
-
-    private function stampChitCollectionClusters(Collection $clusters): int
-    {
-        $stamped = 0;
-
-        foreach ($clusters as $items) {
-            $groupKey = BulkPaymentGroup::generateKey();
-            foreach ($items as $row) {
-                /** @var ChitCollection $row */
-                $row->update([
-                    'remarks' => $this->appendGroup($row->remarks, $groupKey),
-                    'payment_reference' => $this->bulkReference($row->payment_reference, $groupKey),
-                ]);
-                $stamped++;
-            }
-        }
-
-        return $stamped;
-    }
-
-    private function stampInstallmentClusters(Collection $clusters): int
-    {
-        $stamped = 0;
-
-        foreach ($clusters as $items) {
-            $groupKey = BulkPaymentGroup::generateKey();
-            foreach ($items as $row) {
-                /** @var Installment $row */
-                $row->update([
-                    'remarks' => $this->appendGroup($row->remarks, $groupKey),
-                    'reference_no' => $this->bulkReference($row->reference_no, $groupKey),
-                ]);
                 $stamped++;
             }
         }

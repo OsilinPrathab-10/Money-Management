@@ -84,13 +84,10 @@ class AdminNotification extends Model
         return match($this->type) {
             'emi_overdue' => 'ri-alarm-warning-line',
             'new_loan_application' => 'ri-file-list-3-line',
-            'new_chit_application' => 'ri-group-line',
             'new_fd_application' => 'ri-safe-2-line',
             'new_settlement_application' => 'ri-hand-coin-line',
             'new_user_registration' => 'ri-user-add-line',
             'payment_received' => 'ri-money-rupee-circle-line',
-            'chit_installment_collected' => 'ri-money-rupee-circle-line',
-            'chit_settlement_paid' => 'ri-hand-coin-line',
             'loan_disbursed' => 'ri-bank-card-line',
             'fd_booked' => 'ri-safe-2-line',
             'client_assigned' => 'ri-user-shared-line',
@@ -107,9 +104,9 @@ class AdminNotification extends Model
     public function getBadgeColorAttribute()
     {
         return match($this->type) {
-            'emi_overdue', 'kyc_rejected', 'loan_application_rejected', 'chit_application_rejected', 'fd_application_rejected' => 'danger',
-            'new_loan_application', 'new_chit_application', 'new_fd_application', 'new_settlement_application' => 'primary',
-            'new_user_registration', 'payment_received', 'chit_installment_collected', 'chit_settlement_paid', 'loan_disbursed', 'fd_booked', 'kyc_approved' => 'success',
+            'emi_overdue', 'kyc_rejected', 'loan_application_rejected', 'fd_application_rejected' => 'danger',
+            'new_loan_application', 'new_fd_application', 'new_settlement_application' => 'primary',
+            'new_user_registration', 'payment_received', 'loan_disbursed', 'fd_booked', 'kyc_approved' => 'success',
             'client_assigned' => 'info',
             'broadcast', 'interest_update', 'loan_product', 'offer', 'disbursement', 'general' => 'primary',
             default => 'secondary',

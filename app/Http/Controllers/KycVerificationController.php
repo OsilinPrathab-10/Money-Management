@@ -175,15 +175,7 @@ class KycVerificationController extends Controller
         $activePaymentMethods = PaymentMethod::where('is_enabled', true)->get();
         $activeGateways = PaymentGateway::where('enabled', true)->get();
 
-        $availableGroups = \App\Models\ChitGroup::with('scheme')
-            ->whereIn('status', ['forming', 'active'])
-            ->withCount(['members' => fn ($q) => $q->whereNotIn('status', ['rejected', 'transferred', 'withdrawn', 'cancelled'])])
-            ->orderBy('id', 'desc')
-            ->get()
-            ->filter(fn ($g) => $g->members_count < $g->total_members)
-            ->each(function ($g) {
-                $g->settlement_amount = $g->resolvePayoutAmountForMonth((int) $g->current_month + 1);
-            });
+        $availableGroups = collect();
 
         $agents = \App\Models\Agent::orderBy('agent_name')->get();
         $verifiedClients = Client::whereHas('kycDetail', function ($q) {
@@ -542,7 +534,7 @@ class KycVerificationController extends Controller
                 $kyc->attempt_no = $attempt + 1;
                 $kyc->save();
 
-                // Rejection set the client inactive, which blocks new loan/chit applications
+                // Rejection set the client inactive, which blocks new loan applications
                 $client->status = 'pending';
                 $client->save();
             });

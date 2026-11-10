@@ -8,7 +8,6 @@ use App\Models\Agent;
 use App\Models\Client;
 use App\Models\Emi;
 use App\Models\EmiCollection;
-use App\Models\Installment;
 use App\Models\LoanAccount;
 use App\Models\LoanApplication;
 use Illuminate\Support\Carbon;
@@ -327,7 +326,7 @@ class DashboardController extends Controller
       ? round(($activeClients / $totalClients) * 100, 2)
       : 0;
 
-    $activeDashboardTab = in_array($request->get('tab'), ['loan', 'chit', 'fd'], true)
+    $activeDashboardTab = in_array($request->get('tab'), ['loan', 'fd'], true)
       ? $request->get('tab')
       : 'loan';
 
@@ -338,8 +337,6 @@ class DashboardController extends Controller
     $agentCollectionSummary = $this->buildAgentCollectionSummary($agentFromDate, $agentToDate, $agentFilterId);
     $allAgents = Agent::orderBy('agent_name')->get(['id', 'agent_name', 'agent_code']);
 
-    // Nest chit data so keys like totalCollections do not overwrite loan period filters.
-    $chitDashboardData = app(ChitDashboardController::class)->getDashboardData($request);
     $fdDashboard = app(FixedDepositDashboardController::class)->getDashboardData($request);
 
     return view('admin.dashboard', array_merge(compact(
@@ -383,8 +380,7 @@ class DashboardController extends Controller
       'agentFromDate',
       'agentToDate',
       'agentFilterId',
-      'activeDashboardTab',
-      'chitDashboardData'
+      'activeDashboardTab'
     ), $fdDashboard));
   }
 
@@ -433,45 +429,7 @@ class DashboardController extends Controller
         ];
       });
 
-    // Today's Chit collections
-    $chitCollections = \App\Models\ChitCollection::query()
-      ->where('chit_collections.agent_id', $agent->id)
-      ->whereIn('chit_collections.status', ['verified', 'in_progress'])
-      ->whereDate('chit_collections.collected_at', $today)
-      ->join('group_members', 'group_members.id', '=', 'chit_collections.member_id')
-      ->join('clients', 'clients.id', '=', 'chit_collections.client_id')
-      ->join('chit_groups', 'chit_groups.id', '=', 'chit_collections.group_id')
-      ->join('installments', 'installments.id', '=', 'chit_collections.installment_id')
-      ->select([
-        'chit_collections.id',
-        'chit_collections.amount',
-        'chit_collections.payment_method',
-        'chit_collections.status',
-        'chit_collections.collected_at',
-        'clients.id as client_id',
-        'clients.client_name',
-        'chit_groups.group_code',
-        'installments.month_number as instalment_number',
-      ])
-      ->get()
-      ->map(function ($collection) {
-        return [
-          'id' => 'chit_' . $collection->id,
-          'client_id' => $collection->client_id,
-          'client_name' => $collection->client_name ?: 'Unnamed Client',
-          'account_number' => 'Chit: ' . ($collection->group_code ?: 'Group'),
-          'instalment_number' => 'Inst #' . $collection->instalment_number,
-          'amount' => round((float) $collection->amount, 2),
-          'payment_method' => Str::headline((string) $collection->payment_method),
-          'status' => Str::headline((string) $collection->status),
-          'collected_at' => Carbon::parse($collection->collected_at)->format('d M Y, h:i A'),
-          'collected_at_raw' => Carbon::parse($collection->collected_at)->toIso8601String(),
-        ];
-      });
-
-    $allCollections = $loanCollections->concat($chitCollections)
-      ->sortByDesc('collected_at_raw')
-      ->values();
+    $allCollections = $loanCollections->sortByDesc('collected_at_raw')->values();
 
     $collectionTotalsByClient = $allCollections
       ->groupBy('client_id')
@@ -484,27 +442,13 @@ class DashboardController extends Controller
         ->where('pending_amount', '>', 0)
         ->count();
 
-      $chitOverdue = Installment::whereHas('member', fn ($q) => $q->where('client_id', $client->id))
-        ->whereDate('due_date', '<', $today)
-        ->whereIn('status', ['pending', 'overdue', 'partial'])
-        ->count();
-
       $loanPending = Emi::whereHas('loanAccount', fn ($q) => $q->where('client_id', $client->id)->where('status', 'active'))
         ->whereBetween('due_date', [$today, $monthEnd])
         ->whereIn('status', ['pending', 'overdue'])
         ->where('pending_amount', '>', 0)
         ->count();
 
-      $chitPending = Installment::whereHas('member', fn ($q) => $q->where('client_id', $client->id))
-        ->whereBetween('due_date', [$today, $monthEnd])
-        ->whereIn('status', ['pending', 'overdue', 'partial'])
-        ->count();
-
       $loanPaid = Emi::whereHas('loanAccount', fn ($q) => $q->where('client_id', $client->id))
-        ->where('status', 'paid')
-        ->count();
-
-      $chitPaid = Installment::whereHas('member', fn ($q) => $q->where('client_id', $client->id))
         ->where('status', 'paid')
         ->count();
 
@@ -514,19 +458,14 @@ class DashboardController extends Controller
         ->where('pending_amount', '>', 0)
         ->count();
 
-      $chitUpcoming = Installment::whereHas('member', fn ($q) => $q->where('client_id', $client->id))
-        ->whereDate('due_date', '>', $monthEnd)
-        ->whereIn('status', ['pending', 'overdue', 'partial'])
-        ->count();
-
       return [
         'id' => $client->id,
         'name' => $client->client_name ?: 'Unnamed Client',
         'phone' => $client->client_phone,
-        'overdue_count' => $loanOverdue + $chitOverdue,
-        'pending_count' => $loanPending + $chitPending,
-        'paid_count' => $loanPaid + $chitPaid,
-        'upcoming_count' => $loanUpcoming + $chitUpcoming,
+        'overdue_count' => $loanOverdue,
+        'pending_count' => $loanPending,
+        'paid_count' => $loanPaid,
+        'upcoming_count' => $loanUpcoming,
         'collected_today' => (float) ($collectionTotalsByClient[$client->id] ?? 0),
       ];
     })->sortByDesc('overdue_count')->values();
@@ -891,39 +830,6 @@ class DashboardController extends Controller
       ->get()
       ->keyBy('assigned_to');
 
-    $chitStatusCounts = Client::query()
-      ->whereNotNull('clients.assigned_to')
-      ->leftJoin('group_members', function ($j) {
-        $j->on('group_members.client_id', '=', 'clients.id')
-          ->whereNull('group_members.deleted_at')
-          ->whereNotIn('group_members.status', ['rejected', 'transferred', 'withdrawn', 'cancelled']);
-      })
-      ->leftJoin('installments', function ($j) {
-        $j->on('installments.member_id', '=', 'group_members.id')
-          ->whereNull('installments.deleted_at')
-          ->whereNotIn('installments.status', ['waived']);
-      })
-      ->select('clients.assigned_to')
-      ->selectRaw('COUNT(DISTINCT clients.id) as assigned_customers')
-      ->selectRaw(
-        'COUNT(DISTINCT CASE WHEN installments.due_date < ? AND installments.status IN ("pending", "overdue", "partial") THEN clients.id END) as overdue_customers',
-        [$today->toDateString()]
-      )
-      ->selectRaw(
-        'COUNT(DISTINCT CASE WHEN installments.due_date >= ? AND installments.due_date <= ? AND installments.status IN ("pending", "overdue", "partial") THEN clients.id END) as pending_customers',
-        [$today->toDateString(), $monthEnd->toDateString()]
-      )
-      ->selectRaw(
-        'COUNT(DISTINCT CASE WHEN installments.status = "paid" THEN clients.id END) as paid_customers'
-      )
-      ->selectRaw(
-        'COUNT(DISTINCT CASE WHEN installments.due_date > ? AND installments.status IN ("pending", "overdue", "partial") THEN clients.id END) as upcoming_customers',
-        [$monthEnd->toDateString()]
-      )
-      ->groupBy('clients.assigned_to')
-      ->get()
-      ->keyBy('assigned_to');
-
     $dailyLoanCollections = EmiCollection::query()
       ->whereNotNull('agent_id')
       ->whereIn('status', ['verified', 'in_progress'])
@@ -934,35 +840,24 @@ class DashboardController extends Controller
       ->groupBy('agent_id')
       ->pluck('total', 'agent_id');
 
-    $dailyChitCollections = \App\Models\ChitCollection::query()
-      ->whereNotNull('agent_id')
-      ->whereIn('status', ['verified', 'in_progress'])
-      ->whereDate('collected_at', $today)
-      ->select('agent_id')
-      ->selectRaw('SUM(amount) as total')
-      ->groupBy('agent_id')
-      ->pluck('total', 'agent_id');
-
     return Agent::query()
       ->with('user:id,name')
       ->orderBy('agent_name')
       ->get()
-      ->map(function (Agent $agent) use ($loanStatusCounts, $chitStatusCounts, $dailyLoanCollections, $dailyChitCollections) {
+      ->map(function (Agent $agent) use ($loanStatusCounts, $dailyLoanCollections) {
         $loanCounts = $loanStatusCounts->get($agent->id);
-        $chitCounts = $chitStatusCounts->get($agent->id);
 
-        $assignedCount = max((int) ($loanCounts->assigned_customers ?? 0), (int) ($chitCounts->assigned_customers ?? 0));
+        $assignedCount = (int) ($loanCounts->assigned_customers ?? 0);
         if ($assignedCount === 0) {
           $assignedCount = Client::where('assigned_to', $agent->id)->count();
         }
 
-        $overdueCount = max((int) ($loanCounts->overdue_customers ?? 0), (int) ($chitCounts->overdue_customers ?? 0));
-        $pendingCount = max((int) ($loanCounts->pending_customers ?? 0), (int) ($chitCounts->pending_customers ?? 0));
-        $paidCount = max((int) ($loanCounts->paid_customers ?? 0), (int) ($chitCounts->paid_customers ?? 0));
-        $upcomingCount = max((int) ($loanCounts->upcoming_customers ?? 0), (int) ($chitCounts->upcoming_customers ?? 0));
+        $overdueCount = (int) ($loanCounts->overdue_customers ?? 0);
+        $pendingCount = (int) ($loanCounts->pending_customers ?? 0);
+        $paidCount = (int) ($loanCounts->paid_customers ?? 0);
+        $upcomingCount = (int) ($loanCounts->upcoming_customers ?? 0);
 
         $loanTotal = (float) ($dailyLoanCollections[$agent->id] ?? 0);
-        $chitTotal = (float) ($dailyChitCollections[$agent->id] ?? 0);
 
         return [
           'name' => $agent->agent_name ?: optional($agent->user)->name ?: 'Unnamed Agent',
@@ -972,7 +867,7 @@ class DashboardController extends Controller
           'pending_customers' => $pendingCount,
           'paid_customers' => $paidCount,
           'upcoming_customers' => $upcomingCount,
-          'collected_today' => round($loanTotal + $chitTotal, 2),
+          'collected_today' => round($loanTotal, 2),
           'details_url' => route('dashboard.agent-collection-details', $agent),
         ];
       })

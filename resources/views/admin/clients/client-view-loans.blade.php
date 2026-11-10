@@ -33,7 +33,6 @@
           <li class="nav-item"><a class="nav-link" href="{{ url('/clients/view/kyc/'.$client->id) }}"><i class="icon-base ri ri-shield-check-line me-1_5"></i>KYC</a></li>
           @endif
           <li class="nav-item"><a class="nav-link active" href="javascript:void(0);"><i class="icon-base ri ri-file-list-3-line me-1_5"></i>Loans</a></li>
-          <li class="nav-item"><a class="nav-link" href="{{ url('/client/view/chits/'.$client->id) }}"><i class="icon-base ri ri-group-2-line me-1_5"></i>Chits</a></li>
           <li class="nav-item"><a class="nav-link" href="{{ url('/clients/view/ledger/'.$client->id) }}"><i class="icon-base ri ri-wallet-3-line me-1_5"></i>Ledger</a></li>
           <li class="nav-item"><a class="nav-link" href="{{ url('/clients/view/notifications/'.$client->id) }}"><i class="icon-base ri ri-notification-3-line me-1_5"></i>Notifications</a></li>
         </ul>
@@ -240,9 +239,16 @@
                   </span>
                 </td>
                 <td>
-                  <a href="{{ route('client-loan-emi-details', $account->id) }}" class="btn btn-sm btn-primary">
-                    <i class="icon-base ri ri-eye-line me-1"></i>EMI Details
-                  </a>
+                  <div class="d-flex align-items-center gap-1">
+                    <a href="{{ route('client-loan-emi-details', $account->id) }}" class="btn btn-sm btn-primary">
+                      <i class="icon-base ri ri-eye-line me-1"></i>EMI Details
+                    </a>
+                    @if(strtolower((string)$account->status) === 'active' && !(bool)($account->is_foreclosed ?? false))
+                    <a href="{{ route('client-loan-emi-details', $account->id) }}?action=topup" class="btn btn-sm btn-outline-success" title="Top-Up Loan">
+                      <i class="icon-base ri ri-add-circle-line me-1"></i>Top-Up
+                    </a>
+                    @endif
+                  </div>
                 </td>
               </tr>
               @empty

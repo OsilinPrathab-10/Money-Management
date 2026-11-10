@@ -60,10 +60,6 @@ class FixedDepositDashboardController extends Controller
         $this->applyDateRange($walletCreditsQuery, 'created_at', $from, $to);
         $totalWalletCredits = (float) $walletCreditsQuery->sum('amount');
 
-        $chitAdjQuery = FixedDepositTransaction::where('transaction_type', 'chit_adjustment');
-        $this->applyDateRange($chitAdjQuery, 'created_at', $from, $to);
-        $totalChitAdjustments = (float) $chitAdjQuery->sum('amount');
-
         $renewalsQuery = FixedDepositRenewal::query();
         $this->applyDateRange($renewalsQuery, 'renewed_at', $from, $to);
         $totalRenewals = $renewalsQuery->count();
@@ -134,7 +130,6 @@ class FixedDepositDashboardController extends Controller
             'fdUpcomingMaturity' => $upcomingMaturity,
             'fdOverdueMaturity' => $overdueMaturity,
             'fdTotalWalletCredits' => $totalWalletCredits,
-            'fdTotalChitAdjustments' => $totalChitAdjustments,
             'fdTotalRenewals' => $totalRenewals,
             'fdTotalClients' => $totalFdClients,
             'fdActiveClients' => $activeFdClients,

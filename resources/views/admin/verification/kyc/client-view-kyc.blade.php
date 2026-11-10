@@ -37,9 +37,7 @@
 'resources/assets/js/client-view-account.js',
 'resources/assets/custom-js/app-kyc-verification.js',
 'resources/assets/custom-js/emi-calculator.js',
-'resources/assets/custom-js/loan-applications.js',
-'resources/assets/custom-js/chit-applications.js',
-'resources/assets/custom-js/chit-need-month.js'
+'resources/assets/custom-js/loan-applications.js'
 ])
 <script>
 document.addEventListener('DOMContentLoaded', function() {
@@ -1077,13 +1075,10 @@ document.addEventListener('DOMContentLoaded', function() {
                       </div>
                     </div>
                     <h5 class="mb-2">Eligibility Ready</h5>
-                    <p class="mb-4 small">KYC is verified. You can now process a new loan or chit application for this client.</p>
+                    <p class="mb-4 small">KYC is verified. You can now process a new loan application for this client.</p>
                     <div class="d-flex flex-column gap-2">
                       <button type="button" class="btn btn-primary w-100" data-bs-toggle="modal" data-bs-target="#modalApplyLoan">
                         <i class="ri-add-line me-1"></i> Apply for Loan
-                      </button>
-                      <button type="button" class="btn btn-outline-primary w-100" data-bs-toggle="modal" data-bs-target="#modalApplyChit">
-                        <i class="ri-add-line me-1"></i> Apply for Chit
                       </button>
                     </div>
                     </div>
@@ -1839,9 +1834,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
 <!-- Loan Application Modal -->
 @include('admin.clients.modals.modal-apply-loan')
-
-<!-- Chit Application Modal -->
-@include('admin.clients.modals.modal-apply-chit')
 
 <!-- Success Modal -->
 <div class="modal fade" id="successModal" tabindex="-1" aria-hidden="true">

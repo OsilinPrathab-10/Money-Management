@@ -110,21 +110,6 @@
         'badge' => 'warning',
         'icon'  => 'ri-alarm-warning-line',
       ],
-      'chit_installment' => [
-        'label' => 'Chit Installment',
-        'badge' => 'info',
-        'icon'  => 'ri-coins-line',
-      ],
-      'chit_approved', 'chit_application_approved' => [
-        'label' => 'Chit Approved',
-        'badge' => 'success',
-        'icon'  => 'ri-group-line',
-      ],
-      'chit_application', 'new_chit_application' => [
-        'label' => 'Chit Application',
-        'badge' => 'primary',
-        'icon'  => 'ri-user-add-line',
-      ],
       'client_assigned' => [
         'label' => 'Agent Assigned',
         'badge' => 'info',
@@ -189,7 +174,6 @@
       <li class="nav-item"><a class="nav-link" href="{{ url('/clients/view/kyc/'.$client->id) }}"><i class="icon-base ri ri-shield-check-line me-1_5"></i>KYC</a></li>
       @endif
       <li class="nav-item"><a class="nav-link" href="{{ url('/client/view/loans/'.$client->id) }}"><i class="icon-base ri ri-file-list-3-line me-1_5"></i>Loans</a></li>
-      <li class="nav-item"><a class="nav-link" href="{{ url('/client/view/chits/'.$client->id) }}"><i class="icon-base ri ri-group-2-line me-1_5"></i>Chits</a></li>
       <li class="nav-item"><a class="nav-link" href="{{ url('/clients/view/ledger/'.$client->id) }}"><i class="icon-base ri ri-wallet-3-line me-1_5"></i>Ledger</a></li>
       <li class="nav-item"><a class="nav-link active" href="javascript:void(0);"><i class="icon-base ri ri-notification-3-line me-1_5"></i>Notifications</a></li>
     </ul>
@@ -281,22 +265,6 @@
                 <div>
                   <h5 class="mb-0">{{ $stats['loans'] ?? ($client->loans_count ?? 0) }}</h5>
                   <span class="small">Total Loans</span>
-                </div>
-              </div>
-            </a>
-          </div>
-
-          <div class="col-6">
-            <a href="{{ route('client-view-chits', $client->id) }}" class="text-heading text-decoration-none">
-              <div class="d-flex align-items-center gap-3">
-                <div class="avatar">
-                  <div class="avatar-initial bg-label-warning rounded-3">
-                    <i class="icon-base ri ri-group-line icon-24px"></i>
-                  </div>
-                </div>
-                <div>
-                  <h5 class="mb-0">{{ $stats['chits'] ?? 0 }}</h5>
-                  <span class="small">Total Chits</span>
                 </div>
               </div>
             </a>
@@ -702,7 +670,6 @@
                 <option value="general" selected>General Notice</option>
                 <option value="emi_reminder">EMI Reminder</option>
                 <option value="loan_approved">Loan Update</option>
-                <option value="chit_installment">Chit Alert</option>
                 <option value="offer">Special Offer / Promotion</option>
                 <option value="interest_update">Interest Rate Update</option>
               </select>

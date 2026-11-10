@@ -82,7 +82,6 @@ document.addEventListener('DOMContentLoaded', function (e) {
         { data: 'mobile' },
         { data: 'zone' },
         { data: 'loans_count' },
-        { data: 'chits_count' },
         { data: 'agent_name' },
         { data: 'added_by_name' },
         { data: 'status' },
@@ -191,25 +190,8 @@ document.addEventListener('DOMContentLoaded', function (e) {
           }
         },
         {
-          // Chits Count
-          targets: 8,
-          className: 'text-center',
-          render: function (data, type, full) {
-            const chitsCount = full['chits_count'] || 0;
-            const canManagePenalty = window.userRole === 'Admin' || window.userRole === 'Staff';
-            if (chitsCount >= 1 && canManagePenalty) {
-              return `<button type="button" class="btn btn-sm rounded-pill btn-label-success fw-medium open-client-penalty"
-                        data-client-id="${full['id']}" data-client-name="${$('<div>').text(full['name'] || '').html()}"
-                        data-penalty-type="chit" title="Set chit penalty">
-                        <i class="ri-group-2-line me-1_5"></i>${chitsCount}
-                      </button>`;
-            }
-            return `<span class="badge rounded-pill bg-label-success fw-medium"><i class="ri-group-2-line me-1_5"></i>${chitsCount}</span>`;
-          }
-        },
-        {
           // Assigned Agent
-          targets: 9,
+          targets: 8,
           render: function (data, type, full) {
             const agentName = full['agent_name'];
             const isAgent = (window.userRole === 'Agent');
@@ -225,7 +207,7 @@ document.addEventListener('DOMContentLoaded', function (e) {
         },
         {
           // Added By
-          targets: 10,
+          targets: 9,
           render: function (data, type, full) {
             const addedByName = full['added_by_name'] || 'Admin';
             return `<span class="badge bg-label-info">${addedByName}</span>`;
@@ -233,7 +215,7 @@ document.addEventListener('DOMContentLoaded', function (e) {
         },
         {
           // Status
-          targets: 11,
+          targets: 10,
           className: 'text-center',
           render: function (data, type, full, meta) {
             const status = (full['status'] || 'inactive').toLowerCase();
@@ -260,13 +242,13 @@ document.addEventListener('DOMContentLoaded', function (e) {
           render: function (data, type, full, meta) {
             let actions = '<div class="d-flex align-items-center gap-2 flex-nowrap">';
             
-            // Apply Options (Loan, Chit, FD) (only if active/verified)
+            // Apply Options (Loan, FD) (only if active/verified)
             if (full['status'] === 'active' || full['status'] === 'verified') {
               const rawId = full['fake_id'] || full['id'];
               const clientNameSafe = $('<div>').text(full['name'] || '').html();
               actions += `
                 <div class="d-inline-block">
-                  <button type="button" class="btn btn-icon btn-text-secondary btn-sm rounded-pill dropdown-toggle hide-arrow" data-bs-toggle="dropdown" data-bs-boundary="viewport" aria-expanded="false" title="Apply Application (Loan, Chit, FD)">
+                  <button type="button" class="btn btn-icon btn-text-secondary btn-sm rounded-pill dropdown-toggle hide-arrow" data-bs-toggle="dropdown" data-bs-boundary="viewport" aria-expanded="false" title="Apply Application (Loan, FD)">
                     <i class="icon-base ri ri-hand-coin-line icon-22px text-primary"></i>
                   </button>
                   <ul class="dropdown-menu dropdown-menu-end shadow">
@@ -277,15 +259,6 @@ document.addEventListener('DOMContentLoaded', function (e) {
                         <div class="d-flex flex-column">
                           <span class="fw-semibold">Apply Loan</span>
                           <small class="text-muted" style="font-size: 0.75rem;">Standard EMI / Open Loan</small>
-                        </div>
-                      </a>
-                    </li>
-                    <li>
-                      <a class="dropdown-item apply-chit-modal d-flex align-items-center py-2" href="javascript:void(0);" data-id="${full['id']}" data-raw-id="${rawId}" data-client-name="${clientNameSafe}">
-                        <i class="ri-group-line me-2 text-info fs-5"></i>
-                        <div class="d-flex flex-column">
-                          <span class="fw-semibold">Apply Chit</span>
-                          <small class="text-muted" style="font-size: 0.75rem;">Chit Fund Scheme</small>
                         </div>
                       </a>
                     </li>
@@ -349,7 +322,7 @@ document.addEventListener('DOMContentLoaded', function (e) {
                       text: '<i class="icon-base ri ri-printer-line me-2" ></i>Print',
                       className: 'dropdown-item',
                       exportOptions: {
-                        columns: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+                        columns: [2, 3, 4, 5, 6, 7, 8, 9, 10],
                         // prevent avatar to be print
                         format: {
                           body: function (inner, coldex, rowdex) {
@@ -423,7 +396,7 @@ document.addEventListener('DOMContentLoaded', function (e) {
                       text: '<i class="icon-base ri ri-file-text-line me-2" ></i>Csv',
                       className: 'dropdown-item',
                       exportOptions: {
-                        columns: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+                        columns: [2, 3, 4, 5, 6, 7, 8, 9, 10],
                         format: {
                           body: function (inner, coldex, rowdex) {
                             if (inner == null) return '';
@@ -463,7 +436,7 @@ document.addEventListener('DOMContentLoaded', function (e) {
                       text: '<i class="icon-base ri ri-file-excel-line me-2"></i>Excel',
                       className: 'dropdown-item',
                       exportOptions: {
-                        columns: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+                        columns: [2, 3, 4, 5, 6, 7, 8, 9, 10],
                         format: {
                           body: function (inner, coldex, rowdex) {
                             if (inner == null) return '';
@@ -503,7 +476,7 @@ document.addEventListener('DOMContentLoaded', function (e) {
                       text: '<i class="icon-base ri ri-file-pdf-line me-2"></i>Pdf',
                       className: 'dropdown-item',
                       exportOptions: {
-                        columns: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+                        columns: [2, 3, 4, 5, 6, 7, 8, 9, 10],
                         format: {
                           body: function (inner) {
                             if (inner == null) return '';
@@ -538,7 +511,7 @@ document.addEventListener('DOMContentLoaded', function (e) {
 
                         const tableContent = doc.content.find(item => item.table);
                         if (tableContent) {
-                          tableContent.table.widths = ['8%', '18%', '16%', '12%', '10%', '8%', '8%', '10%', '10%', '10%'];
+                          tableContent.table.widths = ['8%', '18%', '16%', '12%', '10%', '10%', '13%', '13%'];
                           tableContent.layout = {
                             hLineWidth: function () { return 0.5; },
                             vLineWidth: function () { return 0.5; },
@@ -564,7 +537,7 @@ document.addEventListener('DOMContentLoaded', function (e) {
                       text: '<i class="icon-base ri ri-file-copy-line me-2" ></i>Copy',
                       className: 'dropdown-item',
                       exportOptions: {
-                        columns: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+                        columns: [2, 3, 4, 5, 6, 7, 8, 9, 10],
                         format: {
                           body: function (inner) {
                             if (inner == null) return '';
@@ -708,7 +681,7 @@ document.addEventListener('DOMContentLoaded', function (e) {
       if (typeof Swal !== 'undefined') {
         Swal.fire({
           title: 'Move to Recycle Bin?',
-          text: `${selectedIds.length} selected client(s) and their loan, chit and deposit accounts will be moved to the recycle bin. You can restore them later.`,
+          text: `${selectedIds.length} selected client(s) and their loan and deposit accounts will be moved to the recycle bin. You can restore them later.`,
           icon: 'warning',
           showCancelButton: true,
           confirmButtonText: 'Yes, move them!',
@@ -1022,38 +995,7 @@ document.addEventListener('DOMContentLoaded', function (e) {
       applyModal.show();
     });
 
-    // 2. Apply Chit
-    $('.datatables-users').on('click', '.apply-chit-modal', function() {
-      const clientId = $(this).data('id');
-      const rawId = $(this).data('raw-id') || clientId;
-      const clientName = $(this).data('client-name') || '';
-      const modalEl = document.getElementById('modalApplyChit');
-      if (!modalEl) return;
-
-      if (modalEl.classList.contains('show')) {
-        return;
-      }
-
-      const applyModal = bootstrap.Modal.getOrCreateInstance(modalEl);
-
-      $(modalEl).off('shown.bs.modal.applyChitFromList').one('shown.bs.modal.applyChitFromList', function () {
-        const select = $('#chit_client_id');
-        if (select.length) {
-          let opt = select.find(`option[value="${rawId}"], option[value="${clientId}"]`);
-          if (!opt.length && clientName) {
-            const newOption = new Option(clientName, rawId, true, true);
-            select.append(newOption).trigger('change');
-          } else {
-            const val = opt.length ? opt.val() : String(rawId);
-            select.val(val).trigger('change');
-          }
-        }
-      });
-
-      applyModal.show();
-    });
-
-    // 3. Apply Fixed Deposit (FD)
+    // 2. Apply Fixed Deposit (FD)
     $('.datatables-users').on('click', '.apply-fd-modal', function() {
       const clientId = $(this).data('id');
       const rawId = $(this).data('raw-id') || clientId;
@@ -1982,7 +1924,7 @@ document.addEventListener('DOMContentLoaded', function (e) {
     });
   }
 
-  // ---- Per-client Loan / Chit Penalty popup ----
+  // ---- Per-client Loan Penalty popup ----
   const penaltyModalEl = document.getElementById('clientPenaltyModal');
   const penaltyModal = penaltyModalEl ? new bootstrap.Modal(penaltyModalEl) : null;
   const penaltyListEl = document.getElementById('clientPenaltyList');
@@ -1990,7 +1932,6 @@ document.addEventListener('DOMContentLoaded', function (e) {
   const penaltyEmptyEl = document.getElementById('clientPenaltyEmpty');
   const penaltyTitleEl = document.getElementById('clientPenaltyModalTitle');
   const penaltyClientNameEl = document.getElementById('clientPenaltyClientName');
-  let currentPenaltyType = 'loan';
 
   function formatPenaltyMoney(amount) {
     const n = Number(amount) || 0;
@@ -2010,12 +1951,9 @@ document.addEventListener('DOMContentLoaded', function (e) {
     accounts.forEach(function (account) {
       const card = document.createElement('div');
       card.className = 'border rounded p-3';
-      const amountLabel = type === 'loan' ? 'Loan amount' : 'Chit value';
+      const amountLabel = 'Loan amount';
       const amountValue = formatPenaltyMoney(account.amount);
-      const extra =
-        type === 'loan'
-          ? `<span class="text-muted small">Outstanding: ${formatPenaltyMoney(account.outstanding)}</span>`
-          : `<span class="text-muted small">Group: ${account.group_name || '—'}</span>`;
+      const extra = `<span class="text-muted small">Outstanding: ${formatPenaltyMoney(account.outstanding)}</span>`;
       const currentType = account.penalty_type === 'percentage' ? 'percentage' : 'fixed';
       const currentValue = account.penalty != null ? account.penalty : '';
 
@@ -2058,9 +1996,8 @@ document.addEventListener('DOMContentLoaded', function (e) {
 
   function openClientPenaltyModal(clientId, clientName, type) {
     if (!penaltyModal) return;
-    currentPenaltyType = type;
     if (penaltyTitleEl) {
-      penaltyTitleEl.textContent = type === 'loan' ? 'Loan Penalty' : 'Chit Penalty';
+      penaltyTitleEl.textContent = 'Loan Penalty';
     }
     if (penaltyClientNameEl) {
       penaltyClientNameEl.textContent = clientName || '';
@@ -2069,7 +2006,7 @@ document.addEventListener('DOMContentLoaded', function (e) {
     if (penaltyListEl) penaltyListEl.innerHTML = '';
     penaltyModal.show();
 
-    fetch(`${baseUrl}client-management/${clientId}/penalty-accounts?type=${encodeURIComponent(type)}`, {
+    fetch(`${baseUrl}client-management/${clientId}/penalty-accounts?type=loan`, {
       headers: {
         Accept: 'application/json',
         'X-Requested-With': 'XMLHttpRequest'
@@ -2092,7 +2029,7 @@ document.addEventListener('DOMContentLoaded', function (e) {
           setPenaltyModalState('empty');
           return;
         }
-        renderPenaltyRows(type, accounts);
+        renderPenaltyRows('loan', accounts);
         setPenaltyModalState('list');
       })
       .catch(err => {
@@ -2114,7 +2051,7 @@ document.addEventListener('DOMContentLoaded', function (e) {
       openClientPenaltyModal(
         openBtn.getAttribute('data-client-id'),
         openBtn.getAttribute('data-client-name'),
-        openBtn.getAttribute('data-penalty-type') || 'loan'
+        'loan'
       );
       return;
     }
@@ -2156,23 +2093,13 @@ document.addEventListener('DOMContentLoaded', function (e) {
     applyBtn.disabled = true;
     if (spinner) spinner.classList.remove('d-none');
 
-    const url =
-      currentPenaltyType === 'chit'
-        ? `${baseUrl}client-management/penalty/apply-chit`
-        : `${baseUrl}client-management/penalty/apply-loan`;
+    const url = `${baseUrl}client-management/penalty/apply-loan`;
 
-    const body =
-      currentPenaltyType === 'chit'
-        ? {
-            group_member_id: accountId,
-            penalty_type: penaltyType,
-            penalty_value: penaltyValue
-          }
-        : {
-            loan_account_id: accountId,
-            penalty_type: penaltyType,
-            penalty_value: penaltyValue
-          };
+    const body = {
+      loan_account_id: accountId,
+      penalty_type: penaltyType,
+      penalty_value: penaltyValue
+    };
 
     fetch(url, {
       method: 'POST',

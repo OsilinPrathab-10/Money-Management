@@ -250,6 +250,12 @@ class LoanDocumentEmailService
                 $placeholders
             );
 
+            $actualPaid = (float) ($emi->paid_amount ?? 0);
+            $totalScheduled = (float) ($emi->total_amount ?: $emi->amount);
+            $schedInterest = (float) ($emi->interest_amount ?? 0);
+            $receiptInterest = min($actualPaid, $schedInterest);
+            $receiptPrincipal = max(0.0, round($actualPaid - $receiptInterest, 2));
+
             // 5. Generate payment receipt PDF
             // Prepare receipt data
             $receiptData = [
@@ -260,10 +266,12 @@ class LoanDocumentEmailService
                 'application_number' => $loanAccount->application_number,
                 'account_number'     => $loanAccount->account_number,
                 'disbursed_date'     => $loanAccount->disbursed_at,
-                'principal_amount'   => $emi->principal_amount,
-                'interest_amount'    => $emi->interest_amount,
-                'emi_amount'         => $emi->total_amount,
-                'paid_amount'        => $emi->paid_amount,
+                'principal_amount'   => $receiptPrincipal,
+                'interest_amount'    => $receiptInterest,
+                'total_due_amount'   => $totalScheduled,
+                'emi_amount'         => $actualPaid,
+                'paid_amount'        => $actualPaid,
+                'outstanding_amount' => max(0.0, round($totalScheduled - $actualPaid, 2)),
                 'overdue_amount'     => $emi->penalty_amount ?? 0,
                 'show_overdue'       => ($emi->penalty_amount ?? 0) > 0,
             ];

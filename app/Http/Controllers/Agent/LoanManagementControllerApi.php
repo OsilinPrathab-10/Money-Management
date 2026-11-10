@@ -26,7 +26,7 @@ class LoanManagementControllerApi extends Controller
     public function metadata(): JsonResponse
     {
         $loanTypes = LoanType::with(['products'])->get();
-        $loanProducts = LoanProduct::all(['id', 'loan_type_id', 'loan_name', 'loan_code', 'interest_rate', 'interest_type', 'loan_amount_min', 'loan_amount_max', 'min_tenture', 'max_tenture', 'term_unit', 'status']);
+        $loanProducts = LoanProduct::where('loan_code', '!=', LoanProduct::MANUAL_OPEN_LOAN_CODE)->get(['id', 'loan_type_id', 'loan_name', 'loan_code', 'interest_rate', 'interest_type', 'loan_amount_min', 'loan_amount_max', 'min_tenture', 'max_tenture', 'term_unit', 'status']);
         $activePaymentMethods = PaymentMethod::where('is_enabled', true)->get(['id', 'name']);
         $activeGateways = PaymentGateway::where('enabled', true)->get(['id', 'name']);
 
@@ -322,14 +322,12 @@ class LoanManagementControllerApi extends Controller
             $message = "Client has a {$pendingApplication->status} loan application (#{$pendingApplication->application_number}).";
         }
 
-        $chitDetails = $this->getClientChitDetails($clientId);
-
         return response()->json([
             'success' => true,
             'data' => [
                 'eligible' => $eligible,
                 'message' => $message,
-                'chit_details' => $chitDetails,
+                'chit_details' => ['has_chit' => false],
             ]
         ]);
     }
@@ -373,74 +371,6 @@ class LoanManagementControllerApi extends Controller
                 'total_payable' => $result['total_payment']
             ]
         ]);
-    }
-
-    /**
-     * Get chit fund details for a client (used during loan application)
-     */
-    private function getClientChitDetails(int $clientId): array
-    {
-        $memberships = \App\Models\GroupMember::with(['group.scheme'])
-            ->involvingClient($clientId)
-            ->whereIn('status', ['active', 'approved', 'applied'])
-            ->get();
-
-        if ($memberships->isEmpty()) {
-            return ['has_chit' => false];
-        }
-
-        $memberIds = $memberships->pluck('id');
-
-        $installments = \App\Models\Installment::whereIn('member_id', $memberIds)->get();
-
-        $today = Carbon::now()->startOfDay();
-
-        $totalChitValue = 0;
-        $totalMonthlyInstallment = 0;
-        $groups = [];
-
-        foreach ($memberships as $membership) {
-            $group = $membership->group;
-            if (! $group) {
-                continue;
-            }
-
-            $groupInstallments = $installments->where('member_id', $membership->id);
-            $overdueInstallments = $groupInstallments->filter(fn ($i) => ! in_array($i->status, ['paid', 'waived']) && $i->due_date && $i->due_date->lt($today));
-            $overdueAmount = $overdueInstallments->sum(fn ($i) => max(0, (float) $i->amount + (float) $i->penalty_amount - (float) $i->paid_amount));
-
-            $totalChitValue += (float) $group->chit_value;
-            $totalMonthlyInstallment += (float) $group->installment_amount;
-
-            $groups[] = [
-                'group_code' => $group->group_code,
-                'scheme_name' => $group->scheme->name ?? '—',
-                'chit_value' => (float) $group->chit_value,
-                'installment_amount' => (float) $group->installment_amount,
-                'status' => $group->status,
-                'total_installments' => $groupInstallments->count(),
-                'paid_count' => $groupInstallments->where('status', 'paid')->count(),
-                'overdue_count' => $overdueInstallments->count(),
-                'overdue_amount' => round($overdueAmount, 2),
-                'total_paid' => round($groupInstallments->sum('paid_amount'), 2),
-                'total_balance' => round($groupInstallments->sum(fn ($i) => max(0, (float) $i->amount + (float) $i->penalty_amount - (float) $i->paid_amount)), 2),
-            ];
-        }
-
-        $totalOverdue = collect($groups)->sum('overdue_amount');
-        $totalBalance = collect($groups)->sum('total_balance');
-        $totalPaid = collect($groups)->sum('total_paid');
-
-        return [
-            'has_chit' => true,
-            'total_groups' => count($groups),
-            'total_chit_value' => round($totalChitValue, 2),
-            'total_monthly_installment' => round($totalMonthlyInstallment, 2),
-            'total_overdue' => round($totalOverdue, 2),
-            'total_balance' => round($totalBalance, 2),
-            'total_paid' => round($totalPaid, 2),
-            'groups' => $groups,
-        ];
     }
     
     /**

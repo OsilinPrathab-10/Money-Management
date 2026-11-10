@@ -20,6 +20,9 @@ class Appearance extends Model
         'favicon',
         'type',
         'footer_text',
+        'footer_link_text',
+        'footer_link_url',
+        'footer_custom_note',
     ];
 
     protected function logo(): Attribute

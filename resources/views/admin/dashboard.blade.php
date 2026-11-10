@@ -71,9 +71,7 @@
       <p class="text-muted mb-0">
         Real-time business statistics overview
         <span class="badge bg-label-primary ms-1" id="dashboardPeriodBadge">
-          @if($activeDashboardTab === 'chit')
-            {{ $chitDashboardData['periodLabel'] ?? 'This Month' }}
-          @elseif($activeDashboardTab === 'fd')
+          @if($activeDashboardTab === 'fd')
             {{ $fdPeriodLabel ?? 'This Month' }}
           @else
             {{ $periodLabel ?? 'This Month' }}
@@ -87,15 +85,6 @@
         <input type="hidden" name="tab" value="loan">
         @if(request('client_period'))
           <input type="hidden" name="client_period" value="{{ request('client_period') }}">
-        @endif
-        @if(request('chit_period'))
-          <input type="hidden" name="chit_period" value="{{ request('chit_period') }}">
-        @endif
-        @if(request('chit_from'))
-          <input type="hidden" name="chit_from" value="{{ request('chit_from') }}">
-        @endif
-        @if(request('chit_to'))
-          <input type="hidden" name="chit_to" value="{{ request('chit_to') }}">
         @endif
         @if(request('fd_period'))
           <input type="hidden" name="fd_period" value="{{ request('fd_period') }}">
@@ -124,48 +113,6 @@
         </div>
       </form>
 
-      {{-- Chit period filter --}}
-      <form method="GET" action="{{ route('dashboard') }}" class="d-flex align-items-center flex-wrap gap-2 {{ $activeDashboardTab === 'chit' ? '' : 'd-none' }}" id="chitDashboardPeriodForm">
-        <input type="hidden" name="tab" value="chit">
-        @if(request('period'))
-          <input type="hidden" name="period" value="{{ request('period') }}">
-        @endif
-        @if(request('period_from'))
-          <input type="hidden" name="period_from" value="{{ request('period_from') }}">
-        @endif
-        @if(request('period_to'))
-          <input type="hidden" name="period_to" value="{{ request('period_to') }}">
-        @endif
-        @if(request('client_period'))
-          <input type="hidden" name="client_period" value="{{ request('client_period') }}">
-        @endif
-        @if(request('fd_period'))
-          <input type="hidden" name="fd_period" value="{{ request('fd_period') }}">
-        @endif
-        @if(request('fd_from'))
-          <input type="hidden" name="fd_from" value="{{ request('fd_from') }}">
-        @endif
-        @if(request('fd_to'))
-          <input type="hidden" name="fd_to" value="{{ request('fd_to') }}">
-        @endif
-        <label for="chitDashboardPeriodFilter" class="form-label mb-0 text-nowrap small fw-medium">Period:</label>
-        <select name="chit_period" id="chitDashboardPeriodFilter" class="form-select form-select-sm no-search dashboard-period-filter" style="min-width: 160px;" autocomplete="off">
-          <option value="today" {{ ($chitDashboardData['periodKey'] ?? 'month') === 'today' ? 'selected' : '' }}>Today</option>
-          <option value="month" {{ ($chitDashboardData['periodKey'] ?? 'month') === 'month' ? 'selected' : '' }}>This Month</option>
-          <option value="year" {{ ($chitDashboardData['periodKey'] ?? '') === 'year' ? 'selected' : '' }}>This Year</option>
-          <option value="custom" {{ ($chitDashboardData['periodKey'] ?? '') === 'custom' ? 'selected' : '' }}>Custom</option>
-          <option value="all" {{ ($chitDashboardData['periodKey'] ?? '') === 'all' ? 'selected' : '' }}>All Time</option>
-        </select>
-        <div id="chitCustomDateRange" class="align-items-center gap-2 {{ ($chitDashboardData['periodKey'] ?? '') === 'custom' ? 'd-flex' : 'd-none' }}">
-          <input type="date" name="chit_from" id="chitFromDate" class="form-control form-control-sm" style="min-width: 145px;"
-                 value="{{ $chitDashboardData['periodFromInput'] ?? '' }}" {{ ($chitDashboardData['periodKey'] ?? '') === 'custom' ? '' : 'disabled' }}>
-          <span class="text-muted small">to</span>
-          <input type="date" name="chit_to" id="chitToDate" class="form-control form-control-sm" style="min-width: 145px;"
-                 value="{{ $chitDashboardData['periodToInput'] ?? '' }}" {{ ($chitDashboardData['periodKey'] ?? '') === 'custom' ? '' : 'disabled' }}>
-          <button type="submit" class="btn btn-sm btn-primary">Apply</button>
-        </div>
-      </form>
-
       {{-- Fixed Deposit period filter --}}
       <form method="GET" action="{{ route('dashboard') }}" class="d-flex align-items-center flex-wrap gap-2 {{ $activeDashboardTab === 'fd' ? '' : 'd-none' }}" id="fdDashboardPeriodForm">
         <input type="hidden" name="tab" value="fd">
@@ -177,15 +124,6 @@
         @endif
         @if(request('period_to'))
           <input type="hidden" name="period_to" value="{{ request('period_to') }}">
-        @endif
-        @if(request('chit_period'))
-          <input type="hidden" name="chit_period" value="{{ request('chit_period') }}">
-        @endif
-        @if(request('chit_from'))
-          <input type="hidden" name="chit_from" value="{{ request('chit_from') }}">
-        @endif
-        @if(request('chit_to'))
-          <input type="hidden" name="chit_to" value="{{ request('chit_to') }}">
         @endif
         @if(request('client_period'))
           <input type="hidden" name="client_period" value="{{ request('client_period') }}">
@@ -219,29 +157,23 @@
 <script>
 document.addEventListener('DOMContentLoaded', function () {
   const loanForm = document.getElementById('dashboardPeriodForm');
-  const chitForm = document.getElementById('chitDashboardPeriodForm');
   const fdForm = document.getElementById('fdDashboardPeriodForm');
   const refreshBtn = document.getElementById('refreshStatsBtn');
   const periodBadge = document.getElementById('dashboardPeriodBadge');
-  const chitPeriodSelect = document.getElementById('chitDashboardPeriodFilter');
-  const chitCustomRange = document.getElementById('chitCustomDateRange');
   const loanPeriodSelect = document.getElementById('dashboardPeriodFilter');
   const loanCustomRange = document.getElementById('loanCustomDateRange');
   const fdPeriodSelect = document.getElementById('fdDashboardPeriodFilter');
   const fdCustomRange = document.getElementById('fdCustomDateRange');
   const loanPeriodLabel = @json($periodLabel ?? 'This Month');
-  const chitPeriodLabel = @json($chitDashboardData['periodLabel'] ?? 'This Month');
   const fdPeriodLabel = @json($fdPeriodLabel ?? 'This Month');
 
   function periodLabelForTab(tab) {
-    if (tab === 'chit') return chitPeriodLabel;
     if (tab === 'fd') return fdPeriodLabel;
     return loanPeriodLabel;
   }
 
   function toggleDashboardFilters(tab) {
     if (loanForm) loanForm.classList.toggle('d-none', tab !== 'loan');
-    if (chitForm) chitForm.classList.toggle('d-none', tab !== 'chit');
     if (fdForm) fdForm.classList.toggle('d-none', tab !== 'fd');
     if (refreshBtn) refreshBtn.classList.toggle('d-none', tab !== 'loan');
     if (periodBadge) {
@@ -307,13 +239,11 @@ document.addEventListener('DOMContentLoaded', function () {
   }
 
   bindPeriodSelect(loanPeriodSelect, loanCustomRange, loanForm);
-  bindPeriodSelect(chitPeriodSelect, chitCustomRange, chitForm);
   bindPeriodSelect(fdPeriodSelect, fdCustomRange, fdForm);
 
   // Select2 may init after this script; tear it down once more on window load.
   window.addEventListener('load', function () {
     ensureNativeSelect(loanPeriodSelect);
-    ensureNativeSelect(chitPeriodSelect);
     ensureNativeSelect(fdPeriodSelect);
   });
 });
@@ -331,19 +261,6 @@ document.addEventListener('DOMContentLoaded', function () {
       aria-selected="{{ $activeDashboardTab === 'loan' ? 'true' : 'false' }}"
       data-dashboard-tab="loan">
       <i class="ri-bank-line me-1"></i> Loan Dashboard
-    </button>
-  </li>
-  <li class="nav-item" role="presentation">
-    <button type="button"
-      class="nav-link {{ $activeDashboardTab === 'chit' ? 'active' : '' }}"
-      id="chit-dashboard-tab"
-      data-bs-toggle="tab"
-      data-bs-target="#chit-dashboard-pane"
-      role="tab"
-      aria-controls="chit-dashboard-pane"
-      aria-selected="{{ $activeDashboardTab === 'chit' ? 'true' : 'false' }}"
-      data-dashboard-tab="chit">
-      <i class="ri-group-line me-1"></i> Chit Dashboard
     </button>
   </li>
   <li class="nav-item" role="presentation">
@@ -930,10 +847,6 @@ document.addEventListener('DOMContentLoaded', function () {
 </div>
 <!--/ Recent Applications Table -->
   </div><!-- /#loan-dashboard-pane -->
-
-  <div class="tab-pane fade {{ $activeDashboardTab === 'chit' ? 'show active' : '' }}" id="chit-dashboard-pane" role="tabpanel" aria-labelledby="chit-dashboard-tab" tabindex="0">
-    @include('admin.chit.partials.dashboard-content', $chitDashboardData ?? [])
-  </div>
 
   <div class="tab-pane fade {{ $activeDashboardTab === 'fd' ? 'show active' : '' }}" id="fd-dashboard-pane" role="tabpanel" aria-labelledby="fd-dashboard-tab" tabindex="0">
     @include('admin.fd.partials.dashboard-content')

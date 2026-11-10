@@ -69,8 +69,6 @@
                 "Agent"
             ],
             "slug": [
-                "chit.applications.index",
-                "chit.applications.show",
                 "loan-applications",
                 "loan-application-view",
                 "fd.applications.index",
@@ -78,15 +76,11 @@
                 "applications",
                 "all-applications",
                 "applications.loan",
-                "applications.chit",
-                "applications.fd",
-                "applications.settlement",
-                "chit.settlement-applications.index",
-                "chit.settlement-applications.show"
+                "applications.fd"
             ]
         },
         {
-            "name": "EMI & Chit Collections",
+            "name": "EMI Collections",
             "icon": "menu-icon icon-base ri ri-calendar-check-line",
             "url": "client-collections",
             "roles": [
@@ -112,162 +106,27 @@
                 "payment-receipts",
                 "all-payment-receipts",
                 "loan-payment-receipts",
-                "chit-payment-receipts",
                 "fd-payment-receipts"
             ]
         },
         {
             "menuHeader": "Business Modules"
         },
-        {
-            "name": "Card to Cash",
-            "icon": "menu-icon icon-base ri ri-bank-card-2-line",
+          {
+            "url": "cibil-report",
+            "icon": "menu-icon icon-base ri ri-bar-chart-box-line",
+            "name": "CIBIL Report",
+            "slug": [
+                "cibil-report.index",
+                "cibil-report.show",
+                "client-view-cibil"
+            ],
             "roles": [
                 "Admin",
-                "Staff"
-            ],
-            "slug": [
-                "card-cash.dashboard",
-                "card-cash.leads.index",
-                "card-cash.leads.create",
-                "card-cash.leads.show",
-                "card-cash.processing.index",
-                "card-cash.processing.process",
-                "card-cash.bill-payments.index",
-                "card-cash.swipes.index",
-                "card-cash.returns.index",
-                "card-cash.customers.index",
-                "card-cash.customers.create",
-                "card-cash.customers.show",
-                "card-cash.customers.edit",
-                "card-cash.wallets.index",
-                "card-cash.wallets.show",
-                "card-cash.settings.index",
-                "card-cash.reports.index"
-            ],
-            "submenu": [
-                {
-                    "url": "card-to-cash/dashboard",
-                    "name": "Dashboard",
-                    "slug": "card-cash.dashboard",
-                    "roles": [
-                        "Admin",
-                        "Staff"
-                    ]
-                },
-                {
-                    "url": "card-to-cash/leads",
-                    "name": "Leads",
-                    "slug": [
-                        "card-cash.leads.index",
-                        "card-cash.leads.create",
-                        "card-cash.leads.show"
-                    ],
-                    "roles": [
-                        "Admin",
-                        "Staff"
-                    ]
-                },
-                {
-                    "url": "card-to-cash/customers",
-                    "name": "Credit Card Customers",
-                    "slug": [
-                        "card-cash.customers.index",
-                        "card-cash.customers.create",
-                        "card-cash.customers.show",
-                        "card-cash.customers.edit"
-                    ],
-                    "roles": [
-                        "Admin",
-                        "Staff"
-                    ]
-                },
-                {
-                    "url": "card-to-cash/wallets",
-                    "name": "Wallets",
-                    "slug": [
-                        "card-cash.wallets.index",
-                        "card-cash.wallets.show"
-                    ],
-                    "roles": [
-                        "Admin"
-                    ]
-                },
-                {
-                    "name": "Reports",
-                    "slug": [
-                        "card-cash.reports.index",
-                        "card-cash.processing.index",
-                        "card-cash.processing.process",
-                        "card-cash.bill-payments.index",
-                        "card-cash.swipes.index",
-                        "card-cash.returns.index"
-                    ],
-                    "roles": [
-                        "Admin",
-                        "Staff"
-                    ],
-                    "submenu": [
-                        {
-                            "url": "card-to-cash/reports",
-                            "name": "Reports & Analytics",
-                            "slug": "card-cash.reports.index",
-                            "roles": [
-                                "Admin",
-                                "Staff"
-                            ]
-                        },
-                        {
-                            "url": "card-to-cash/processing",
-                            "name": "Processing",
-                            "slug": [
-                                "card-cash.processing.index",
-                                "card-cash.processing.process"
-                            ],
-                            "roles": [
-                                "Admin",
-                                "Staff"
-                            ]
-                        },
-                        {
-                            "url": "card-to-cash/bill-payments",
-                            "name": "Bill Payments",
-                            "slug": "card-cash.bill-payments.index",
-                            "roles": [
-                                "Admin",
-                                "Staff"
-                            ]
-                        },
-                        {
-                            "url": "card-to-cash/swipes",
-                            "name": "Swipe Transactions",
-                            "slug": "card-cash.swipes.index",
-                            "roles": [
-                                "Admin",
-                                "Staff"
-                            ]
-                        },
-                        {
-                            "url": "card-to-cash/returns",
-                            "name": "Returns / Statement",
-                            "slug": "card-cash.returns.index",
-                            "roles": [
-                                "Admin",
-                                "Staff"
-                            ]
-                        }
-                    ]
-                },
-                {
-                    "url": "card-to-cash/settings",
-                    "name": "Settings",
-                    "slug": "card-cash.settings.index",
-                    "roles": [
-                        "Admin"
-                    ]
-                }
+                "CreditVerifier"
             ]
         },
+      
         {
             "name": "Accounting",
             "icon": "menu-icon icon-base ri ri-book-2-line",
@@ -277,7 +136,6 @@
                 "account.bank-transfers",
                 "account.bank-transactions",
                 "account.loan-accounts",
-                "account.chit-accounts",
                 "account.fd-accounts",
                 "account.emis",
                 "account.revenues",
@@ -520,204 +378,6 @@
             ]
         },
         {
-            "name": "Chit Management",
-            "icon": "menu-icon icon-base ri ri-group-2-line",
-            "roles": [
-                "Admin",
-                "Staff",
-                "Agent"
-            ],
-            "slug": [
-                "chit.applications",
-                "chit.accounts",
-                "chit.dashboard",
-                "chit.schemes",
-                "chit.groups",
-                "chit.members",
-                "chit.transfers",
-                "chit.families",
-                "chit.configuration",
-                "chit.installments",
-                "chit.settlement-applications",
-                "chit.settlements",
-                "chit.auctions",
-                "chit.dividends",
-                "chit.reports.applications",
-                "chit.reports.accounts",
-                "chit.reports.installments-analytics",
-                "chit.reports.payments",
-                "chit.referral-bonuses"
-            ],
-            "submenu": [
-                {
-                    "url": "admin/chit/dashboard",
-                    "name": "Dashboard",
-                    "slug": "chit.dashboard",
-                    "roles": [
-                        "Admin",
-                        "Staff"
-                    ]
-                },
-                {
-                    "url": "admin/chit/chit-configuration",
-                    "name": "Configuration",
-                    "slug": "chit.configuration.index",
-                    "roles": [
-                        "Admin",
-                        "Staff"
-                    ]
-                },
-                {
-                    "url": "admin/chit/schemes",
-                    "name": "Schemes",
-                    "slug": "chit.schemes.index",
-                    "roles": [
-                        "Admin",
-                        "Staff"
-                    ]
-                },
-                {
-                    "url": "admin/chit/groups",
-                    "name": "Groups",
-                    "slug": "chit.groups.index",
-                    "roles": [
-                        "Admin",
-                        "Staff"
-                    ]
-                },
-                {
-                    "url": "admin/chit/members",
-                    "name": "Members",
-                    "slug": "chit.members.index",
-                    "roles": [
-                        "Admin",
-                        "Staff",
-                        "Agent"
-                    ]
-                },
-                {
-                    "url": "admin/chit/transfers",
-                    "name": "Member Transfers",
-                    "slug": [
-                        "chit.transfers.index",
-                        "chit.transfers.show",
-                        "chit.members.transfer.create"
-                    ],
-                    "roles": [
-                        "Admin",
-                        "Staff"
-                    ]
-                },
-                {
-                    "url": "admin/chit/families",
-                    "name": "Family Members",
-                    "slug": "chit.families.index",
-                    "roles": [
-                        "Admin",
-                        "Staff"
-                    ]
-                },
-                {
-                    "url": "admin/chit/accounts",
-                    "name": "Chit Accounts",
-                    "slug": [
-                        "chit.accounts.index",
-                        "chit.accounts.show"
-                    ],
-                    "roles": [
-                        "Admin",
-                        "Staff",
-                        "Agent"
-                    ]
-                },
-                {
-                    "url": "admin/chit/installments",
-                    "name": "Installments",
-                    "slug": "chit.installments.index",
-                    "roles": [
-                        "Admin",
-                        "Staff",
-                        "Agent"
-                    ]
-                },
-                {
-                    "url": "admin/chit/settlement-applications",
-                    "name": "Settlement Applications",
-                    "slug": [
-                        "chit.settlement-applications.index",
-                        "chit.settlement-applications.show"
-                    ],
-                    "roles": [
-                        "Admin",
-                        "Staff"
-                    ]
-                },
-                {
-                    "url": "admin/chit/auctions",
-                    "name": "Auction Winners",
-                    "slug": "chit.auctions.index",
-                    "roles": [
-                        "Admin",
-                        "Staff"
-                    ]
-                },
-                {
-                    "url": "admin/chit/dividends",
-                    "name": "Dividends",
-                    "slug": "chit.dividends.index",
-                    "roles": [
-                        "Admin",
-                        "Staff"
-                    ]
-                },
-                {
-                    "url": "admin/chit/referral-bonuses",
-                    "name": "Referral Bonuses",
-                    "slug": "chit.referral-bonuses.index",
-                    "roles": [
-                        "Admin",
-                        "Staff"
-                    ]
-                },
-                {
-                    "url": "admin/chit/reports/applications",
-                    "name": "Application Reports",
-                    "slug": "chit.reports.applications",
-                    "roles": [
-                        "Admin",
-                        "Staff"
-                    ]
-                },
-                {
-                    "url": "admin/chit/reports/accounts-analytics",
-                    "name": "Chit Reports",
-                    "slug": "chit.reports.accounts",
-                    "roles": [
-                        "Admin",
-                        "Staff"
-                    ]
-                },
-                {
-                    "url": "admin/chit/reports/installments-analytics",
-                    "name": "Installment Reports",
-                    "slug": "chit.reports.installments-analytics",
-                    "roles": [
-                        "Admin",
-                        "Staff"
-                    ]
-                },
-                {
-                    "url": "admin/chit/reports/payments",
-                    "name": "Payment Reports",
-                    "slug": "chit.reports.payments",
-                    "roles": [
-                        "Admin",
-                        "Staff"
-                    ]
-                }
-            ]
-        },
-        {
             "name": "Fixed Deposit",
             "icon": "menu-icon icon-base ri ri-safe-2-line",
             "slug": [
@@ -899,6 +559,7 @@
                 }
             ]
         },
+      
         {
             "name": "API Hits & Usage",
             "icon": "menu-icon icon-base ri ri-bar-chart-2-line",

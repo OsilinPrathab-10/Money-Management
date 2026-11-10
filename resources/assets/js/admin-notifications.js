@@ -13,7 +13,7 @@
     window.adminNotificationsInitialized = true;
 
     // Configuration
-    const NOTIFICATION_CHECK_INTERVAL = 5000; // 5 seconds
+    const NOTIFICATION_CHECK_INTERVAL = 25000; // 25 seconds
     const dataBaseUrl = document.documentElement.getAttribute('data-base-url');
     let baseUrl = window.baseUrl || (dataBaseUrl ? dataBaseUrl.replace(/\/+$/, '') + '/' : '/');
     if (!baseUrl.endsWith('/')) {
@@ -44,6 +44,7 @@
     let intervalId = null;
     let notificationRefreshInterval = null;
     let pollingStopped = false;
+    let isLoadingNotifications = false;
 
     function stopNotificationPolling() {
         pollingStopped = true;
@@ -96,16 +97,19 @@
 
     // Load latest notifications
     function loadNotifications() {
-        if (pollingStopped) {
+        if (pollingStopped || isLoadingNotifications) {
             return;
         }
+
+        isLoadingNotifications = true;
 
         $.ajax({
             url: baseUrl + 'admin/notifications/latest',
             type: 'GET',
-            data: { limit: 4 }, // Show minimum 4 notifications
+            data: { limit: 4 },
+            timeout: 10000,
             success: function (response) {
-                if (response.success) {
+                if (response && response.success) {
                     updateNotificationUI(response.notifications, response.unread_count);
 
                     // Play sound / toast if new notifications arrived
@@ -120,12 +124,17 @@
                     lastNotificationCount = response.unread_count;
                 }
             },
-            error: function (xhr) {
+            error: function (xhr, status) {
                 if (isAuthFailure(xhr)) {
                     stopNotificationPolling();
                     return;
                 }
-                console.error('Failed to load notifications');
+                if (status !== 'timeout' && status !== 'abort') {
+                    console.warn('Failed to load notifications');
+                }
+            },
+            complete: function () {
+                isLoadingNotifications = false;
             }
         });
     }

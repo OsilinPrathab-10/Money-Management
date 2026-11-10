@@ -34,5 +34,9 @@ class CompanyDetail extends Model
         'agent_contact_email',
         'agent_contact_mobile',
         'working_hours',
+        'footer_text',
+        'footer_link_text',
+        'footer_link_url',
+        'footer_custom_note',
     ];
 }

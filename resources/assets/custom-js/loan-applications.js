@@ -265,6 +265,9 @@ $(function () {
   const modalApplyLoan = $('#modalApplyLoan, #modalApplyLoanGeneric');
   const formApplyLoan = $('#formApplyLoan, #formApplyLoanGeneric');
 
+  // Assigned inside the quick-apply block below; flatpickr callbacks run outside that block's scope.
+  let onEmiStartDateSelected = null;
+
   // Function to initialize Select2 for elements in the modal
   function initModalSelect2(targetModal) {
     const parent = $(targetModal);
@@ -303,8 +306,8 @@ $(function () {
           monthSelectorType: 'static',
           dateFormat: 'd-m-Y',
           onChange: function(selectedDates, dateStr, instance) {
-            if ($el.attr('id') === 'emi_start_date' && selectedDates.length > 0) {
-              updateEmiDayFromDate(selectedDates[0], parent.find('form'));
+            if ($el.attr('id') === 'emi_start_date' && selectedDates.length > 0 && onEmiStartDateSelected) {
+              onEmiStartDateSelected(selectedDates[0], parent.find('form'));
             }
           }
         });
@@ -823,6 +826,8 @@ $(function () {
       }
     }
 
+    onEmiStartDateSelected = updateEmiDayFromDate;
+
     function updateEmiDayFromDate(date, form) {
       if (!date || !form || !form.length) return;
       const frequency = form.find('#repayment_frequency').val();
@@ -967,7 +972,16 @@ $(function () {
         // Hide Total Payable in preview by setting text to "Open Loan"
         form.find('#preview_total').closest('.col-4').fadeOut();
         form.find('#preview_interest').closest('.col-4').removeClass('border-end');
+
+        form.find('.open-loan-interest-source').slideDown(150);
       } else {
+        form.find('.open-loan-interest-source').slideUp(150);
+        const sourceToggle = form.find('.interest-source-toggle');
+        if (sourceToggle.is(':checked')) {
+          sourceToggle.prop('checked', false);
+          applyInterestSourceUi(form);
+        }
+
         // EMI Mode UI
         tenureWrapper.fadeIn();
         form.find('#tenure_input, #tenure_slider').prop('disabled', false);
@@ -986,6 +1000,101 @@ $(function () {
         form.find('#preview_interest').closest('.col-4').addClass('border-end');
       }
       updateEmiPreview(form);
+    });
+
+    function isManualInterestMode(form) {
+      return form.find('.loan-mode-toggle').is(':checked') && form.find('.interest-source-toggle').is(':checked');
+    }
+
+    function frequencyWord(frequency) {
+      if (frequency === 'daily') return 'Daily';
+      if (frequency === 'weekly') return 'Weekly';
+      return 'Monthly';
+    }
+
+    function syncManualInterestLabel(form) {
+      const frequency = form.find('#repayment_frequency').val();
+      const word = frequencyWord(frequency);
+      const period = frequency === 'daily' ? 'day' : (frequency === 'weekly' ? 'week' : 'month');
+
+      form.find('.manual-interest-label').html(`${word} Interest Amount (₹) <span class="text-danger">*</span>`);
+      form.find('.manual-interest-input').attr('placeholder', `Interest collected every ${period}`);
+      form.find('.manual-interest-unit').text(`/ ${period}`);
+      form.find('.manual-interest-help').text(`Collected every ${period} on the full loan amount. When principal is repaid, interest reduces proportionally.`);
+
+      const units = `${period}s`;
+      form.find('.manual-tenure-label').html(`Tenure (${units.charAt(0).toUpperCase() + units.slice(1)}) <span class="text-muted fw-normal small">Optional</span>`);
+      form.find('.manual-tenure-unit').text(units);
+    }
+
+    // Manual interest frees the amount from product limits; product mode restores them.
+    function applyAmountLimits(form) {
+      const amtInput = form.find('#loan_amount_input');
+      const amtSlider = form.find('#loan_amount_slider');
+      const selected = form.find('#loan_product :selected');
+
+      if (isManualInterestMode(form)) {
+        amtInput.attr('min', 1).removeAttr('max');
+        const currentMax = Math.max(parseFloat(amtSlider.attr('max')) || 0, parseFloat(amtInput.val()) || 0, 1000000);
+        amtSlider.attr({ min: 0, max: currentMax });
+        form.find('#amount_range_info').text('Manual amount (no product limit)');
+        return;
+      }
+
+      if (!selected.val()) return;
+      const minAmt = Math.round(parseFloat(selected.data('min-amount')) || 0);
+      const maxAmt = Math.round(parseFloat(selected.data('max-amount')) || 0);
+      amtInput.attr({ min: minAmt, max: maxAmt });
+      amtSlider.attr({ min: minAmt, max: maxAmt });
+      form.find('#amount_range_info').text(`Min: ${formatRupeeLabel(minAmt)} | Max: ${formatRupeeLabel(maxAmt)}`);
+    }
+
+    function applyInterestSourceUi(form) {
+      const isManual = form.find('.interest-source-toggle').is(':checked');
+      const wrapper = form.find('.manual-interest-wrapper');
+      const manualInput = form.find('.manual-interest-input');
+
+      const productColumns = form.find('#loan_type_filter, #loan_product').closest('.col-md-6');
+
+      if (isManual) {
+        productColumns.slideUp(150);
+        form.find('#loan_product').prop('required', false);
+        wrapper.slideDown(150);
+        manualInput.prop('required', true);
+        form.find('.interest-source-description').text('Enter the interest amount collected every cycle');
+        form.find('.interest-source-product-label').removeClass('text-primary').addClass('text-muted');
+        form.find('.interest-source-manual-label').removeClass('text-muted').addClass('text-danger');
+        syncManualInterestLabel(form);
+      } else {
+        productColumns.slideDown(150);
+        form.find('#loan_product').prop('required', true);
+        wrapper.slideUp(150);
+        manualInput.prop('required', false).val('').removeClass('is-invalid');
+        form.find('.manual-tenure-input').val('').removeClass('is-invalid');
+        form.find('.interest-source-description').text("Interest is calculated from the selected product's rate");
+        form.find('.interest-source-product-label').removeClass('text-muted').addClass('text-primary');
+        form.find('.interest-source-manual-label').removeClass('text-danger').addClass('text-muted');
+      }
+
+      applyAmountLimits(form);
+      updateEmiPreview(form);
+    }
+
+    $(document).on('change', '.interest-source-toggle', function () {
+      applyInterestSourceUi($(this).closest('form'));
+    });
+
+    $(document).on('input', '.manual-interest-input', function () {
+      updateEmiPreview($(this).closest('form'));
+    });
+
+    $(document).on('change', '#repayment_frequency', function () {
+      syncManualInterestLabel($(this).closest('form'));
+    });
+
+    $(document).on('change', '#loan_product', function () {
+      const form = $(this).closest('form');
+      if (isManualInterestMode(form)) applyAmountLimits(form);
     });
 
     function updateEmiPreview(form = null) {
@@ -1013,16 +1122,23 @@ $(function () {
         $(previewLabels[1]).text('INTEREST RATE');
         $(previewLabels[2]).text('LOAN STATUS');
 
+        const isManual = form.find('.interest-source-toggle').is(':checked');
+        const manualInterest = parseFloat(form.find('.manual-interest-input').val()) || 0;
+        const effectiveRate = isManual
+          ? (amount > 0 ? (manualInterest / amount) * 100 : 0)
+          : rate;
+        const rateText = `${parseFloat(effectiveRate.toFixed(4))}%`;
+
         if (amount <= 0) {
-          emiPreviewLocal.text('₹0.00');
-          interestPreviewLocal.text(`${rate}%`);
+          emiPreviewLocal.text(isManual ? `₹${manualInterest.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '₹0.00');
+          interestPreviewLocal.text(rateText);
           totalPreviewLocal.text('OPEN');
           return;
         }
-        
-        const interestCycle = amount * (rate / 100);
+
+        const interestCycle = isManual ? manualInterest : amount * (rate / 100);
         emiPreviewLocal.text(`₹${interestCycle.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
-        interestPreviewLocal.text(`${rate}%`);
+        interestPreviewLocal.text(rateText);
         totalPreviewLocal.text('OPEN LOAN');
       } else {
         // EMI Labels
@@ -1094,6 +1210,16 @@ $(function () {
         productSelect.empty().append(allOptions.clone()).val('');
       }
       form.find('.loan-type-filter, #loan_type_filter').val('');
+
+      form.find('.interest-source-toggle').prop('checked', false);
+      form.find('.manual-interest-input').val('').prop('required', false).removeClass('is-invalid');
+      form.find('.manual-tenure-input').val('').removeClass('is-invalid');
+      form.find('.manual-interest-wrapper').hide();
+      form.find('#loan_type_filter, #loan_product').closest('.col-md-6').show();
+      form.find('#loan_product').prop('required', true);
+      if (!form.find('.loan-mode-toggle').is(':checked')) {
+        form.find('.open-loan-interest-source').hide();
+      }
 
       const backdrops = document.querySelectorAll('.modal-backdrop');
       if (backdrops.length > 1) {
@@ -1216,10 +1342,12 @@ $(function () {
         return;
       }
 
-      // 2. Validate Loan Product
+      const isManualInterest = isInterestOnly && $form.find('.interest-source-toggle').is(':checked');
+
+      // 2. Validate Loan Product (not used for manual open loans)
       const productSelect = $form.find('#loan_product');
       const loanCode = productSelect.val();
-      if (!loanCode) {
+      if (!isManualInterest && !loanCode) {
         productSelect.next('.select2-container').find('.select2-selection').addClass('border-danger');
         Swal.fire({
           title: 'Validation Error',
@@ -1267,6 +1395,40 @@ $(function () {
           customClass: { confirmButton: 'btn btn-primary' }
         });
         return;
+      }
+
+      // 3b. Validate Manual Interest (Open Loan, manual mode)
+      if (isManualInterest) {
+        const manualInput = $form.find('.manual-interest-input');
+        const manualInterest = parseFloat(manualInput.val()) || 0;
+        let manualError = null;
+        if (manualInterest <= 0) {
+          manualError = 'Please enter the interest amount per cycle.';
+        } else if (manualInterest >= loanAmount) {
+          manualError = 'Interest amount per cycle must be less than the loan amount.';
+        }
+        const manualTenureInput = $form.find('.manual-tenure-input');
+        const manualTenureRaw = String(manualTenureInput.val() || '').trim();
+        if (!manualError && manualTenureRaw !== '' && !/^[1-9]\d*$/.test(manualTenureRaw)) {
+          manualTenureInput.addClass('is-invalid').focus();
+          Swal.fire({
+            title: 'Validation Error',
+            text: 'Tenure must be a whole number of at least 1, or left blank.',
+            icon: 'warning',
+            customClass: { confirmButton: 'btn btn-primary' }
+          });
+          return;
+        }
+        if (manualError) {
+          manualInput.addClass('is-invalid').focus();
+          Swal.fire({
+            title: 'Validation Error',
+            text: manualError,
+            icon: 'warning',
+            customClass: { confirmButton: 'btn btn-primary' }
+          });
+          return;
+        }
       }
 
       // 4. Validate Repayment Frequency
@@ -1353,6 +1515,17 @@ $(function () {
       // Ensure loan_mode is always explicitly present
       formArray = formArray.filter(item => item.name !== 'loan_mode');
       formArray.push({ name: 'loan_mode', value: isInterestOnly ? 'interest_only' : 'emi' });
+
+      formArray = formArray.filter(item => !['interest_source', 'manual_interest_amount', 'manual_tenure'].includes(item.name));
+      formArray.push({ name: 'interest_source', value: isManualInterest ? 'manual' : 'product' });
+      if (isManualInterest) {
+        formArray.push({ name: 'manual_interest_amount', value: $form.find('.manual-interest-input').val() });
+        const manualTenure = String($form.find('.manual-tenure-input').val() || '').trim();
+        if (manualTenure !== '') {
+          formArray.push({ name: 'manual_tenure', value: manualTenure });
+        }
+        formArray = formArray.filter(item => item.name !== 'loan_code');
+      }
 
       // Ensure emi_day is present
       formArray = formArray.filter(item => item.name !== 'emi_day');

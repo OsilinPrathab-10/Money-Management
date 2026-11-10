@@ -5,9 +5,7 @@ namespace App\Http\Controllers\Account;
 use App\Models\Account\BankAccount;
 use App\Models\Client;
 use App\Models\FixedDeposit;
-use App\Models\Installment;
 use App\Models\LoanAccount;
-use App\Models\Payout;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Routing\Controller;
@@ -54,7 +52,6 @@ class DashboardController extends Controller
             ->sum('current_balance');
 
         $loanAll = $this->loanClientFlow();
-        $chitAll = $this->chitClientFlow();
         $fdAll = $this->fdClientFlow();
 
         return view('admin.account.dashboard.company', [
@@ -65,10 +62,8 @@ class DashboardController extends Controller
                 'total_liquidity' => (float) $cashBalance + (float) $bankBalance,
             ],
             'loanByClient' => $this->paginateFlow($loanAll, $request, 'loan_page', $perPage, 'loan'),
-            'chitByClient' => $this->paginateFlow($chitAll, $request, 'chit_page', $perPage, 'chit'),
             'fdByClient' => $this->paginateFlow($fdAll, $request, 'fd_page', $perPage, 'fd'),
             'loanTotals' => $this->flowTotals($loanAll),
-            'chitTotals' => $this->flowTotals($chitAll),
             'fdTotals' => $this->flowTotals($fdAll),
             'perPage' => $perPage,
             'perPageOptions' => self::PER_PAGE_OPTIONS,
@@ -121,39 +116,6 @@ class DashboardController extends Controller
             ->groupBy('client_id')
             ->havingRaw('SUM(COALESCE(paid_amount, 0)) > 0 OR SUM(COALESCE(disbursed_amount, 0)) > 0')
             ->get();
-
-        return $this->attachClientNames($rows)->sortBy('client_name', SORT_NATURAL | SORT_FLAG_CASE)->values();
-    }
-
-    /**
-     * Client-wise chit credit (installments) / debit (payouts).
-     */
-    private function chitClientFlow(): Collection
-    {
-        $credits = Installment::query()
-            ->join('group_members', 'installments.member_id', '=', 'group_members.id')
-            ->whereNotNull('group_members.client_id')
-            ->selectRaw('group_members.client_id, SUM(COALESCE(installments.paid_amount, 0)) as credit')
-            ->groupBy('group_members.client_id')
-            ->pluck('credit', 'client_id');
-
-        $debits = Payout::query()
-            ->join('group_members', 'payouts.winner_member_id', '=', 'group_members.id')
-            ->where('payouts.status', 'paid')
-            ->whereNotNull('group_members.client_id')
-            ->selectRaw('group_members.client_id, SUM(COALESCE(payouts.net_payout_amount, 0)) as debit')
-            ->groupBy('group_members.client_id')
-            ->pluck('debit', 'client_id');
-
-        $clientIds = $credits->keys()->merge($debits->keys())->unique()->filter()->values();
-
-        $rows = $clientIds->map(function ($clientId) use ($credits, $debits) {
-            return (object) [
-                'client_id' => (int) $clientId,
-                'credit' => (float) ($credits[$clientId] ?? 0),
-                'debit' => (float) ($debits[$clientId] ?? 0),
-            ];
-        })->filter(fn ($row) => $row->credit > 0 || $row->debit > 0);
 
         return $this->attachClientNames($rows)->sortBy('client_name', SORT_NATURAL | SORT_FLAG_CASE)->values();
     }

@@ -26,7 +26,7 @@
 <div class="account-module">
   @include('admin.account.shared.page-header', [
     'title' => __('Profit & Loss Management'),
-    'subtitle' => __('Revenue minus expense for the selected period — overall Loan, Chit & FD.'),
+    'subtitle' => __('Revenue minus expense for the selected period — overall Loan & FD.'),
   ])
 
   <div class="mb-4">

@@ -30,7 +30,6 @@ class FixedDepositReportsController extends Controller
         'maturity_overdue' => 'Overdue Maturity',
         'transactions' => 'FD Transaction History',
         'wallet_credits' => 'Wallet Credits from FD',
-        'chit_adjustments' => 'Chit Adjustments from FD',
         'financial_summary' => 'Financial Summary',
     ];
 
@@ -259,23 +258,6 @@ class FixedDepositReportsController extends Controller
                 ])->all();
                 break;
 
-            case 'chit_adjustments':
-                $items = FixedDepositTransaction::with(['fixedDeposit.client.user'])
-                    ->where('transaction_type', 'chit_adjustment')
-                    ->when($from, fn ($q) => $q->where('created_at', '>=', $from))
-                    ->when($to, fn ($q) => $q->where('created_at', '<=', $to))
-                    ->latest()
-                    ->get();
-                $headers = ['Date', 'FD Number', 'Customer', 'Amount', 'Description'];
-                $rows = $items->map(fn ($t) => [
-                    $t->created_at?->format('d M Y H:i'),
-                    $t->fixedDeposit->fd_number ?? '—',
-                    $this->resolveClientName($t->fixedDeposit?->client),
-                    number_format((float) $t->amount, 2),
-                    $t->description,
-                ])->all();
-                break;
-
             case 'financial_summary':
                 $headers = ['Metric', 'Amount'];
                 $rows = [
@@ -284,7 +266,6 @@ class FixedDepositReportsController extends Controller
                     ['Total Interest Paid', number_format((float) FixedDeposit::whereNotNull('maturity_processed_at')->sum('interest_amount'), 2)],
                     ['Maturity Payments', number_format((float) FixedDepositTransaction::where('transaction_type', 'maturity')->sum('amount'), 2)],
                     ['Wallet Credits from FD', number_format((float) WalletTransaction::where('reference_type', 'fixed_deposit')->where('type', 'credit')->sum('amount'), 2)],
-                    ['Chit Adjustments from FD', number_format((float) FixedDepositTransaction::where('transaction_type', 'chit_adjustment')->sum('amount'), 2)],
                 ];
                 break;
 

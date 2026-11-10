@@ -151,7 +151,7 @@
     var views = Array.from(root.querySelectorAll('.sds-app-view'));
     var tabs = Array.from(root.querySelectorAll('.sds-app-tab'));
     var payBtn = root.querySelector('.sds-pay-btn');
-    var chitAction = root.querySelector('[data-app-action="chit"]');
+    var loanAction = root.querySelector('[data-app-action="loan"]');
     if (!views.length || reduceMotion) return;
     var tabFor = [0, 1, 1];
     var step = 0;
@@ -166,9 +166,9 @@
         tab.classList.toggle('is-active', idx === tabFor[step]);
       });
       if (payBtn) payBtn.classList.remove('is-paying');
-      if (chitAction) chitAction.classList.remove('is-hit');
+      if (loanAction) loanAction.classList.remove('is-hit');
       if (step === 1) {
-        if (chitAction) chitAction.classList.add('is-hit');
+        if (loanAction) loanAction.classList.add('is-hit');
         setTimeout(function () { if (payBtn) payBtn.classList.add('is-paying'); }, 900);
       }
       if (prev) setTimeout(function () { prev.classList.remove('is-leave'); }, 450);

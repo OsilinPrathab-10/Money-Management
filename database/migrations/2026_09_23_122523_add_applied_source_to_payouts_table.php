@@ -11,11 +11,13 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::table('payouts', function (Blueprint $table) {
-            if (!Schema::hasColumn('payouts', 'applied_source')) {
-                $table->string('applied_source', 20)->default('admin')->after('initiated_by')->index();
-            }
-        });
+        if (Schema::hasTable('payouts')) {
+            Schema::table('payouts', function (Blueprint $table) {
+                if (!Schema::hasColumn('payouts', 'applied_source')) {
+                    $table->string('applied_source', 20)->default('admin')->after('initiated_by')->index();
+                }
+            });
+        }
     }
 
     /**

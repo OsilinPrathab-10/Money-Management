@@ -7,8 +7,6 @@ use App\Models\LoanAccount;
 use App\Models\LoanApplication;
 use App\Models\FixedDeposit;
 use App\Models\FixedDepositApplication;
-use App\Models\GroupMember;
-use App\Models\Installment;
 use App\Support\HashId;
 use Illuminate\Http\Request;
 use Illuminate\View\View;
@@ -17,7 +15,7 @@ use Carbon\Carbon;
 class PublicClientScheduleController extends Controller
 {
     /**
-     * View public repayment schedule for a client (combining Loans and Chits).
+     * View public repayment schedule for a client (Loans).
      */
     public function viewSchedule(string $token): View
     {
@@ -110,16 +108,7 @@ class PublicClientScheduleController extends Controller
                     break;
                 }
 
-                // 6. Try lookup by Chit Group Member (member_number)
-                $gm = GroupMember::with('client')
-                    ->where('member_number', $cand)
-                    ->first();
-                if ($gm && $gm->client) {
-                    $client = $gm->client;
-                    break;
-                }
-
-                // 7. Fallback lookup by client ID / customer_id / user_id / phone
+                // 6. Fallback lookup by client ID / customer_id / user_id / phone
                 $cleanCustomerCandidate = preg_replace('/^APP/i', '', $cand);
                 $client = Client::where('id', $cand)
                     ->orWhere('user_id', $cand)
@@ -174,111 +163,15 @@ class PublicClientScheduleController extends Controller
                 $loan->due_emis = $loan->currentlyDueEmis();
             });
 
-            // 2. Fetch Active Chit Memberships for this client (exclude closed/completed/terminated chits)
-            $memberships = GroupMember::with(['group.scheme', 'group.dividends', 'shares.client'])
-                ->involvingClient($client->id)
-                ->whereIn('status', ['active', 'approved', 'applied'])
-                ->whereHas('group', function ($g) {
-                    $g->whereNotIn('status', ['completed', 'closed', 'terminated']);
-                })
-                ->orderBy('group_id')
-                ->get()
-                ->reject(function ($membership) {
-                    $mStatus = strtolower((string) $membership->status);
-                    if (in_array($mStatus, ['completed', 'closed', 'terminated', 'withdrawn', 'cancelled', 'rejected'], true)) {
-                        return true;
-                    }
-                    $gStatus = strtolower((string) ($membership->group?->status ?? ''));
-                    if (in_array($gStatus, ['completed', 'closed', 'terminated'], true)) {
-                        return true;
-                    }
-                    if (method_exists($membership, 'hasCompletedTenure') && $membership->hasCompletedTenure()) {
-                        return true;
-                    }
-                    if (method_exists($membership, 'customerFacingStatus') && in_array($membership->customerFacingStatus(), ['completed', 'closed'], true)) {
-                        return true;
-                    }
-                    return false;
-                })
-                ->values();
-
-            $memberIds = $memberships->pluck('id');
-
-            // Fetch Payouts and Auctions for Chit Memberships
-            $payoutsGrouped = \App\Models\Payout::with('auction')
-                ->whereIn('winner_member_id', $memberIds)
-                ->get()
-                ->groupBy('winner_member_id');
-
-            $auctionsGrouped = \App\Models\Auction::whereIn('winner_member_id', $memberIds)
-                ->get()
-                ->groupBy('winner_member_id');
-
-            $memberships->each(function ($membership) use ($payoutsGrouped, $auctionsGrouped, $client) {
-                $mPayouts = $payoutsGrouped->get($membership->id, collect());
-                $mAuctions = $auctionsGrouped->get($membership->id, collect());
-
-                $membership->won_payout = $mPayouts->first(fn ($p) => in_array(strtolower($p->status ?? ''), ['paid', 'completed', 'disbursed'], true));
-                $membership->pending_payout = $mPayouts->first(fn ($p) => in_array(strtolower($p->status ?? ''), ['pending', 'processing', 'submitted', 'requested'], true));
-                $membership->won_auction = $mAuctions->first();
-                $membership->payouts_by_month = $mPayouts->keyBy('month_number');
-                $membership->auctions_by_month = $mAuctions->keyBy('month_number');
-
-                $pct = $membership->ownershipPercentageFor((int) $client->id);
-                $membership->ownership_percentage = $pct;
-                $membership->client_chit_value = $membership->amountForClient((float)($membership->group?->chit_value ?? 0), (int) $client->id);
-                $membership->client_monthly_amount = $membership->installmentAmountForClient((int) $client->id, $membership->group, $membership->group?->current_month ?? 1);
-            });
-
-            // Fetch installments strictly for active memberships only (do not include closed chits)
-            $installments = Installment::with(['member.client', 'member.shares', 'group.scheme', 'sharePayments'])
-                ->whereIn('member_id', $memberIds)
-                ->whereNotIn('status', ['waived'])
-                ->whereNull('deleted_at')
-                ->orderBy('group_id')
-                ->orderBy('member_id')
-                ->orderBy('month_number')
-                ->get();
-
             $today = Carbon::now()->startOfDay();
-            $installments->each(function ($inst) use ($today, $client) {
-                if (! in_array($inst->status, ['paid', 'waived'], true) && $inst->due_date && $inst->due_date->lt($today)) {
-                    $inst->display_status = 'overdue';
-                } else {
-                    $inst->display_status = $inst->status;
-                }
 
-                $pct = $inst->member ? $inst->member->ownershipPercentageFor((int) $client->id) : 100;
-                $inst->ownership_percentage = $pct;
-                $inst->client_share_amount = $inst->member
-                    ? $inst->member->amountForClient((float) $inst->amount, (int) $client->id)
-                    : (float) $inst->amount;
-                $inst->client_share_paid = $inst->member
-                    ? $inst->clientPaidShare((int) $client->id)
-                    : (float) $inst->paid_amount;
-                $inst->client_share_balance = $inst->member
-                    ? $inst->clientBalanceShare((int) $client->id)
-                    : (float) $inst->balance;
-            });
-
-            $byMember = $installments->groupBy('member_id');
-            $seatLetterMap = [];
-            $memberships->groupBy('group_id')->each(function ($siblings) use (&$seatLetterMap) {
-                if ($siblings->count() <= 1) {
-                    return;
-                }
-                $siblings->sortBy('id')->values()->each(function ($member, $index) use (&$seatLetterMap) {
-                    $seatLetterMap[$member->id] = chr(65 + $index);
-                });
-            });
-
-            // 3. Fetch Fixed Deposits for this client
+            // 2. Fetch Fixed Deposits for this client
             $fixedDeposits = \App\Models\FixedDeposit::with('scheme')
                 ->where('client_id', $client->id)
                 ->orderBy('id', 'desc')
                 ->get();
 
-            // 4. Compute consolidated statistics across Loans + Chits + FDs
+            // 3. Compute consolidated statistics for Loans + FDs
             $loansPayable = 0;
             $loansPaid = 0;
             $loansBalance = 0;
@@ -306,31 +199,21 @@ class PublicClientScheduleController extends Controller
                 }
             }
 
-            $chitsPaid = (float) $installments->sum(fn ($i) => isset($i->client_share_paid) ? (float) $i->client_share_paid : (float) $i->paid_amount);
-            $chitsBalance = (float) $installments->sum(fn ($i) => isset($i->client_share_balance) ? max(0, (float) $i->client_share_balance) : max(0, (float) $i->balance));
-            $chitsOverdueCount = $installments->where('display_status', 'overdue')->count();
-
             $summary = [
                 'has_loans' => $loans->count() > 0,
-                'has_chits' => $memberships->count() > 0,
                 'has_fds' => $fixedDeposits->count() > 0,
                 'total_loans' => $loans->count(),
-                'total_chits' => $memberships->count(),
                 'total_fds' => $fixedDeposits->count(),
-                'total_payable_sum' => $loansPayable + ($chitsPaid + $chitsBalance),
-                'total_paid' => $loansPaid + $chitsPaid,
-                'total_balance' => $loansBalance + $chitsBalance,
-                'total_overdue' => $loansOverdueCount + $chitsOverdueCount,
+                'total_payable_sum' => $loansPayable,
+                'total_paid' => $loansPaid,
+                'total_balance' => $loansBalance,
+                'total_overdue' => $loansOverdueCount,
             ];
 
             return view('public.client-schedule', compact(
                 'client',
                 'loans',
-                'memberships',
                 'fixedDeposits',
-                'installments',
-                'byMember',
-                'seatLetterMap',
                 'summary'
             ));
         } catch (\Throwable $e) {

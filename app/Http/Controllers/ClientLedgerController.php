@@ -9,12 +9,7 @@ use App\Models\Client;
 use App\Models\LoanAccount;
 use App\Models\Emi;
 use App\Models\EmiCollection;
-use App\Models\GroupMember;
-use App\Models\Installment;
-use App\Models\DividendDistribution;
-use App\Models\Payout;
 use App\Models\Location;
-use App\Models\ChitCollection;
 use App\Support\ClientLedgerEntries;
 use App\Support\HashId;
 use Illuminate\Support\Facades\DB;
@@ -37,15 +32,12 @@ class ClientLedgerController extends Controller
             ->sum('outstanding_amount');
             
         $activeLoanAccountsCount = LoanAccount::where('status', 'active')->count();
-        
-        $activeChitMembersCount = GroupMember::where('status', 'active')->count();
 
         return view('admin.clients.ledgers-index', compact(
             'locations', 
             'totalClients', 
             'totalOutstandingLoans', 
-            'activeLoanAccountsCount', 
-            'activeChitMembersCount'
+            'activeLoanAccountsCount'
         ));
     }
 
@@ -61,16 +53,12 @@ class ClientLedgerController extends Controller
             4 => 'client_phone',
             5 => 'location_id',
             6 => 'active_loans_count',
-            7 => 'active_chits_count',
-            8 => 'total_outstanding',
+            7 => 'total_outstanding',
         ];
 
         $query = Client::with(['location'])
             ->withCount([
                 'loanAccounts as active_loans_count' => function ($q) {
-                    $q->where('status', 'active');
-                },
-                'groupMembers as active_chits_count' => function ($q) {
                     $q->where('status', 'active');
                 }
             ])
@@ -108,8 +96,7 @@ class ClientLedgerController extends Controller
         }
 
         // Apply pagination and ordering
-        // Since we are using generated relations/aggregations, let's handle ordering
-        if (in_array($order, ['active_loans_count', 'active_chits_count', 'total_outstanding'])) {
+        if (in_array($order, ['active_loans_count', 'total_outstanding'])) {
             $clients = $query->orderBy($order, $dir)
                 ->offset($start)
                 ->limit($limit)
@@ -132,7 +119,6 @@ class ClientLedgerController extends Controller
                 'mobile' => $client->client_phone ?? 'N/A',
                 'zone' => $client->location ? $client->location->name : 'N/A',
                 'active_loans' => $client->active_loans_count ?? 0,
-                'active_chits' => $client->active_chits_count ?? 0,
                 'total_outstanding' => number_format($client->total_outstanding ?? 0, 2),
                 'action' => '',
             ];
@@ -172,72 +158,9 @@ class ClientLedgerController extends Controller
         ];
 
         $closedLoanAccounts = $loanAccounts->where('status', 'closed')->values();
-
-        // 2. Fetch Chit Fund subscriptions (Group memberships) & compute summaries
-        $groupMemberships = GroupMember::with(['group.scheme', 'installments', 'shares'])
-            ->whereHas('group')
-            ->involvingClient((int) $realId)
-            ->get();
-
-        $chitStats = [
-            'total_subscriptions' => $groupMemberships
-                ->whereNotIn('status', GroupMember::INACTIVE_STATUSES)
-                ->filter(fn ($m) => ($m->group->status ?? '') !== 'completed')
-                ->count(),
-            'active_subscriptions' => $groupMemberships->where('status', 'active')->count(),
-            'completed_subscriptions' => $groupMemberships
-                ->filter(fn ($m) => ($m->group->status ?? '') === 'completed' || $m->status === 'completed')
-                ->count(),
-            'total_paid_installments' => 0,
-            'total_pending_installments' => 0,
-            'total_penalty_paid' => 0,
-            'total_dividend_received' => 0,
-            'total_payout_received' => 0,
-        ];
-
-        $closedChitMemberships = $groupMemberships
-            ->filter(fn ($m) => ($m->group->status ?? '') === 'completed'
-                || in_array($m->status, ['completed', 'withdrawn', 'cancelled', 'transferred'], true))
-            ->values();
-
-        $memberIds = $groupMemberships->pluck('id')->toArray();
-        $membershipById = $groupMemberships->keyBy('id');
         $clientId = (int) $realId;
 
-        if (!empty($memberIds)) {
-            // Installment sums (ownership-weighted for shared seats)
-            $installments = Installment::with(['member.shares', 'sharePayments'])->whereIn('member_id', $memberIds)->get();
-            $chitStats['total_paid_installments'] = $installments->where('status', 'paid')
-                ->sum(fn ($inst) => $inst->clientPaidShare($clientId));
-            $chitStats['total_pending_installments'] = $installments->whereIn('status', ['pending', 'overdue', 'partial'])
-                ->sum(fn ($inst) => $inst->clientBalanceShare($clientId));
-            $chitStats['total_penalty_paid'] = $installments->sum(function ($inst) use ($membershipById, $clientId) {
-                $member = $membershipById->get($inst->member_id);
-                return $member ? $member->amountForClient((float) $inst->penalty_amount, $clientId) : (float) $inst->penalty_amount;
-            });
-
-            // Dividends
-            $dividends = DividendDistribution::with('member.shares')->whereIn('member_id', $memberIds)
-                ->where('status', 'paid')
-                ->get();
-            $chitStats['total_dividend_received'] = $dividends->sum(function ($div) use ($clientId) {
-                return $div->member
-                    ? $div->member->amountForClient((float) $div->amount, $clientId)
-                    : (float) $div->amount;
-            });
-
-            // Payouts
-            $payouts = Payout::with('winner.shares')->whereIn('winner_member_id', $memberIds)
-                ->where('status', 'paid')
-                ->get();
-            $chitStats['total_payout_received'] = $payouts->sum(function ($payout) use ($clientId) {
-                return $payout->winner
-                    ? $payout->winner->amountForClient((float) $payout->payout_amount, $clientId)
-                    : (float) $payout->payout_amount;
-            });
-        }
-
-        // 3. Build Unified Chronological Transaction History (Ledger Entries)
+        // 2. Build Unified Chronological Transaction History (Ledger Entries)
         $ledgerEntries = [];
 
         // A. Loan Disbursements & Foreclosures
@@ -268,7 +191,7 @@ class ClientLedgerController extends Controller
             }
         }
 
-        // B + C. EMI / Open Loan / Chit incoming receipts (original amount, splits inside)
+        // B. EMI / Open Loan incoming receipts
         $loanIds = $loanAccounts->pluck('id')->toArray();
         $emiCollections = collect();
         if (! empty($loanIds)) {
@@ -280,85 +203,11 @@ class ClientLedgerController extends Controller
                 ->get();
         }
 
-        $chitCollections = collect();
-        $legacyInstallments = collect();
-        if (! empty($memberIds)) {
-            $chitCollections = ChitCollection::with(['installment.group', 'group', 'member.shares'])
-                ->where(function ($q) use ($clientId, $memberIds) {
-                    $q->where('client_id', $clientId)
-                        ->orWhereIn('member_id', $memberIds);
-                })
-                ->whereIn('status', ClientLedgerEntries::postedCollectionStatuses())
-                ->get()
-                ->filter(function (ChitCollection $col) use ($clientId) {
-                    if ($col->client_id) {
-                        return (int) $col->client_id === $clientId;
-                    }
-
-                    return $col->member?->involvesClient($clientId) ?? false;
-                })
-                ->values();
-
-            $legacyInstallments = Installment::with(['group', 'member.shares', 'sharePayments', 'collections'])
-                ->whereIn('member_id', $memberIds)
-                ->where('paid_amount', '>', 0)
-                ->get();
-        }
-
         foreach (ClientLedgerEntries::incomingPaymentRows(
             $emiCollections,
-            $chitCollections,
-            $legacyInstallments,
             $clientId
         ) as $paymentRow) {
             $ledgerEntries[] = $paymentRow;
-        }
-
-        if (! empty($memberIds)) {
-
-            // D. Chit Dividends Received
-            $dividendsReceived = DividendDistribution::with(['dividend.group', 'member.shares'])
-                ->whereIn('member_id', $memberIds)
-                ->where('status', 'paid')
-                ->get();
-
-            foreach ($dividendsReceived as $div) {
-                $shareDiv = $div->member
-                    ? $div->member->amountForClient((float) $div->amount, $clientId)
-                    : (float) $div->amount;
-                $ledgerEntries[] = [
-                    'date' => $div->paid_at ?: $div->created_at,
-                    'type' => 'Chit Dividend',
-                    'reference' => $div->dividend->group->group_code,
-                    'details' => 'Dividend Distributed (Ref: ' . ($div->reference_no ?? 'N/A') . ')',
-                    'method' => $div->payment_mode ?? 'Wallet/Adjusted',
-                    'flow' => 'OUT', // System distributed/paid out to client
-                    'amount' => $shareDiv,
-                    'badge_color' => 'primary'
-                ];
-            }
-
-            // E. Chit Payouts (Auction Winnings)
-            $payoutsReceived = Payout::with(['group', 'winner.shares'])
-                ->whereIn('winner_member_id', $memberIds)
-                ->where('status', 'paid')
-                ->get();
-
-            foreach ($payoutsReceived as $payout) {
-                $sharePayout = $payout->winner
-                    ? $payout->winner->amountForClient((float) $payout->payout_amount, $clientId)
-                    : (float) $payout->payout_amount;
-                $ledgerEntries[] = [
-                    'date' => $payout->paid_date ?: $payout->created_at,
-                    'type' => 'Chit Payout',
-                    'reference' => $payout->group->group_code,
-                    'details' => 'Auction Prize Payout (' . $payout->payout_code . ')',
-                    'method' => $payout->payment_mode ?? 'Bank Transfer',
-                    'flow' => 'OUT', // System paid out to client
-                    'amount' => $sharePayout,
-                    'badge_color' => 'secondary'
-                ];
-            }
         }
 
         // Sort entries by date descending, then by type to ensure stable sorting
@@ -376,9 +225,6 @@ class ClientLedgerController extends Controller
             'loanAccounts',
             'loanStats',
             'closedLoanAccounts',
-            'groupMemberships',
-            'chitStats',
-            'closedChitMemberships',
             'ledgerEntries'
         ));
     }

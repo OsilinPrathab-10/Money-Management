@@ -62,7 +62,7 @@
   <!-- Stats Cards -->
   @if($isAgent)
   <div class="row g-6 mb-6">
-    <div class="col-sm-6 col-xl-4">
+    <div class="col-sm-6 col-xl-6">
       <div class="card">
         <div class="card-body">
           <div class="d-flex justify-content-between">
@@ -82,27 +82,9 @@
         </div>
       </div>
     </div>
-    <div class="col-sm-6 col-xl-4">
-      <div class="card">
-        <div class="card-body">
-          <div class="d-flex justify-content-between">
-            <div class="me-1">
-              <p class="text-heading mb-1">My Chit Collections</p>
-              <div class="d-flex align-items-center">
-                <h4 class="mb-1 me-1" id="stat-chit-count">{{ $chitCollectedCount }}</h4>
-              </div>
-              <small class="mb-0">Total: ₹{{ number_format($chitCollectedAmount, 0) }}</small>
-            </div>
-            <div class="avatar">
-              <div class="avatar-initial bg-label-info rounded-3">
-                <div class="icon-base ri ri-group-line icon-26px"></div>
-              </div>
-            </div>
-          </div>
-        </div>
       </div>
     </div>
-    <div class="col-sm-6 col-xl-4">
+    <div class="col-sm-6 col-xl-6">
       <div class="card">
         <div class="card-body">
           <div class="d-flex justify-content-between">
@@ -125,7 +107,7 @@
   </div>
   @else
   <div class="row g-6 mb-6">
-    <div class="col-sm-6 col-xl-4">
+    <div class="col-sm-6 col-xl-6">
       <div class="card">
         <div class="card-body">
           <div class="d-flex justify-content-between">
@@ -145,7 +127,7 @@
         </div>
       </div>
     </div>
-    <div class="col-sm-6 col-xl-4">
+    <div class="col-sm-6 col-xl-6">
       <div class="card">
         <div class="card-body">
           <div class="d-flex justify-content-between">
@@ -165,7 +147,7 @@
         </div>
       </div>
     </div>
-    <div class="col-sm-6 col-xl-4">
+    <div class="col-sm-6 col-xl-6">
       <div class="card">
         <div class="card-body">
           <div class="d-flex justify-content-between">
@@ -274,12 +256,6 @@
             <span class="badge bg-primary text-white ms-1">{{ $agentCollectedCount + $adminCollectedCount }}</span>
           </button>
         </li>
-        <li class="nav-item" role="presentation">
-          <button class="nav-link fw-semibold" id="chit-collections-tab" data-bs-toggle="tab" data-bs-target="#chitCollectionsPane" type="button" role="tab" aria-controls="chitCollectionsPane" aria-selected="false">
-            <i class="ri-group-line me-1"></i> {{ $isAgent ? 'My Chit Collections' : 'Chit Collections' }}
-            <span class="badge bg-info text-white ms-1" id="chit-tab-count">{{ $chitCollectedCount }}</span>
-          </button>
-        </li>
       </ul>
     </div>
 
@@ -290,7 +266,7 @@
         <span class="badge bg-label-primary fs-7 loan-only-stat">Agent: {{ $agentCollectedCount }}</span>
         <span class="badge bg-label-success fs-7 loan-only-stat">Admin: {{ $adminCollectedCount }}</span>
         @endif
-        <span class="badge bg-label-info fs-7 chit-only-stat d-none">Total: ₹{{ number_format($chitCollectedAmount, 0) }}</span>
+        
       </h5>
       <div class="d-flex flex-wrap align-items-center gap-2 w-100 w-md-auto justify-content-md-end">
         <div class="d-flex align-items-center gap-1">
@@ -395,29 +371,7 @@
             </thead>
           </table>
         </div>
-      </div>
-
-      <div class="tab-pane fade" id="chitCollectionsPane" role="tabpanel" aria-labelledby="chit-collections-tab">
-        <div class="card-datatable table-responsive border-top">
-          <table class="datatables-chit-collections table text-nowrap">
-            <thead>
-              <tr>
-                <th style="width:50px">@if(!$isAgent)<input type="checkbox" id="selectAllChitCollections" title="Select All Pending" class="me-1">@endif S.No</th>
-                <th>Client</th>
-                <th>Collected By</th>
-                <th>Group / Installment</th>
-                <th>Amount</th>
-                <th>Method</th>
-                <th>Type</th>
-                <th>Status</th>
-                <th>Date</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-          </table>
-        </div>
-      </div>
-    </div>
+      </div></div></div>
   </div>
   
   <!-- View Collection Modal -->
@@ -567,9 +521,7 @@
             <div class="col-md-3">
               <label class="form-label fw-medium text-dark small mb-1" for="bulkDueType">Due Type</label>
               <select class="form-select form-select-sm" id="bulkDueType">
-                <option value="all">Loan + Chit</option>
                 <option value="loan">Loan EMIs</option>
-                <option value="chit">Chit Installments</option>
               </select>
             </div>
             <div class="col-md-7">
@@ -866,9 +818,6 @@
 
       let collectionId = String(document.getElementById('verifyCollectionId')?.value || '').trim();
       const collectionType = String(document.getElementById('verifyCollectionType')?.value || '').trim();
-      if (collectionType === 'chit' && collectionId && !collectionId.startsWith('chit_')) {
-        collectionId = 'chit_' + collectionId;
-      }
       if (!collectionId) {
         restore();
         Swal.fire({ icon: 'error', title: 'Verification Failed', text: 'Collection id is missing.' });
@@ -877,7 +826,7 @@
 
       const body = new FormData(form);
       body.set('collection_id', collectionId);
-      body.set('collection_type', collectionType || (collectionId.startsWith('chit_') ? 'chit' : 'loan'));
+      body.set('collection_type', 'loan');
       body.set('status', status);
 
       fetch(base + 'app/agents/agent-collections/verify-one', {

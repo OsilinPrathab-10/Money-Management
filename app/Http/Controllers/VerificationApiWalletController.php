@@ -54,6 +54,7 @@ class VerificationApiWalletController extends Controller
             'aadhaar' => (clone $baseCountsQuery)->where('service', 'aadhaar')->count(),
             'pan' => (clone $baseCountsQuery)->where('service', 'pan')->count(),
             'bank' => (clone $baseCountsQuery)->where('service', 'bank')->count(),
+            'cibil' => (clone $baseCountsQuery)->where('service', 'cibil')->count(),
             'success' => (clone $baseCountsQuery)->where('success', true)->count(),
             'failed' => (clone $baseCountsQuery)->where('success', false)->count(),
             'total' => (clone $baseCountsQuery)->count(),
@@ -103,6 +104,7 @@ class VerificationApiWalletController extends Controller
             'aadhaar' => 0,
             'pan' => 0,
             'bank' => 0,
+            'cibil' => 0,
             'success' => 0,
             'failed' => 0,
             'total' => 0,
@@ -193,7 +195,7 @@ class VerificationApiWalletController extends Controller
         $service = $request->get('service', 'all');
         $status = $request->get('status', 'all');
 
-        if ($service !== 'all' && in_array($service, ['aadhaar', 'pan', 'bank'], true)) {
+        if ($service !== 'all' && in_array($service, ['aadhaar', 'pan', 'bank', 'cibil'], true)) {
             $query->where('service', $service);
         }
         if ($status === 'success') {

@@ -32,7 +32,6 @@ Route::middleware(['web', 'auth', 'admin'])->prefix('account')->group(function (
 
     Route::get('loan-accounts', [LoanPortfolioController::class, 'loanAccounts'])->name('account.loan-accounts.index');
     Route::get('loan-accounts/export', [LoanPortfolioController::class, 'loanAccountsExport'])->name('account.loan-accounts.export');
-    Route::get('chit-accounts', [LoanPortfolioController::class, 'chitAccounts'])->name('account.chit-accounts.index');
     Route::get('fd-accounts', [LoanPortfolioController::class, 'fdAccounts'])->name('account.fd-accounts.index');
     Route::get('emis', [LoanPortfolioController::class, 'emis'])->name('account.emis.index');
     Route::get('emis/export', [LoanPortfolioController::class, 'emisExport'])->name('account.emis.export');

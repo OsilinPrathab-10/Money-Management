@@ -66,17 +66,6 @@ Route::prefix('agent')->name('agent.')->group(function () {
         Route::get('/loan-account', [App\Http\Controllers\Agent\LoanManagementControllerApi::class, 'viewLoanAccount']);
         Route::post('/loan-account/{id}/regenerate-documents', [App\Http\Controllers\Agent\LoanManagementControllerApi::class, 'regenerateDocuments']);
 
-        // Chit Applications
-        Route::get('/chit-applications/metadata', [App\Http\Controllers\Agent\ChitManagementControllerApi::class, 'metadata']);
-        Route::get('/chit-applications', [App\Http\Controllers\Agent\ChitManagementControllerApi::class, 'index']);
-        Route::post('/chit-applications/apply', [App\Http\Controllers\Agent\ChitManagementControllerApi::class, 'apply']);
-        Route::get('/chit-applications/{member}', [App\Http\Controllers\Agent\ChitManagementControllerApi::class, 'show']);
-
-        // Chit Accounts
-        Route::get('/chit-accounts', [App\Http\Controllers\Agent\ChitManagementControllerApi::class, 'chitAccounts']);
-        Route::get('/chit-account/{id?}', [App\Http\Controllers\Agent\ChitManagementControllerApi::class, 'viewChitAccount']);
-        Route::get('/chit-account', [App\Http\Controllers\Agent\ChitManagementControllerApi::class, 'viewChitAccount']);
-
         // Fixed Deposits
         Route::get('/fd-schemes/metadata', [App\Http\Controllers\Agent\FDManagementControllerApi::class, 'schemes']);
         Route::post('/fd-applications/apply', [App\Http\Controllers\Agent\FDManagementControllerApi::class, 'apply']);
@@ -85,18 +74,20 @@ Route::prefix('agent')->name('agent.')->group(function () {
         Route::get('/fixed-deposits', [App\Http\Controllers\Agent\FDManagementControllerApi::class, 'fixedDeposits']);
         Route::get('/fixed-deposits/{id}', [App\Http\Controllers\Agent\FDManagementControllerApi::class, 'showFixedDeposit']);
 
-        // Agent Collections (Unified Loan & Chit)
+        // Agent Collections
         Route::get('/agent-collections/search-dues', [App\Http\Controllers\Agent\AgentCollectionControllerApi::class, 'assignedDues']);
         Route::get('/agent-collections/overdue', [App\Http\Controllers\Agent\AgentCollectionControllerApi::class, 'overdueClients']);
         Route::get('/overdue-clients', [App\Http\Controllers\Agent\AgentCollectionControllerApi::class, 'overdueClients']);
         Route::get('/agent-collections', [App\Http\Controllers\Agent\AgentCollectionControllerApi::class, 'allCollections']);
+        Route::get('/agent-collections/reminders', [App\Http\Controllers\Agent\AgentCollectionControllerApi::class, 'getReminders']);
         Route::get('/agent-collections/pending-follow-ups', [App\Http\Controllers\Agent\AgentCollectionControllerApi::class, 'pendingFollowUps']);
+        Route::post('/agent-collections/notes', [App\Http\Controllers\Agent\AgentCollectionControllerApi::class, 'storeFollowUp']);
+        Route::get('/agent-collections/notes/{type}/{id}', [App\Http\Controllers\Agent\AgentCollectionControllerApi::class, 'getNotesHistory']);
         Route::get('/agent-collections/bank-accounts', [App\Http\Controllers\Agent\AgentCollectionControllerApi::class, 'collectionBankAccounts']);
         Route::post('/agent-collections/store', [App\Http\Controllers\Agent\AgentCollectionControllerApi::class, 'store']);
         Route::post('/agent-collections/bulk-store', [App\Http\Controllers\Agent\AgentCollectionControllerApi::class, 'bulkStore']);
         Route::get('/agent-collections/list', [App\Http\Controllers\Agent\AgentCollectionControllerApi::class, 'list']);
-        Route::get('/agent-collections/chit-list', [App\Http\Controllers\Agent\AgentCollectionControllerApi::class, 'chitList']);
-        // Unified Receipt Endpoint (supports single/bulk loans and chits, and legacy loan/chit receipt routes)
+        // Unified Receipt Endpoint (supports single/bulk loans, and legacy receipt routes)
         Route::get('/agent-collections/receipt/{id?}', [App\Http\Controllers\Agent\AgentCollectionControllerApi::class, 'unifiedReceipt']);
 
         Route::get('/notifications', [App\Http\Controllers\Agent\EmiPaymentControllerApi::class, 'notifications']);

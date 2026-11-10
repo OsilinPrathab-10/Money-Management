@@ -161,12 +161,10 @@ class AppSettingControllerApi extends Controller
             'background_color' => $setting->background_color,
             'overview_tab_color' => $setting->overview_tab_color ?? '#696CFF',
             'loan_tab_color' => $setting->loan_tab_color ?? '#00CFDD',
-            'chit_tab_color' => $setting->chit_tab_color ?? '#7367F0',
             'fixed_deposit_tab_color' => $setting->fixed_deposit_tab_color ?? '#FF4C51',
             'tab_colors' => [
                 'overview' => $setting->overview_tab_color ?? '#696CFF',
                 'loan' => $setting->loan_tab_color ?? '#00CFDD',
-                'chit' => $setting->chit_tab_color ?? '#7367F0',
                 'fixed_deposit' => $setting->fixed_deposit_tab_color ?? '#FF4C51',
             ],
             'banner_images' => $banners,

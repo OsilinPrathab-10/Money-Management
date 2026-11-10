@@ -2,7 +2,6 @@
 
 namespace App\Console\Commands;
 
-use App\Models\ChitGroup;
 use App\Models\Emi;
 use App\Models\LoanAccount;
 use App\Support\CalendarWeek;
@@ -13,37 +12,17 @@ class FixSkippedScheduleYears extends Command
 {
     protected $signature = 'schedules:fix-year-skips';
 
-    protected $description = 'Fix weekly/chit due dates that skipped a calendar year (e.g. 2026 then 2028)';
+    protected $description = 'Fix weekly due dates that skipped a calendar year (e.g. 2026 then 2028)';
 
     public function handle(): int
     {
-        $chitFixed = $this->repairChitInstallments();
         $emiFixed = $this->repairWeeklyEmis();
-
-        $this->info($chitFixed > 0
-            ? "Corrected {$chitFixed} chit installment due date(s)."
-            : 'No chit installment year skips found.');
 
         $this->info($emiFixed > 0
             ? "Corrected {$emiFixed} weekly EMI due date(s)."
             : 'No weekly EMI year skips found.');
 
         return self::SUCCESS;
-    }
-
-    protected function repairChitInstallments(): int
-    {
-        $fixed = 0;
-        ChitGroup::query()
-            ->whereNotNull('start_date')
-            ->orderBy('id')
-            ->chunkById(50, function ($groups) use (&$fixed) {
-                foreach ($groups as $group) {
-                    $fixed += $group->repairSkippedYearInstallmentDates();
-                }
-            });
-
-        return $fixed;
     }
 
     protected function repairWeeklyEmis(): int

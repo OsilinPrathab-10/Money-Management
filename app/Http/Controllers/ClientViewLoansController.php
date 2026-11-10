@@ -96,6 +96,14 @@ class ClientViewLoansController extends Controller
 
     public function emiDetailsPage($loanId)
     {
+        if (request('action') === 'topup') {
+            $query = request()->except('action');
+
+            return redirect()
+                ->to(request()->url() . ($query ? '?' . http_build_query($query) : ''))
+                ->with('open_topup_modal', true);
+        }
+
         $decodedLoanId = \App\Support\HashId::decode($loanId) ?? $loanId;
         $loanAccount = LoanAccount::with([
             'loanApplication.client',
@@ -120,7 +128,7 @@ class ClientViewLoansController extends Controller
             ->where('loan_account_id', $decodedLoanId)
             ->orderBy('instalment_number', 'asc')
             ->paginate($perPage)
-            ->withQueryString();
+            ->appends(request()->except(['page', 'action']));
         
         // Get available document templates based on loan status and product
         $availableTemplates = $this->documentService->getAvailableDocuments($loanAccount);

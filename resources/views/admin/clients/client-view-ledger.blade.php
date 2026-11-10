@@ -63,7 +63,6 @@
           <li class="nav-item"><a class="nav-link" href="{{ url('/clients/view/kyc/'.$client->id) }}"><i class="icon-base ri ri-shield-check-line me-1_5"></i>KYC</a></li>
           @endif
           <li class="nav-item"><a class="nav-link" href="{{ url('/client/view/loans/'.$client->id) }}"><i class="icon-base ri ri-file-list-3-line me-1_5"></i>Loans</a></li>
-          <li class="nav-item"><a class="nav-link" href="{{ url('/client/view/chits/'.$client->id) }}"><i class="icon-base ri ri-group-2-line me-1_5"></i>Chits</a></li>
           <li class="nav-item"><a class="nav-link active" href="javascript:void(0);"><i class="icon-base ri ri-wallet-3-line me-1_5"></i>Ledger</a></li>
           <li class="nav-item"><a class="nav-link" href="{{ url('/clients/view/notifications/'.$client->id) }}"><i class="icon-base ri ri-notification-3-line me-1_5"></i>Notifications</a></li>
         </ul>
@@ -139,7 +138,7 @@
       <div class="col-12 col-xl-8">
         <div class="row g-4 h-100">
           <!-- Loans Summary Card -->
-          <div class="col-12 col-md-6">
+          <div class="col-12">
             <div class="card h-100 shadow-sm border-0">
               <div class="card-header d-flex align-items-center justify-content-between pb-2 border-bottom">
                 <h5 class="card-title mb-0 fw-bold"><i class="ri-bank-card-line me-2 text-primary"></i>Loans Overview</h5>
@@ -169,46 +168,6 @@
               </div>
             </div>
           </div>
-
-          <!-- Chit Funds Summary Card -->
-          <div class="col-12 col-md-6">
-            <div class="card h-100 shadow-sm border-0">
-              <div class="card-header d-flex align-items-center justify-content-between pb-2 border-bottom">
-                <h5 class="card-title mb-0 fw-bold"><i class="ri-hand-coin-line me-2 text-info"></i>Chits Overview</h5>
-                <span class="badge bg-label-info rounded-pill">{{ $chitStats['total_subscriptions'] }} Active</span>
-              </div>
-              <div class="card-body pt-3">
-                <div class="row g-3">
-                  <div class="col-6">
-                    <div class="bg-light p-3 rounded text-center">
-                      <p class="mb-1 text-muted small">Total Payouts Won</p>
-                      <h5 class="mb-0 fw-bold text-primary">₹{{ number_format($chitStats['total_payout_received'], 2) }}</h5>
-                    </div>
-                  </div>
-                  <div class="col-6">
-                    <div class="bg-light p-3 rounded text-center">
-                      <p class="mb-1 text-muted small">Total Dividends Received</p>
-                      <h5 class="mb-0 fw-bold text-success">₹{{ number_format($chitStats['total_dividend_received'], 2) }}</h5>
-                    </div>
-                  </div>
-                  <div class="col-12 pt-2">
-                    <div class="d-flex justify-content-between mb-1">
-                      <span class="small text-muted">Total Paid Installments</span>
-                      <span class="small fw-semibold text-success">₹{{ number_format($chitStats['total_paid_installments'], 2) }}</span>
-                    </div>
-                    <div class="d-flex justify-content-between mb-1">
-                      <span class="small text-muted">Total Pending Installments</span>
-                      <span class="small fw-semibold text-danger">₹{{ number_format($chitStats['total_pending_installments'], 2) }}</span>
-                    </div>
-                    <div class="d-flex justify-content-between">
-                      <span class="small text-muted">Penalty Paid</span>
-                      <span class="small fw-semibold text-warning">₹{{ number_format($chitStats['total_penalty_paid'], 2) }}</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
         </div>
       </div>
     </div>
@@ -226,17 +185,13 @@
             <i class="ri-bank-card-line me-1"></i> Loan Accounts ({{ $loanStats['active_loans'] }})
           </button>
         </li>
-        <li class="nav-item">
-          <button type="button" class="nav-link fw-semibold" role="tab" data-bs-toggle="tab" data-bs-target="#tab-chits" aria-controls="tab-chits" aria-selected="false">
-            <i class="ri-hand-coin-line me-1"></i> Chit Funds ({{ $chitStats['total_subscriptions'] }})
-          </button>
-        </li>
+        
       </ul>
 
       <div class="tab-content">
         <!-- Unified Ledger Tab -->
         <div class="tab-pane fade show active" id="tab-ledger" role="tabpanel">
-          @if(($closedLoanAccounts ?? collect())->isNotEmpty() || ($closedChitMemberships ?? collect())->isNotEmpty())
+          @if(($closedLoanAccounts ?? collect())->isNotEmpty())
           <div class="row g-4 mb-4">
             @if(($closedLoanAccounts ?? collect())->isNotEmpty())
             <div class="col-12 col-lg-6">
@@ -271,39 +226,7 @@
               </div>
             </div>
             @endif
-            @if(($closedChitMemberships ?? collect())->isNotEmpty())
-            <div class="col-12 col-lg-6">
-              <div class="card border-0 shadow-sm h-100">
-                <div class="card-header border-bottom">
-                  <h6 class="mb-0 fw-bold"><i class="ri-checkbox-circle-line text-info me-1"></i>Closed / Ended Chit Details</h6>
-                </div>
-                <div class="table-responsive">
-                  <table class="table table-sm mb-0">
-                    <thead class="table-light">
-                      <tr>
-                        <th>Group</th>
-                        <th>Ticket</th>
-                        <th>Status</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      @foreach($closedChitMemberships as $membership)
-                      <tr>
-                        <td class="fw-semibold">{{ $membership->group->group_code ?? '—' }}</td>
-                        <td>#{{ $membership->member_number }}</td>
-                        <td>
-                          <span class="badge bg-label-secondary text-capitalize">
-                            {{ ($membership->group->status ?? '') === 'completed' ? 'Group Completed' : $membership->status }}
-                          </span>
-                        </td>
-                      </tr>
-                      @endforeach
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </div>
-            @endif
+            
           </div>
           @endif
           <div class="card border-0 shadow-sm">
@@ -486,96 +409,7 @@
           @endforelse
         </div>
 
-        <!-- Chit Funds Tab -->
-        <div class="tab-pane fade" id="tab-chits" role="tabpanel">
-          @forelse($groupMemberships as $member)
-            <div class="card border-0 shadow-sm mb-4">
-              <div class="card-header bg-light d-flex justify-content-between align-items-center py-3">
-                <div>
-                  <h5 class="mb-0 fw-bold text-info">Chit Group: {{ $member->group->group_code }} ({{ $member->group->group_name }})</h5>
-                  <span class="text-muted small">Scheme: {{ $member->group->scheme->scheme_name }} | Value: ₹{{ number_format($member->group->scheme->chit_value, 2) }}</span>
-                </div>
-                <div>
-                  <span class="badge bg-label-{{ $member->status_badge }} text-capitalize px-3 py-1">
-                    {{ $member->status }}
-                  </span>
-                </div>
-              </div>
-              <div class="card-body pt-3">
-                <div class="row g-3 mb-4">
-                  <div class="col-6 col-md-3">
-                    <span class="text-muted small d-block">Member Number</span>
-                    <strong class="fs-5">#{{ $member->member_number }}</strong>
-                  </div>
-                  <div class="col-6 col-md-3">
-                    <span class="text-muted small d-block">Joined Date</span>
-                    <strong class="fs-5">{{ $member->joined_date ? $member->joined_date->format('d M Y') : 'N/A' }}</strong>
-                  </div>
-                  <div class="col-6 col-md-3">
-                    <span class="text-muted small d-block">Won Auction?</span>
-                    <strong class="fs-5 {{ $member->has_won_auction ? 'text-success' : 'text-muted' }}">
-                      {{ $member->has_won_auction ? 'YES' : 'NO' }}
-                    </strong>
-                  </div>
-                  <div class="col-6 col-md-3">
-                    <span class="text-muted small d-block">Payout Value (Prize)</span>
-                    @php
-                      $payout = \App\Models\Payout::where('winner_member_id', $member->id)->first();
-                    @endphp
-                    <strong class="fs-5 text-primary">
-                      {{ $payout ? '₹' . number_format($payout->payout_amount, 2) : 'N/A' }}
-                    </strong>
-                  </div>
-                </div>
-
-                <!-- Installments subtable -->
-                <h6 class="fw-bold mb-3 border-bottom pb-2">Chit Installments Schedule</h6>
-                <div class="table-responsive">
-                  <table class="table table-sm table-hover table-bordered mb-0">
-                    <thead class="table-light">
-                      <tr>
-                        <th class="text-center">Month #</th>
-                        <th>Due Date</th>
-                        <th>Amount Due</th>
-                        <th>Paid Date</th>
-                        <th>Paid Amount</th>
-                        <th>Penalty</th>
-                        <th>Reference No</th>
-                        <th>Status</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      @forelse($member->installments as $inst)
-                        <tr>
-                          <td class="text-center fw-semibold">Month {{ $inst->month_number }}</td>
-                          <td>{{ $inst->due_date ? $inst->due_date->format('d M Y') : '-' }}</td>
-                          <td>{{ $inst->amount_display }}</td>
-                          <td>{{ $inst->paid_date ? $inst->paid_date->format('d M Y') : '-' }}</td>
-                          <td class="text-success fw-bold">₹{{ number_format($inst->paid_amount, 2) }}</td>
-                          <td class="text-warning">₹{{ number_format($inst->penalty_amount, 2) }}</td>
-                          <td><code>{{ $inst->reference_no ?? '-' }}</code></td>
-                          <td>
-                            <span class="badge bg-label-{{ $inst->status_badge }} text-capitalize py-0 px-2">{{ $inst->status }}</span>
-                          </td>
-                        </tr>
-                      @empty
-                        <tr>
-                          <td colspan="8" class="text-center text-muted">No installments generated for this chit subscription.</td>
-                        </tr>
-                      @endforelse
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </div>
-          @empty
-            <div class="card border-0 shadow-sm text-center py-5 text-muted">
-              <i class="ri-information-line ri-24px mb-2 d-block"></i>
-              No chit subscriptions associated with this client.
-            </div>
-          @endforelse
         </div>
-      </div>
     </div>
   </div>
 </div>

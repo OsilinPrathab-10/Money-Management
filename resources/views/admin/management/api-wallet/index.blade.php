@@ -235,7 +235,7 @@
   </div>
 @else
   <div class="row g-6 mb-6">
-    <div class="col-sm-6 col-xl-3">
+    <div class="col-sm-6 col-xl">
       <div class="card h-100">
         <div class="card-body">
           <p class="mb-1 text-muted">Total API Hits</p>
@@ -243,7 +243,7 @@
         </div>
       </div>
     </div>
-    <div class="col-sm-6 col-xl-3">
+    <div class="col-sm-6 col-xl">
       <div class="card h-100">
         <div class="card-body">
           <p class="mb-1 text-muted">Aadhaar Hits</p>
@@ -251,7 +251,7 @@
         </div>
       </div>
     </div>
-    <div class="col-sm-6 col-xl-3">
+    <div class="col-sm-6 col-xl">
       <div class="card h-100">
         <div class="card-body">
           <p class="mb-1 text-muted">PAN Hits</p>
@@ -259,11 +259,19 @@
         </div>
       </div>
     </div>
-    <div class="col-sm-6 col-xl-3">
+    <div class="col-sm-6 col-xl">
       <div class="card h-100">
         <div class="card-body">
           <p class="mb-1 text-muted">Bank Hits</p>
           <h3 class="mb-0 text-success">{{ $counts['bank'] }}</h3>
+        </div>
+      </div>
+    </div>
+    <div class="col-sm-6 col-xl">
+      <div class="card h-100">
+        <div class="card-body">
+          <p class="mb-1 text-muted">CIBIL Hits</p>
+          <h3 class="mb-0 text-warning">{{ $counts['cibil'] ?? 0 }}</h3>
         </div>
       </div>
     </div>
@@ -274,7 +282,7 @@
       <div class="d-flex flex-wrap justify-content-between align-items-center gap-3">
         <div>
           <h5 class="mb-0">Verification Hits</h5>
-          <small class="text-muted">Aadhaar, PAN and Bank API calls</small>
+          <small class="text-muted">Aadhaar, PAN, Bank and CIBIL API calls</small>
         </div>
         <div class="d-flex gap-2 align-items-center">
           <span class="badge bg-label-success">Success: {{ $counts['success'] }}</span>
@@ -318,6 +326,7 @@
             <option value="aadhaar" @selected($service === 'aadhaar')>Aadhaar</option>
             <option value="pan" @selected($service === 'pan')>PAN</option>
             <option value="bank" @selected($service === 'bank')>Bank</option>
+            <option value="cibil" @selected($service === 'cibil')>CIBIL</option>
           </select>
         </div>
 

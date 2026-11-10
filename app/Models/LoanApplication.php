@@ -15,6 +15,8 @@ class LoanApplication extends Model
         'client_id',
         'loan_code',
         'loan_mode',
+        'interest_source',
+        'manual_interest_amount',
         'loan_amount_min',
         'loan_amount_max',
         'loan_amount',
@@ -52,12 +54,33 @@ class LoanApplication extends Model
         'loan_amount_min' => 'integer',
         'loan_amount_max' => 'integer',
         'loan_amount' => 'integer',
-        'interest_rate' => 'decimal:2',
+        'interest_rate' => 'float',
+        'manual_interest_amount' => 'decimal:2',
         'total_payable' => 'decimal:2',
         'applied_at' => 'datetime',
         'approved_at' => 'datetime',
         'disbursed_at' => 'datetime'
     ];
+
+    public function isManualInterest(): bool
+    {
+        return ($this->loan_mode ?? 'emi') === 'interest_only'
+            && ($this->interest_source ?? 'product') === 'manual'
+            && (float) $this->manual_interest_amount > 0;
+    }
+
+    /**
+     * Per-cycle rate (%) that yields the given interest amount on the given principal,
+     * so open-loan cycle math (principal × rate / 100) reproduces the manual amount.
+     */
+    public static function rateFromInterestAmount(float $principal, float $interestAmount): float
+    {
+        if ($principal <= 0) {
+            return 0.0;
+        }
+
+        return round(($interestAmount / $principal) * 100, 6);
+    }
 
     public function getEmiStartDateAttribute(): ?string
     {

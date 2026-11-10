@@ -44,7 +44,10 @@ class SettingsHelper
                     'admin_favicon' => 'favicon',
                     'primary_color' => 'primary_color',
                     'secondary_color' => 'secondary_color',
-                    'footer_text' => 'footer_text'
+                    'footer_text' => 'footer_text',
+                    'footer_link_text' => 'footer_link_text',
+                    'footer_link_url' => 'footer_link_url',
+                    'footer_custom_note' => 'footer_custom_note',
                 ];
                 
                 $field = $fieldMap[$key] ?? $key;
@@ -78,6 +81,9 @@ class SettingsHelper
             'primary_color',
             'secondary_color',
             'footer_text',
+            'footer_link_text',
+            'footer_link_url',
+            'footer_custom_note',
             'loader_animation',
         ];
         

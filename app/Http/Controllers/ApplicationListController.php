@@ -3,7 +3,6 @@
 namespace App\Http\Controllers;
 
 use App\Models\Agent;
-use App\Models\ChitGroup;
 use App\Models\Client;
 use App\Models\FixedDepositScheme;
 use App\Models\LoanProduct;
@@ -22,26 +21,11 @@ class ApplicationListController extends Controller
     public function index(Request $request, string $module = 'all'): View
     {
         $module = $this->guardModule($module);
-        if ($module === 'settlement' && ! $this->applications->canListSettlements()) {
-            abort(403);
-        }
 
-        $settlementTab = 'pending';
         try {
-            if ($module === 'settlement') {
-                $settlementTab = strtolower((string) $request->input('status', 'pending'));
-                if (! in_array($settlementTab, ['pending', 'approved', 'rejected'], true)) {
-                    $settlementTab = 'pending';
-                }
-                $request->merge(['status' => $settlementTab]);
-                $listed = $this->applications->listRows($module, $request);
-                $stats = $this->applications->settlementTabCounts($request);
-                $rows = $this->applications->paginateListed($listed, $request);
-            } else {
-                $listed = $this->applications->listRows($module, $request);
-                $stats = $this->applications->statsFromRows($listed);
-                $rows = $this->applications->paginateListed($listed, $request);
-            }
+            $listed = $this->applications->listRows($module, $request);
+            $stats = $this->applications->statsFromRows($listed);
+            $rows = $this->applications->paginateListed($listed, $request);
         } catch (\Throwable $e) {
             report($e);
             $rows = new \Illuminate\Pagination\LengthAwarePaginator([], 0, 25, 1, [
@@ -78,14 +62,6 @@ class ApplicationListController extends Controller
             ->orderBy('loan_name')
             ->get();
 
-        $availableGroups = ChitGroup::with(['scheme'])
-            ->whereIn('status', ['forming', 'upcoming', 'active', 'open'])
-            ->withCount(['members' => fn ($q) => $q->whereNotIn('status', ['rejected', 'transferred', 'withdrawn', 'cancelled'])])
-            ->orderBy('group_code')
-            ->get()
-            ->filter(fn ($g) => (int) $g->members_count < (int) ($g->total_members ?? 0))
-            ->values();
-
         $agents = Agent::orderBy('agent_name')->get();
         $fdSchemes = FixedDepositScheme::query()
             ->where('status', 'active')
@@ -102,13 +78,12 @@ class ApplicationListController extends Controller
             'moduleTitle' => $this->applications->moduleTitle($module),
             'verifiedClients' => $verifiedClients,
             'loanProducts' => $loanProducts,
-            'availableGroups' => $availableGroups,
             'agents' => $agents,
             'fdSchemes' => $fdSchemes,
             'payoutOptions' => $payoutOptions,
             'canApply' => $canApply,
-            'canListSettlements' => $this->applications->canListSettlements(),
-            'settlementTab' => $settlementTab,
+            'canListSettlements' => false,
+            'settlementTab' => 'pending',
         ]);
     }
 

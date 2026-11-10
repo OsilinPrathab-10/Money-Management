@@ -36,7 +36,6 @@
             <option value="all" {{ request('category', 'all') == 'all' ? 'selected' : '' }}>All Categories</option>
             <option value="client" {{ request('category') == 'client' ? 'selected' : '' }}>Client / KYC</option>
             <option value="loan" {{ request('category') == 'loan' ? 'selected' : '' }}>Loan</option>
-            <option value="chit" {{ request('category') == 'chit' ? 'selected' : '' }}>Chit</option>
             <option value="ticket" {{ request('category') == 'ticket' ? 'selected' : '' }}>Tickets & Support</option>
             <option value="fd" {{ request('category') == 'fd' ? 'selected' : '' }}>Fixed Deposit (FD)</option>
           </select>

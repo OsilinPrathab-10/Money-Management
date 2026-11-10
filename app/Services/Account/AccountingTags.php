@@ -7,14 +7,11 @@ namespace App\Services\Account;
  */
 class AccountingTags
 {
-    public const MODULE_CHIT = 'CHIT';
     public const MODULE_LOAN = 'LOAN';
     public const MODULE_FD = 'FD';
     public const MODULE_TRANSFER = 'TRANSFER';
     public const MODULE_OTHER = 'OTHER';
 
-    public const ENTRY_INSTALLMENT = 'INSTALLMENT';
-    public const ENTRY_SETTLEMENT = 'SETTLEMENT';
     public const ENTRY_TRANSFER = 'TRANSFER';
     public const ENTRY_DISBURSEMENT = 'DISBURSEMENT';
     public const ENTRY_EMI = 'EMI';
@@ -24,18 +21,16 @@ class AccountingTags
     public const ENTRY_DOC_FEE = 'DOC_FEE';
     public const ENTRY_OTHER_FEE = 'OTHER_FEE';
     public const ENTRY_BANK_FEE = 'BANK_FEE';
-    public const ENTRY_FOREMAN_COMM = 'FOREMAN_COMM';
-    public const ENTRY_DIVIDEND = 'DIVIDEND';
     public const ENTRY_REVERSAL = 'REVERSAL';
     public const ENTRY_WALLET_WD = 'WALLET_WD';
     public const ENTRY_INTEREST = 'INTEREST';
     public const ENTRY_FORECLOSE = 'FORECLOSE';
     public const ENTRY_WITHDRAWAL = 'WITHDRAWAL';
+    public const ENTRY_TOPUP = 'TOPUP';
 
     public static function modules(): array
     {
         return [
-            self::MODULE_CHIT,
             self::MODULE_LOAN,
             self::MODULE_FD,
             self::MODULE_TRANSFER,
@@ -46,8 +41,6 @@ class AccountingTags
     public static function entries(): array
     {
         return [
-            self::ENTRY_INSTALLMENT,
-            self::ENTRY_SETTLEMENT,
             self::ENTRY_TRANSFER,
             self::ENTRY_DISBURSEMENT,
             self::ENTRY_EMI,
@@ -58,19 +51,17 @@ class AccountingTags
             self::ENTRY_DOC_FEE,
             self::ENTRY_OTHER_FEE,
             self::ENTRY_BANK_FEE,
-            self::ENTRY_FOREMAN_COMM,
-            self::ENTRY_DIVIDEND,
             self::ENTRY_REVERSAL,
             self::ENTRY_WALLET_WD,
             self::ENTRY_INTEREST,
             self::ENTRY_FORECLOSE,
+            self::ENTRY_TOPUP,
         ];
     }
 
     public static function moduleBadgeClass(string $module): string
     {
         return match (strtoupper($module)) {
-            self::MODULE_CHIT => 'bg-label-primary',
             self::MODULE_LOAN => 'bg-label-info',
             self::MODULE_FD => 'bg-label-warning',
             self::MODULE_TRANSFER => 'bg-label-dark',
@@ -81,8 +72,6 @@ class AccountingTags
     public static function entryLabel(string $entry): string
     {
         return match (strtoupper($entry)) {
-            self::ENTRY_INSTALLMENT => 'Installment',
-            self::ENTRY_SETTLEMENT => 'Settlement',
             self::ENTRY_TRANSFER => 'Transfer',
             self::ENTRY_DISBURSEMENT => 'Disbursement',
             self::ENTRY_EMI => 'EMI',
@@ -93,12 +82,11 @@ class AccountingTags
             self::ENTRY_DOC_FEE => 'Document fee',
             self::ENTRY_OTHER_FEE => 'Other fee',
             self::ENTRY_BANK_FEE => 'Banking charges',
-            self::ENTRY_FOREMAN_COMM => 'Foreman commission',
-            self::ENTRY_DIVIDEND => 'Dividend',
             self::ENTRY_REVERSAL => 'Reversal',
             self::ENTRY_WALLET_WD => 'Wallet withdrawal',
             self::ENTRY_INTEREST => 'Interest',
             self::ENTRY_FORECLOSE => 'Foreclosure',
+            self::ENTRY_TOPUP => 'Top-up loan',
             default => $entry,
         };
     }
@@ -129,51 +117,6 @@ class AccountingTags
         }
 
         return 'System';
-    }
-
-    /**
-     * Short bank-tx description: Chit IC — group M# — client — by collector
-     * $month may be a single month or a list of months for bulk / split payments.
-     */
-    public static function chitIcDescription(
-        string $groupCode,
-        int|string|array|null $month,
-        string $clientName,
-        ?int $collectedByUserId = null,
-        ?string $collectorName = null,
-        bool $reversed = false
-    ): string {
-        $prefix = $reversed ? 'Chit IC Rev' : 'Chit IC';
-        $by = self::collectorDisplayName($collectedByUserId, $collectorName);
-        $monthPart = self::formatMonthPart($month);
-
-        return "{$prefix} — {$groupCode} {$monthPart} — {$clientName} — by {$by}";
-    }
-
-    /**
-     * Bulk chit collection covering multiple groups / months / members in one payment.
-     *
-     * @param  list<array{group_code?: string, month?: int|string|null, client_name?: string}>  $lines
-     */
-    public static function chitIcBulkDescription(
-        array $lines,
-        ?int $collectedByUserId = null,
-        ?string $collectorName = null
-    ): string {
-        $by = self::collectorDisplayName($collectedByUserId, $collectorName);
-        $parts = [];
-
-        foreach ($lines as $line) {
-            $group = trim((string) ($line['group_code'] ?? 'GRP'));
-            $client = trim((string) ($line['client_name'] ?? 'Member'));
-            $monthPart = self::formatMonthPart($line['month'] ?? null);
-            $parts[] = trim("{$group} {$monthPart} ({$client})");
-        }
-
-        $parts = array_values(array_unique(array_filter($parts)));
-        $summary = $parts ? implode('; ', $parts) : 'multiple installments';
-
-        return "Chit IC Bulk — {$summary} — by {$by}";
     }
 
     /**
@@ -261,21 +204,6 @@ class AccountingTags
         $ranges[] = $start === $prev ? (string) $start : "{$start}–{$prev}";
 
         return implode(', ', $ranges);
-    }
-
-    protected static function formatMonthPart(int|string|array|null $month): string
-    {
-        if (is_array($month)) {
-            $list = self::formatNumberList($month);
-
-            return $list !== '' ? "M{$list}" : 'M?';
-        }
-
-        if ($month === null || $month === '') {
-            return 'M?';
-        }
-
-        return 'M' . $month;
     }
 
     protected static function formatEmiPart(int|string|array|null $emiNumber): string

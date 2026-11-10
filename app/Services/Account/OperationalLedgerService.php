@@ -5,7 +5,6 @@ namespace App\Services\Account;
 use App\Models\Account\BankTransaction;
 use App\Models\Account\Expense;
 use App\Models\Account\Revenue;
-use App\Models\ChitDividendPoolEntry;
 use App\Models\Client;
 use Illuminate\Support\Collection;
 
@@ -177,53 +176,6 @@ class OperationalLedgerService
             }
         }
 
-        if (($source === 'all' || $source === 'Dividend')
-            && ($moduleTag === 'all' || $moduleTag === AccountingTags::MODULE_CHIT)
-        ) {
-            if (! $entryTag || $entryTag === AccountingTags::ENTRY_DIVIDEND) {
-                // Dividend memo lines are group-level; skip when a specific client is selected.
-                if (! $clientId) {
-                    $divQuery = ChitDividendPoolEntry::with(['group:id,group_code'])
-                        ->where('created_by', $creatorId);
-                    if ($fromDate) {
-                        $divQuery->whereDate('created_at', '>=', $fromDate);
-                    }
-                    if ($toDate) {
-                        $divQuery->whereDate('created_at', '<=', $toDate);
-                    }
-
-                    if ($search) {
-                        $divQuery->where(function ($q) use ($search) {
-                            $q->where('remarks', 'like', '%' . $search . '%')
-                                ->orWhereHas('group', function ($gq) use ($search) {
-                                    $gq->where('group_code', 'like', '%' . $search . '%');
-                                });
-                        });
-                    }
-
-                    foreach ($divQuery->orderBy('created_at')->orderBy('id')->get() as $d) {
-                        $groupCode = $d->group?->group_code ?? ('GRP-' . $d->group_id);
-                        $isCredit = $d->entry_type === ChitDividendPoolEntry::TYPE_CREDIT;
-                        $date = optional($d->created_at)->format('Y-m-d');
-                        $rows->push([
-                            'date' => $date,
-                            'sort_ts' => ($date ?? '') . '-D' . str_pad((string) $d->id, 12, '0', STR_PAD_LEFT),
-                            'module_tag' => AccountingTags::MODULE_CHIT,
-                            'entry_tag' => AccountingTags::ENTRY_DIVIDEND,
-                            'ref' => 'DIV-' . $d->id,
-                            'description' => ($d->remarks ?: $d->entry_type_label) . ' — ' . $groupCode,
-                            'debit' => $isCredit ? 0.0 : (float) $d->amount,
-                            'credit' => $isCredit ? (float) $d->amount : 0.0,
-                            'source' => 'Dividend',
-                            'bank' => null,
-                            'bank_name' => null,
-                            'status' => 'memo',
-                            'client_id' => null,
-                        ]);
-                    }
-                }
-            }
-        }
 
         $rows = $rows->sortByDesc('sort_ts')->values();
 
@@ -234,14 +186,6 @@ class OperationalLedgerService
             'bank_credit' => (float) $rows->where('source', 'Bank')->sum('credit'),
             'revenue' => (float) $rows->where('source', 'Revenue')->sum('credit'),
             'expense' => (float) $rows->where('source', 'Expense')->sum('debit'),
-            'chit_fees' => (float) $rows->where('module_tag', AccountingTags::MODULE_CHIT)
-                ->whereIn('entry_tag', [
-                    AccountingTags::ENTRY_PROC_FEE,
-                    AccountingTags::ENTRY_DOC_FEE,
-                    AccountingTags::ENTRY_OTHER_FEE,
-                    AccountingTags::ENTRY_BANK_FEE,
-                    AccountingTags::ENTRY_FOREMAN_COMM,
-                ])->sum('credit'),
             'loan_fees' => (float) $rows->where('module_tag', AccountingTags::MODULE_LOAN)
                 ->whereIn('entry_tag', [
                     AccountingTags::ENTRY_PROC_FEE,

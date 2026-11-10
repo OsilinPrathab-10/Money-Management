@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     @php
         $company = \App\Models\CompanyDetail::first();
-        $companyName = \App\Helpers\SettingsHelper::get('admin_title', $company->company_name ?? config('app.name', 'Fintronix Chit Funds & Finance'));
+        $companyName = \App\Helpers\SettingsHelper::get('admin_title', $company->company_name ?? config('app.name', 'Co-operative Society Bank'));
     @endphp
     <title>{{ $companyName }} - Public Client Account & Repayment View</title>
     <!-- Google Fonts -->
@@ -21,8 +21,8 @@
             --primary: #4f46e5;
             --primary-light: #e0e7ff;
             --primary-dark: #3730a3;
-            --chit-purple: #7c3aed;
-            --chit-light: #f3e8ff;
+            --accent-purple: #7c3aed;
+            --accent-light: #f3e8ff;
             --success: #10b981;
             --success-light: #d1fae5;
             --warning: #f59e0b;
@@ -123,7 +123,7 @@
         .client-avatar {
             width: 56px;
             height: 56px;
-            background: linear-gradient(135deg, var(--primary) 0%, var(--chit-purple) 100%);
+            background: linear-gradient(135deg, var(--primary) 0%, var(--accent-purple) 100%);
             color: white;
             border-radius: 16px;
             display: flex;
@@ -319,7 +319,7 @@
             @php
                 $adminLogo = \App\Helpers\SettingsHelper::get('admin_logo');
                 $company = \App\Models\CompanyDetail::first();
-                $companyName = \App\Helpers\SettingsHelper::get('admin_title', $company->company_name ?? config('app.name', 'Fintronix Chit Funds & Finance'));
+                $companyName = \App\Helpers\SettingsHelper::get('admin_title', $company->company_name ?? config('app.name', 'Co-operative Society Bank'));
                 $companySlogan = $company->company_slogan ?? \App\Helpers\SettingsHelper::get('admin_subtitle', '');
                 $logoExists = $adminLogo && \Illuminate\Support\Facades\Storage::disk('public')->exists($adminLogo);
                 if (!$logoExists && !empty($company->logo_path) && \Illuminate\Support\Facades\Storage::disk('public')->exists($company->logo_path)) {
@@ -366,11 +366,6 @@
                         </div>
                     </div>
                     <div class="d-flex gap-2 flex-wrap">
-                        @if($summary['has_chits'])
-                            <span class="badge text-white px-3 py-2 rounded-pill" style="background: linear-gradient(135deg, var(--chit-purple) 0%, #a855f7 100%);">
-                                <i class="ri-group-2-line me-1"></i>{{ $summary['total_chits'] }} Chit Subscription(s)
-                            </span>
-                        @endif
                         @if($summary['has_loans'])
                             <span class="badge text-white px-3 py-2 rounded-pill" style="background: linear-gradient(135deg, var(--primary) 0%, #6366f1 100%);">
                                 <i class="ri-file-list-3-line me-1"></i>{{ $summary['total_loans'] }} Loan Account(s)
@@ -411,13 +406,6 @@
                     <i class="ri-dashboard-line"></i>Accounts Overview Table
                 </button>
             </li>
-            @if($summary['has_chits'])
-            <li class="nav-item" role="presentation">
-                <button class="nav-link" id="tab-chits-btn" data-bs-toggle="pill" data-bs-target="#tab-chits-pane" type="button" role="tab">
-                    <i class="ri-group-2-line"></i>Chit Groups ({{ $summary['total_chits'] }})
-                </button>
-            </li>
-            @endif
             @if($summary['has_loans'])
             <li class="nav-item" role="presentation">
                 <button class="nav-link" id="tab-loans-btn" data-bs-toggle="pill" data-bs-target="#tab-loans-pane" type="button" role="tab">
@@ -436,12 +424,12 @@
                     <div class="schedule-card-header">
                         <div>
                             <h5 class="mb-0 text-dark fw-bold">
-                                <i class="ri-table-line me-2 text-primary"></i>All Accounts & Subscriptions Summary Table
+                                <i class="ri-table-line me-2 text-primary"></i>All Accounts Summary Table
                             </h5>
-                            <small class="text-muted">Table-wise consolidated view of all active loans and chit group memberships</small>
+                            <small class="text-muted">Table-wise consolidated view of all active loan accounts</small>
                         </div>
                         <span class="badge bg-primary text-white rounded-pill px-3 py-1_5">
-                            {{ $summary['total_chits'] + $summary['total_loans'] }} Total Accounts
+                            {{ $summary['total_loans'] }} Total Accounts
                         </span>
                     </div>
                     <div class="table-responsive">
@@ -461,62 +449,6 @@
                             </thead>
                             <tbody>
                                 @php $accCounter = 1; @endphp
-
-                                {{-- Render Chits Rows --}}
-                                @foreach($memberships as $membership)
-                                    @php
-                                        $memberId = $membership->id;
-                                        $group = $membership->group;
-                                        if (!$group) continue;
-                                        $memberInsts = $byMember->get($memberId, collect());
-                                        $seatLetter = $seatLetterMap[$memberId] ?? null;
-                                        $cPaid = $memberInsts->sum(fn ($i) => isset($i->client_share_paid) ? (float) $i->client_share_paid : (float) $i->paid_amount);
-                                        $cBal = $memberInsts->sum(fn ($i) => isset($i->client_share_balance) ? max(0, (float) $i->client_share_balance) : max(0, (float) $i->balance));
-                                        $sharePctSummary = (float) ($membership->ownership_percentage ?? $membership->effective_share_percentage ?? 100);
-                                        $cTotal = $membership->client_chit_value ?? round(($group->chit_value ?? 0) * ($sharePctSummary / 100), 2);
-                                        $wonPayout = $membership->won_payout ?? null;
-                                        $pendingPayout = $membership->pending_payout ?? null;
-                                    @endphp
-                                    <tr>
-                                        <td class="fw-semibold">{{ $accCounter++ }}</td>
-                                        <td>
-                                            <span class="badge text-white px-2.5 py-1" style="background-color: var(--chit-purple);">
-                                                Group: {{ $group->group_code }}
-                                            </span>
-                                            @if($seatLetter)
-                                                <span class="badge bg-warning text-dark ms-1">Seat {{ $seatLetter }}</span>
-                                            @endif
-                                            @if($sharePctSummary < 100)
-                                                <span class="badge bg-info text-white ms-1" style="font-size:.65rem;">{{ rtrim(rtrim(number_format($sharePctSummary, 2), '0'), '.') }}% Share</span>
-                                            @endif
-                                        </td>
-                                        <td><span class="fw-medium text-dark">{{ $group->scheme->name ?? 'Chit Scheme' }}</span></td>
-                                        <td><span class="badge bg-light fw-semibold" style="color: var(--chit-purple); border: 1px solid var(--chit-purple);">Chit Fund</span></td>
-                                        <td class="text-end fw-bold">₹{{ number_format($cTotal, 2) }}</td>
-                                        <td class="text-end text-success fw-semibold">₹{{ number_format($cPaid, 2) }}</td>
-                                        <td class="text-end text-danger fw-semibold">₹{{ number_format($cBal, 2) }}</td>
-                                        <td class="text-center">
-                                            @if($wonPayout)
-                                                <span class="badge bg-success text-white px-2.5 py-1 rounded-pill shadow-sm" style="font-size: 0.78rem;">
-                                                    <i class="ri-trophy-fill text-warning me-1"></i>Settlement Released (Month {{ $wonPayout->month_number }})
-                                                </span>
-                                            @elseif($pendingPayout)
-                                                <span class="badge bg-warning text-dark px-2.5 py-1 rounded-pill shadow-sm" style="font-size: 0.78rem;">
-                                                    <i class="ri-history-line me-1"></i>Settlement Requested
-                                                </span>
-                                            @else
-                                                <span class="badge-status paid">
-                                                    <i class="ri-checkbox-blank-circle-fill me-1" style="font-size: 6px;"></i>Active
-                                                </span>
-                                            @endif
-                                        </td>
-                                        <td class="text-center">
-                                            <button type="button" onclick="switchToChitTab('chit-pane-{{ $memberId }}')" class="btn btn-sm btn-outline-primary sub-nav-btn py-1 px-3">
-                                                <i class="ri-eye-line me-1"></i>View Schedule
-                                            </button>
-                                        </td>
-                                    </tr>
-                                @endforeach
 
                                 {{-- Render Loans Rows --}}
                                 @foreach($loans as $loan)
@@ -563,16 +495,16 @@
                                         </td>
                                     </tr>
                                 @endforeach
-                                @if($memberships->isEmpty() && $loans->isEmpty())
+                                @if($loans->isEmpty())
                                     <tr>
                                         <td colspan="9" class="text-center py-5 text-muted">
                                             <i class="ri-information-line fs-2 d-block mb-2 text-secondary opacity-50"></i>
-                                            No active loan accounts or chit subscriptions to display.
+                                            No active loan accounts to display.
                                         </td>
                                     </tr>
                                 @endif
                             </tbody>
-                            @if($memberships->isNotEmpty() || $loans->isNotEmpty())
+                            @if($loans->isNotEmpty())
                                 <tfoot>
                                     <tr class="fw-bold bg-light" style="border-top: 2px solid var(--border);">
                                         <td colspan="4" class="text-end text-dark">Consolidated Total:</td>
@@ -587,454 +519,6 @@
                     </div>
                 </div>
             </div>
-
-            {{-- ── TAB 2: CHIT GROUPS TAB PANE ── --}}
-            @if($summary['has_chits'])
-            <div class="tab-pane fade" id="tab-chits-pane" role="tabpanel">
-                @if($memberships->count() > 1)
-                    <!-- Sub Tabs for Multiple Chit Memberships -->
-                    <div class="d-flex align-items-center gap-2 mb-3 overflow-auto pb-1" id="chitSubTabs" role="tablist">
-                        <button class="btn btn-sm btn-outline-primary sub-nav-btn active px-3" id="btn-chit-pane-all" data-bs-toggle="pill" data-bs-target="#chit-pane-all" type="button">
-                            <i class="ri-layout-grid-line me-1"></i>All Chits ({{ $memberships->count() }})
-                        </button>
-                        @foreach($memberships as $membership)
-                            @php $seatLetter = $seatLetterMap[$membership->id] ?? null; @endphp
-                            <button class="btn btn-sm btn-outline-primary sub-nav-btn px-3" id="btn-chit-pane-{{ $membership->id }}" data-bs-toggle="pill" data-bs-target="#chit-pane-{{ $membership->id }}" type="button">
-                                Group {{ $membership->group->group_code ?? '' }} @if($seatLetter)(Seat {{ $seatLetter }})@endif
-                            </button>
-                        @endforeach
-                    </div>
-                @endif
-
-                <div class="tab-content" id="chitSubTabContent">
-                    {{-- All Chits Sub-pane --}}
-                    <div class="tab-pane fade show active" id="chit-pane-all" role="tabpanel">
-                        @foreach($memberships as $membership)
-                            @php
-                                $memberId = $membership->id;
-                                $memberInsts = $byMember->get($memberId, collect());
-                                $group = $membership->group;
-                                if (!$group) continue;
-                                $seatLetter = $seatLetterMap[$memberId] ?? null;
-                                $paidCount = $memberInsts->where('display_status', 'paid')->count();
-                                $totalCount = $memberInsts->count();
-                                $progressPct = $totalCount > 0 ? round(($paidCount / $totalCount) * 100) : 0;
-
-                                $wonPayout = $membership->won_payout ?? null;
-                                $pendingPayout = $membership->pending_payout ?? null;
-                                $wonAuction = $membership->won_auction ?? null;
-                                $payoutsByMonth = $membership->payouts_by_month ?? collect();
-                                $auctionsByMonth = $membership->auctions_by_month ?? collect();
-                            @endphp
-
-                            <div class="schedule-card mb-4">
-                                <div class="schedule-card-header">
-                                    <div>
-                                        <div class="d-flex align-items-center gap-2 flex-wrap">
-                                            <span class="badge bg-primary px-2_5 py-1">Group: {{ $group->group_code }}</span>
-                                            @if($seatLetter)
-                                                <span class="badge bg-warning text-dark">Seat {{ $seatLetter }}</span>
-                                            @endif
-                                            @if(isset($membership->ownership_percentage) && $membership->ownership_percentage < 100)
-                                                <span class="badge bg-info text-white"><i class="ri-pie-chart-line me-1"></i>{{ round($membership->ownership_percentage) }}% Share</span>
-                                            @endif
-                                            <span class="fw-semibold text-dark">{{ $group->scheme->name ?? '' }}</span>
-
-                                            @if($wonPayout)
-                                                <span class="badge bg-success text-white shadow-sm d-inline-flex align-items-center gap-1 px-2.5 py-1">
-                                                    <i class="ri-trophy-fill text-warning"></i> Won (Month #{{ $wonPayout->month_number }}) - Settled
-                                                </span>
-                                            @elseif($pendingPayout)
-                                                <span class="badge bg-warning text-dark shadow-sm d-inline-flex align-items-center gap-1 px-2.5 py-1">
-                                                    <i class="ri-history-line"></i> Settlement Requested (Month #{{ $pendingPayout->month_number }})
-                                                </span>
-                                            @elseif($wonAuction)
-                                                <span class="badge bg-success text-white shadow-sm d-inline-flex align-items-center gap-1 px-2.5 py-1">
-                                                    <i class="ri-trophy-line text-warning"></i> Won Auction (Month #{{ $wonAuction->month_number }})
-                                                </span>
-                                            @endif
-                                        </div>
-                                        <small class="text-muted d-block mt-1">
-                                            @if(isset($membership->ownership_percentage) && $membership->ownership_percentage < 100)
-                                                Chit Value Share: <strong>₹{{ number_format($membership->client_chit_value ?? 0) }}</strong> ({{ round($membership->ownership_percentage) }}% Share of ₹{{ number_format($group->chit_value ?? 0) }}) | Monthly Share: <strong>₹{{ number_format($membership->client_monthly_amount ?? 0) }}</strong>
-                                            @else
-                                                Chit Value: ₹{{ number_format($group->chit_value ?? 0) }} | Monthly: ₹{{ number_format($group->installment_amount ?? 0) }}
-                                            @endif
-                                        </small>
-                                    </div>
-                                    <div class="text-end">
-                                        <span class="fw-bold text-success">{{ $paidCount }}/{{ $totalCount }} Paid</span>
-                                        <div class="progress-custom mt-1" style="width: 120px;">
-                                            <div class="progress-bar-custom" style="width: {{ $progressPct }}%;"></div>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                @if($wonPayout)
-                                    <div class="p-3 mx-4 mt-3 rounded-4 shadow-sm border-0 d-flex align-items-center justify-content-between flex-wrap gap-2" style="background: linear-gradient(135deg, #059669 0%, #10b981 100%); color: white;">
-                                        <div class="d-flex align-items-center gap-3">
-                                            <div class="rounded-circle bg-white text-success d-flex align-items-center justify-content-center flex-shrink-0" style="width: 42px; height: 42px;">
-                                                <i class="ri-trophy-fill fs-4 text-warning"></i>
-                                            </div>
-                                            <div>
-                                                <h6 class="mb-0 text-white fw-bold">Chit Settlement Completed &amp; Released</h6>
-                                                <small class="text-white-50">
-                                                    Month {{ $wonPayout->month_number }} Payout &bull; Gross Settlement: ₹{{ number_format((float) $wonPayout->payout_amount, 2) }}
-                                                    @if($wonPayout->net_payout_amount)
-                                                        &bull; Net Paid: <strong>₹{{ number_format((float) $wonPayout->net_payout_amount, 2) }}</strong>
-                                                    @endif
-                                                </small>
-                                            </div>
-                                        </div>
-                                        <span class="badge bg-white text-success fw-bold px-3 py-1_5 rounded-pill shadow-sm"><i class="ri-checkbox-circle-fill me-1"></i>Settlement Released</span>
-                                    </div>
-                                @elseif($pendingPayout)
-                                    <div class="p-3 mx-4 mt-3 rounded-4 shadow-sm border-0 d-flex align-items-center justify-content-between flex-wrap gap-2" style="background: linear-gradient(135deg, #d97706 0%, #f59e0b 100%); color: white;">
-                                        <div class="d-flex align-items-center gap-3">
-                                            <div class="rounded-circle bg-white text-warning d-flex align-items-center justify-content-center flex-shrink-0" style="width: 42px; height: 42px;">
-                                                <i class="ri-time-line fs-4 text-warning"></i>
-                                            </div>
-                                            <div>
-                                                <h6 class="mb-0 text-white fw-bold">Chit Settlement Application Under Review</h6>
-                                                <small class="text-white-50">
-                                                    Month {{ $pendingPayout->month_number }} Settlement Application Submitted &bull; Amount: ₹{{ number_format((float) $pendingPayout->payout_amount, 2) }}
-                                                </small>
-                                            </div>
-                                        </div>
-                                        <span class="badge bg-white text-dark fw-bold px-3 py-1_5 rounded-pill shadow-sm"><i class="ri-history-line me-1"></i>Application Pending</span>
-                                    </div>
-                                @endif
-
-                                <div class="table-responsive">
-                                    <table class="table table-custom">
-                                        <thead>
-                                            <tr>
-                                                <th>Period</th>
-                                                <th>Due Date</th>
-                                                <th>Amount</th>
-                                                <th>Paid</th>
-                                                <th>Payout Amount</th>
-                                                <th>Status</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            @forelse($memberInsts as $inst)
-                                                @php
-                                                    $statusClass = match($inst->display_status) {
-                                                        'paid' => 'paid',
-                                                        'overdue' => 'overdue',
-                                                        'pending' => 'pending',
-                                                        'partial' => 'partial',
-                                                        default => 'upcoming'
-                                                    };
-                                                    $freq = $group->installment_frequency ?? 'monthly';
-                                                    $periodLabel = match($freq) {
-                                                        'daily' => 'Day ' . $inst->month_number,
-                                                        'weekly' => 'Week ' . $inst->month_number,
-                                                        default => 'Month ' . $inst->month_number,
-                                                    };
-
-                                                    $monthPayout = $payoutsByMonth->get($inst->month_number);
-                                                    $monthAuction = $auctionsByMonth->get($inst->month_number);
-
-                                                    $rowStyle = '';
-                                                    if ($monthPayout) {
-                                                        if (in_array(strtolower($monthPayout->status ?? ''), ['paid', 'completed', 'disbursed'], true)) {
-                                                            $rowStyle = 'style="background-color: #ecfdf5;"';
-                                                        } elseif (in_array(strtolower($monthPayout->status ?? ''), ['pending', 'processing', 'submitted', 'requested'], true)) {
-                                                            $rowStyle = 'style="background-color: #fffbeb;"';
-                                                        }
-                                                    }
-                                                @endphp
-                                                <tr {!! $rowStyle !!}>
-                                                    <td class="fw-semibold">
-                                                        {{ $periodLabel }}
-                                                        @if($monthPayout)
-                                                            @if(in_array(strtolower($monthPayout->status ?? ''), ['paid', 'completed', 'disbursed'], true))
-                                                                <span class="badge bg-success text-white ms-1 shadow-sm px-2 py-0.5" style="font-size: 0.75rem;">
-                                                                    <i class="ri-trophy-fill text-warning me-1"></i> Won
-                                                                </span>
-                                                            @elseif(in_array(strtolower($monthPayout->status ?? ''), ['pending', 'processing', 'submitted', 'requested'], true))
-                                                                <span class="badge bg-warning text-dark ms-1 shadow-sm px-2 py-0.5" style="font-size: 0.75rem;">
-                                                                    <i class="ri-history-line me-1"></i> Settlement Requested
-                                                                </span>
-                                                            @else
-                                                                <span class="badge bg-info text-white ms-1 shadow-sm px-2 py-0.5" style="font-size: 0.75rem;">
-                                                                    <i class="ri-award-line me-1"></i> {{ ucfirst($monthPayout->status) }}
-                                                                </span>
-                                                            @endif
-                                                        @elseif($monthAuction)
-                                                            <span class="badge bg-success text-white ms-1 shadow-sm px-2 py-0.5" style="font-size: 0.75rem;">
-                                                                <i class="ri-trophy-line me-1"></i> Won
-                                                            </span>
-                                                        @endif
-                                                    </td>
-                                                    <td>{{ $inst->due_date ? $inst->due_date->format('d M Y') : '—' }}</td>
-                                                    @php
-                                                        $dispInstAmt2 = isset($inst->client_share_amount) ? (float)$inst->client_share_amount : (float)$inst->amount;
-                                                        $dispInstPaid2 = isset($inst->client_share_paid) ? (float)$inst->client_share_paid : (float)$inst->paid_amount;
-                                                        $instSharePct2 = (float) ($inst->ownership_percentage ?? $membership?->effective_share_percentage ?? 100);
-
-                                                        // If real payout/auction record exists, use it directly (already the correct amount for this member).
-                                                        // Only apply amountForClient() scaling for estimated amounts from the group schedule.
-                                                        if ($monthPayout?->payout_amount) {
-                                                            $dispPayoutAmt2 = (float) $monthPayout->payout_amount;
-                                                        } elseif ($monthAuction?->payout_amount) {
-                                                            $dispPayoutAmt2 = (float) $monthAuction->payout_amount;
-                                                        } else {
-                                                            $scheduledPayout2 = $group->getScheduledPayoutAmountForMonth($inst->month_number) ?? (float)$group->chit_value;
-                                                            $dispPayoutAmt2 = ($inst->member)
-                                                                ? $inst->member->amountForClient((float)$scheduledPayout2, (int)$client->id)
-                                                                : (float)$scheduledPayout2;
-                                                        }
-                                                    @endphp
-                                                    <td class="fw-bold">
-                                                        ₹{{ number_format($dispInstAmt2, 2) }}
-                                                        @if($instSharePct2 < 100)
-                                                            <small class="text-muted d-block font-normal" style="font-size: 0.7rem; font-weight: normal;">({{ rtrim(rtrim(number_format($instSharePct2, 2), '0'), '.') }}% share)</small>
-                                                        @endif
-                                                    </td>
-                                                    <td class="text-success">₹{{ number_format($dispInstPaid2, 2) }}</td>
-                                                    <td class="text-primary fw-semibold">
-                                                        {{ $dispPayoutAmt2 ? '₹' . number_format($dispPayoutAmt2, 2) : '—' }}
-                                                        @if($instSharePct2 < 100)
-                                                            <small class="text-muted d-block font-normal" style="font-size: 0.7rem; font-weight: normal;">({{ rtrim(rtrim(number_format($instSharePct2, 2), '0'), '.') }}% share)</small>
-                                                        @endif
-                                                    </td>
-                                                    <td>
-                                                        <span class="badge-status {{ $statusClass }}">
-                                                            <i class="ri-checkbox-blank-circle-fill me-1" style="font-size: 6px;"></i>
-                                                            {{ ucfirst($inst->display_status) }}
-                                                        </span>
-                                                    </td>
-                                                </tr>
-                                            @empty
-                                                <tr>
-                                                    <td colspan="6" class="text-center py-3 text-muted">No installments generated yet.</td>
-                                                </tr>
-                                            @endforelse
-                                        </tbody>
-                                    </table>
-                                </div>
-                            </div>
-                        @endforeach
-                    </div>
-
-                    {{-- Individual Chit Sub-panes --}}
-                    @foreach($memberships as $membership)
-                        @php
-                            $memberId = $membership->id;
-                            $memberInsts = $byMember->get($memberId, collect());
-                            $group = $membership->group;
-                            if (!$group) continue;
-                            $seatLetter = $seatLetterMap[$memberId] ?? null;
-                            $paidCount = $memberInsts->where('display_status', 'paid')->count();
-                            $totalCount = $memberInsts->count();
-                            $progressPct = $totalCount > 0 ? round(($paidCount / $totalCount) * 100) : 0;
-
-                            $wonPayout = $membership->won_payout ?? null;
-                            $pendingPayout = $membership->pending_payout ?? null;
-                            $wonAuction = $membership->won_auction ?? null;
-                            $payoutsByMonth = $membership->payouts_by_month ?? collect();
-                            $auctionsByMonth = $membership->auctions_by_month ?? collect();
-                        @endphp
-
-                        <div class="tab-pane fade" id="chit-pane-{{ $memberId }}" role="tabpanel">
-                            <div class="schedule-card">
-                                <div class="schedule-card-header">
-                                    <div>
-                                        <div class="d-flex align-items-center gap-2 flex-wrap">
-                                            <span class="badge bg-primary px-2_5 py-1">Group: {{ $group->group_code }}</span>
-                                            @if($seatLetter)
-                                                <span class="badge bg-warning text-dark">Seat {{ $seatLetter }}</span>
-                                            @endif
-                                            @if(isset($membership->ownership_percentage) && $membership->ownership_percentage < 100)
-                                                <span class="badge bg-info text-white"><i class="ri-pie-chart-line me-1"></i>{{ round($membership->ownership_percentage) }}% Share</span>
-                                            @endif
-                                            <span class="fw-semibold text-dark">{{ $group->scheme->name ?? '' }}</span>
-
-                                            @if($wonPayout)
-                                                <span class="badge bg-success text-white shadow-sm d-inline-flex align-items-center gap-1 px-2.5 py-1">
-                                                    <i class="ri-trophy-fill text-warning"></i> Won (Month #{{ $wonPayout->month_number }}) - Settled
-                                                </span>
-                                            @elseif($pendingPayout)
-                                                <span class="badge bg-warning text-dark shadow-sm d-inline-flex align-items-center gap-1 px-2.5 py-1">
-                                                    <i class="ri-history-line"></i> Settlement Requested (Month #{{ $pendingPayout->month_number }})
-                                                </span>
-                                            @elseif($wonAuction)
-                                                <span class="badge bg-success text-white shadow-sm d-inline-flex align-items-center gap-1 px-2.5 py-1">
-                                                    <i class="ri-trophy-line text-warning"></i> Won Auction (Month #{{ $wonAuction->month_number }})
-                                                </span>
-                                            @endif
-                                        </div>
-                                        <small class="text-muted d-block mt-1">
-                                            @if(isset($membership->ownership_percentage) && $membership->ownership_percentage < 100)
-                                                Chit Value Share: <strong>₹{{ number_format($membership->client_chit_value ?? 0) }}</strong> ({{ round($membership->ownership_percentage) }}% Share of ₹{{ number_format($group->chit_value ?? 0) }}) | Monthly Share: <strong>₹{{ number_format($membership->client_monthly_amount ?? 0) }}</strong>
-                                            @else
-                                                Chit Value: ₹{{ number_format($group->chit_value ?? 0) }} | Monthly: ₹{{ number_format($group->installment_amount ?? 0) }}
-                                            @endif
-                                        </small>
-                                    </div>
-                                    <div class="text-end">
-                                        <span class="fw-bold text-success">{{ $paidCount }}/{{ $totalCount }} Paid</span>
-                                        <div class="progress-custom mt-1" style="width: 120px;">
-                                            <div class="progress-bar-custom" style="width: {{ $progressPct }}%;"></div>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                @if($wonPayout)
-                                    <div class="p-3 mx-4 mt-3 rounded-4 shadow-sm border-0 d-flex align-items-center justify-content-between flex-wrap gap-2" style="background: linear-gradient(135deg, #059669 0%, #10b981 100%); color: white;">
-                                        <div class="d-flex align-items-center gap-3">
-                                            <div class="rounded-circle bg-white text-success d-flex align-items-center justify-content-center flex-shrink-0" style="width: 42px; height: 42px;">
-                                                <i class="ri-trophy-fill fs-4 text-warning"></i>
-                                            </div>
-                                            <div>
-                                                <h6 class="mb-0 text-white fw-bold">Chit Settlement Completed &amp; Released</h6>
-                                                <small class="text-white-50">
-                                                    Month {{ $wonPayout->month_number }} Payout &bull; Gross Settlement: ₹{{ number_format((float) $wonPayout->payout_amount, 2) }}
-                                                    @if($wonPayout->net_payout_amount)
-                                                        &bull; Net Paid: <strong>₹{{ number_format((float) $wonPayout->net_payout_amount, 2) }}</strong>
-                                                    @endif
-                                                </small>
-                                            </div>
-                                        </div>
-                                        <span class="badge bg-white text-success fw-bold px-3 py-1_5 rounded-pill shadow-sm"><i class="ri-checkbox-circle-fill me-1"></i>Settlement Released</span>
-                                    </div>
-                                @elseif($pendingPayout)
-                                    <div class="p-3 mx-4 mt-3 rounded-4 shadow-sm border-0 d-flex align-items-center justify-content-between flex-wrap gap-2" style="background: linear-gradient(135deg, #d97706 0%, #f59e0b 100%); color: white;">
-                                        <div class="d-flex align-items-center gap-3">
-                                            <div class="rounded-circle bg-white text-warning d-flex align-items-center justify-content-center flex-shrink-0" style="width: 42px; height: 42px;">
-                                                <i class="ri-time-line fs-4 text-warning"></i>
-                                            </div>
-                                            <div>
-                                                <h6 class="mb-0 text-white fw-bold">Chit Settlement Application Under Review</h6>
-                                                <small class="text-white-50">
-                                                    Month {{ $pendingPayout->month_number }} Settlement Application Submitted &bull; Amount: ₹{{ number_format((float) $pendingPayout->payout_amount, 2) }}
-                                                </small>
-                                            </div>
-                                        </div>
-                                        <span class="badge bg-white text-dark fw-bold px-3 py-1_5 rounded-pill shadow-sm"><i class="ri-history-line me-1"></i>Application Pending</span>
-                                    </div>
-                                @endif
-
-                                <div class="table-responsive">
-                                    <table class="table table-custom">
-                                        <thead>
-                                            <tr>
-                                                <th>Period</th>
-                                                <th>Due Date</th>
-                                                <th>Amount</th>
-                                                <th>Paid</th>
-                                                <th>Payout Amount</th>
-                                                <th>Status</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            @forelse($memberInsts as $inst)
-                                                @php
-                                                    $statusClass = match($inst->display_status) {
-                                                        'paid' => 'paid',
-                                                        'overdue' => 'overdue',
-                                                        'pending' => 'pending',
-                                                        'partial' => 'partial',
-                                                        default => 'upcoming'
-                                                    };
-                                                    $freq = $group->installment_frequency ?? 'monthly';
-                                                    $periodLabel = match($freq) {
-                                                        'daily' => 'Day ' . $inst->month_number,
-                                                        'weekly' => 'Week ' . $inst->month_number,
-                                                        default => 'Month ' . $inst->month_number,
-                                                    };
-
-                                                    $monthPayout = $payoutsByMonth->get($inst->month_number);
-                                                    $monthAuction = $auctionsByMonth->get($inst->month_number);
-
-                                                    $rowStyle = '';
-                                                    if ($monthPayout) {
-                                                        if (in_array(strtolower($monthPayout->status ?? ''), ['paid', 'completed', 'disbursed'], true)) {
-                                                            $rowStyle = 'style="background-color: #ecfdf5;"';
-                                                        } elseif (in_array(strtolower($monthPayout->status ?? ''), ['pending', 'processing', 'submitted', 'requested'], true)) {
-                                                            $rowStyle = 'style="background-color: #fffbeb;"';
-                                                        }
-                                                    }
-                                                @endphp
-                                                <tr {!! $rowStyle !!}>
-                                                    <td class="fw-semibold">
-                                                        {{ $periodLabel }}
-                                                        @if($monthPayout)
-                                                            @if(in_array(strtolower($monthPayout->status ?? ''), ['paid', 'completed', 'disbursed'], true))
-                                                                <span class="badge bg-success text-white ms-1 shadow-sm px-2 py-0.5" style="font-size: 0.75rem;">
-                                                                    <i class="ri-trophy-fill text-warning me-1"></i> Won
-                                                                </span>
-                                                            @elseif(in_array(strtolower($monthPayout->status ?? ''), ['pending', 'processing', 'submitted', 'requested'], true))
-                                                                <span class="badge bg-warning text-dark ms-1 shadow-sm px-2 py-0.5" style="font-size: 0.75rem;">
-                                                                    <i class="ri-history-line me-1"></i> Settlement Requested
-                                                                </span>
-                                                            @else
-                                                                <span class="badge bg-info text-white ms-1 shadow-sm px-2 py-0.5" style="font-size: 0.75rem;">
-                                                                    <i class="ri-award-line me-1"></i> {{ ucfirst($monthPayout->status) }}
-                                                                </span>
-                                                            @endif
-                                                        @elseif($monthAuction)
-                                                            <span class="badge bg-success text-white ms-1 shadow-sm px-2 py-0.5" style="font-size: 0.75rem;">
-                                                                <i class="ri-trophy-line me-1"></i> Won
-                                                            </span>
-                                                        @endif
-                                                    </td>
-                                                    <td>{{ $inst->due_date ? $inst->due_date->format('d M Y') : '—' }}</td>
-                                                    @php
-                                                        $dispInstAmt2 = isset($inst->client_share_amount) ? (float)$inst->client_share_amount : (float)$inst->amount;
-                                                        $dispInstPaid2 = isset($inst->client_share_paid) ? (float)$inst->client_share_paid : (float)$inst->paid_amount;
-                                                        $instSharePct2 = (float) ($inst->ownership_percentage ?? $membership?->effective_share_percentage ?? 100);
-
-                                                        // If real payout/auction record exists, use it directly (already the correct amount for this member).
-                                                        // Only apply amountForClient() scaling for estimated amounts from the group schedule.
-                                                        if ($monthPayout?->payout_amount) {
-                                                            $dispPayoutAmt2 = (float) $monthPayout->payout_amount;
-                                                        } elseif ($monthAuction?->payout_amount) {
-                                                            $dispPayoutAmt2 = (float) $monthAuction->payout_amount;
-                                                        } else {
-                                                            $scheduledPayout2 = $group->getScheduledPayoutAmountForMonth($inst->month_number) ?? (float)$group->chit_value;
-                                                            $dispPayoutAmt2 = ($inst->member)
-                                                                ? $inst->member->amountForClient((float)$scheduledPayout2, (int)$client->id)
-                                                                : (float)$scheduledPayout2;
-                                                        }
-                                                    @endphp
-                                                    <td class="fw-bold">
-                                                        ₹{{ number_format($dispInstAmt2, 2) }}
-                                                        @if($instSharePct2 < 100)
-                                                            <small class="text-muted d-block font-normal" style="font-size: 0.7rem; font-weight: normal;">({{ rtrim(rtrim(number_format($instSharePct2, 2), '0'), '.') }}% share)</small>
-                                                        @endif
-                                                    </td>
-                                                    <td class="text-success">₹{{ number_format($dispInstPaid2, 2) }}</td>
-                                                    <td class="text-primary fw-semibold">
-                                                        {{ $dispPayoutAmt2 ? '₹' . number_format($dispPayoutAmt2, 2) : '—' }}
-                                                        @if($instSharePct2 < 100)
-                                                            <small class="text-muted d-block font-normal" style="font-size: 0.7rem; font-weight: normal;">({{ rtrim(rtrim(number_format($instSharePct2, 2), '0'), '.') }}% share)</small>
-                                                        @endif
-                                                    </td>
-                                                    <td>
-                                                        <span class="badge-status {{ $statusClass }}">
-                                                            <i class="ri-checkbox-blank-circle-fill me-1" style="font-size: 6px;"></i>
-                                                            {{ ucfirst($inst->display_status) }}
-                                                        </span>
-                                                    </td>
-                                                </tr>
-                                            @empty
-                                                <tr>
-                                                    <td colspan="6" class="text-center py-3 text-muted">No installments generated yet.</td>
-                                                </tr>
-                                            @endforelse
-                                        </tbody>
-                                    </table>
-                                </div>
-                            </div>
-                        </div>
-                    @endforeach
-                </div>
-            </div>
-            @endif
 
             {{-- ── TAB 3: LOANS TAB PANE ── --}}
             @if($summary['has_loans'])
@@ -1264,29 +748,6 @@
     <!-- Bootstrap Bundle JS -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
     <script>
-        function switchToChitTab(paneId) {
-            var chitTabBtn = document.getElementById('tab-chits-btn');
-            if (chitTabBtn) {
-                var tab = bootstrap.Tab.getOrCreateInstance(chitTabBtn);
-                tab.show();
-            }
-            var subBtn = document.getElementById('btn-' + paneId);
-            if (subBtn) {
-                var subTab = bootstrap.Tab.getOrCreateInstance(subBtn);
-                subTab.show();
-            } else {
-                var targetPane = document.getElementById(paneId);
-                if (targetPane) {
-                    var container = targetPane.closest('.tab-content');
-                    if (container) {
-                        container.querySelectorAll(':scope > .tab-pane').forEach(function(el) {
-                            el.classList.remove('show', 'active');
-                        });
-                    }
-                    targetPane.classList.add('show', 'active');
-                }
-            }
-        }
 
         function switchToLoanTab(paneId) {
             var loanTabBtn = document.getElementById('tab-loans-btn');

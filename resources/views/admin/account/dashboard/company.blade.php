@@ -6,22 +6,20 @@
 @php
   $cash = $cashBook ?? [];
   $loanRows = $loanByClient ?? collect();
-  $chitRows = $chitByClient ?? collect();
   $fdRows = $fdByClient ?? collect();
   $loanTot = $loanTotals ?? ['credit' => 0, 'debit' => 0, 'clients' => 0];
-  $chitTot = $chitTotals ?? ['credit' => 0, 'debit' => 0, 'clients' => 0];
   $fdTot = $fdTotals ?? ['credit' => 0, 'debit' => 0, 'clients' => 0];
   $perPage = $perPage ?? 25;
   $perPageOptions = $perPageOptions ?? [25, 75, 100, 250, 500];
   $activeTab = request('tab', 'loan');
-  if (! in_array($activeTab, ['loan', 'chit', 'fd'], true)) {
+  if (! in_array($activeTab, ['loan', 'fd'], true)) {
       $activeTab = 'loan';
   }
 @endphp
 <div class="account-module">
   @include('admin.account.shared.page-header', [
     'title' => __('Accounting Dashboard Management'),
-    'subtitle' => __('Bank, cash, loan, chit & fixed deposit money flow'),
+    'subtitle' => __('Bank, cash, loan & fixed deposit money flow'),
     'toolbar' => '<button type="button" class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#bankAccountModal"><i class="ri-bank-line me-1"></i>' . e(__('Add Bank')) . '</button>
       <a href="' . e(route('account.bank-accounts.index')) . '" class="btn btn-sm btn-outline-primary"><i class="ri-bank-line me-1"></i>' . e(__('Bank Accounts')) . '</a>
       <a href="' . e(route('account.bank-transactions.index')) . '" class="btn btn-sm btn-outline-secondary"><i class="ri-exchange-line me-1"></i>' . e(__('Transactions')) . '</a>
@@ -113,22 +111,6 @@
         <li class="nav-item" role="presentation">
           <button
             type="button"
-            class="nav-link {{ $activeTab === 'chit' ? 'active' : '' }}"
-            id="tab-chit-btn"
-            data-bs-toggle="tab"
-            data-bs-target="#tab-chit"
-            role="tab"
-            aria-controls="tab-chit"
-            aria-selected="{{ $activeTab === 'chit' ? 'true' : 'false' }}"
-            onclick="if (window.history && history.replaceState) { const u = new URL(window.location.href); u.searchParams.set('tab','chit'); history.replaceState({}, '', u); }"
-          >
-            <i class="ri-group-line me-1"></i>{{ __('Chit') }}
-            <span class="badge bg-label-success ms-1">{{ number_format($chitTot['clients'] ?? 0) }}</span>
-          </button>
-        </li>
-        <li class="nav-item" role="presentation">
-          <button
-            type="button"
             class="nav-link {{ $activeTab === 'fd' ? 'active' : '' }}"
             id="tab-fd-btn"
             data-bs-toggle="tab"
@@ -209,67 +191,7 @@
           ])
   </div>
 
-        {{-- Chit tab --}}
-        <div class="tab-pane fade {{ $activeTab === 'chit' ? 'show active' : '' }}" id="tab-chit" role="tabpanel" aria-labelledby="tab-chit-btn">
-          <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
-            <div>
-              <h6 class="mb-0">{{ __('Client-wise chit credit & debit') }}</h6>
-              <small class="text-muted">{{ __('Credit = installments · Debit = payouts') }}</small>
-      </div>
-            <a href="{{ route('account.chit-accounts.index') }}" class="btn btn-sm btn-outline-success">{{ __('View all chits') }}</a>
-      </div>
-          <div class="row g-3 mb-3">
-            <div class="col-sm-6">
-              <div class="border rounded p-3 h-100">
-                <span class="d-block text-muted small">{{ __('Total credit') }}</span>
-                <h4 class="mb-0 acc-credit">₹{{ number_format((float) ($chitTot['credit'] ?? 0), 2) }}</h4>
-      </div>
-    </div>
-            <div class="col-sm-6">
-              <div class="border rounded p-3 h-100">
-                <span class="d-block text-muted small">{{ __('Total debit') }}</span>
-                <h4 class="mb-0 acc-debit">₹{{ number_format((float) ($chitTot['debit'] ?? 0), 2) }}</h4>
-      </div>
-    </div>
-  </div>
-          <div class="table-responsive">
-            <table class="account-datatable table table-hover">
-              <thead>
-                <tr>
-                  <th>{{ __('Client') }}</th>
-                  <th class="text-end acc-credit">{{ __('Credit') }}</th>
-                  <th class="text-end acc-debit">{{ __('Debit') }}</th>
-                </tr>
-              </thead>
-              <tbody>
-                @forelse($chitRows as $row)
-                  <tr>
-                    <td><span class="acc-name">{{ $row->client_name }}</span></td>
-                    <td class="text-end acc-credit {{ ((float) $row->credit) <= 0 ? 'is-zero' : '' }}">₹{{ number_format((float) $row->credit, 2) }}</td>
-                    <td class="text-end acc-debit {{ ((float) $row->debit) <= 0 ? 'is-zero' : '' }}">₹{{ number_format((float) $row->debit, 2) }}</td>
-                  </tr>
-                @empty
-                  <tr><td colspan="3" class="text-center text-muted py-4">{{ __('No chit credit / debit yet') }}</td></tr>
-                @endforelse
-              </tbody>
-              @if(method_exists($chitRows, 'isNotEmpty') ? $chitRows->isNotEmpty() : $chitRows->count())
-                <tfoot>
-                  <tr class="fw-semibold">
-                    <td>{{ __('Total (all clients)') }}</td>
-                    <td class="text-end acc-credit">₹{{ number_format((float) ($chitTot['credit'] ?? 0), 2) }}</td>
-                    <td class="text-end acc-debit">₹{{ number_format((float) ($chitTot['debit'] ?? 0), 2) }}</td>
-                  </tr>
-                </tfoot>
-              @endif
-            </table>
-          </div>
-          @include('admin.account.shared.flow-pagination', [
-            'tab' => 'chit',
-            'paginator' => $chitRows,
-            'perPage' => $perPage,
-            'perPageOptions' => $perPageOptions,
-          ])
-        </div>
+
 
         {{-- FD tab --}}
         <div class="tab-pane fade {{ $activeTab === 'fd' ? 'show active' : '' }}" id="tab-fd" role="tabpanel" aria-labelledby="tab-fd-btn">

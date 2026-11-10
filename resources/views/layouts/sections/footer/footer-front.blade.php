@@ -71,14 +71,41 @@
   <div class="footer-bottom py-5">
     <div class="container d-flex flex-wrap justify-content-between flex-md-row flex-column text-center text-md-start">
       <div class="mb-2 mb-md-0">
-        <span class="footer-bottom-text"
-          >©
-          <script>
-            document.write(new Date().getFullYear());
-          </script>
-          , Made with <i class="icon-base ri ri-heart-fill text-danger"></i> by
-        </span>
-        <a href="{{config('variables.creatorUrl')}}" target="_blank" class="footer-link fw-medium footer-theme-link">{{config('variables.creatorName')}}</a>
+        @php
+          $footerTextFront = \App\Helpers\SettingsHelper::get('footer_text');
+          $footerLinkTextFront = \App\Helpers\SettingsHelper::get('footer_link_text');
+          $footerLinkUrlFront = \App\Helpers\SettingsHelper::get('footer_link_url');
+          $footerCustomNoteFront = \App\Helpers\SettingsHelper::get('footer_custom_note');
+
+          if ($footerTextFront) {
+              $footerTextFront = str_ireplace(['{year}', '{{year}}'], date('Y'), $footerTextFront);
+          }
+          if ($footerCustomNoteFront) {
+              $footerCustomNoteFront = str_ireplace(['{year}', '{{year}}'], date('Y'), $footerCustomNoteFront);
+          }
+
+          $hasDynamicFooterFront = !empty(trim($footerTextFront ?? '')) || !empty(trim($footerLinkTextFront ?? '')) || !empty(trim($footerCustomNoteFront ?? ''));
+        @endphp
+        @if($hasDynamicFooterFront)
+          <span>{!! !empty(trim($footerTextFront ?? '')) ? $footerTextFront : ('&#169; ' . date('Y')) !!}</span>
+          @if(!empty(trim($footerLinkTextFront ?? '')))
+            <a href="{{ !empty(trim($footerLinkUrlFront ?? '')) ? $footerLinkUrlFront : 'javascript:void(0);' }}"
+               @if(!empty(trim($footerLinkUrlFront ?? '')) && !str_starts_with($footerLinkUrlFront, 'javascript')) target="_blank" @endif
+               class="footer-link fw-medium ms-1">{{ $footerLinkTextFront }}</a>
+          @endif
+          @if(!empty(trim($footerCustomNoteFront ?? '')))
+            <span class="ms-1">{{ $footerCustomNoteFront }}</span>
+          @endif
+        @else
+          <span class="footer-bottom-text"
+            >©
+            <script>
+              document.write(new Date().getFullYear());
+            </script>
+            , Made with <i class="icon-base ri ri-heart-fill text-danger"></i> by
+          </span>
+          <a href="{{config('variables.creatorUrl')}}" target="_blank" class="footer-link fw-medium footer-theme-link">{{config('variables.creatorName')}}</a>
+        @endif
       </div>
       <div>
         <a href="{{config('variables.githubFreeUrl')}}" class="footer-link me-4" target="_blank"><i class="icon-base ri ri-github-fill"></i></a>

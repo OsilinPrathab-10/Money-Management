@@ -22,7 +22,7 @@ class BankTransactionController extends Controller
         $validated = $request->validate([
             'bank_account_id' => 'nullable|integer',
             'transaction_type' => 'nullable|string|in:credit,debit',
-            'module_tag' => 'nullable|string|in:all,CHIT,LOAN,FD,TRANSFER,OTHER',
+            'module_tag' => 'nullable|string|in:all,LOAN,FD,TRANSFER,OTHER',
             'entry_tag' => 'nullable|string|max:40',
             'search' => 'nullable|string|max:255',
             'date_preset' => 'nullable|string|max:50',
@@ -146,7 +146,7 @@ class BankTransactionController extends Controller
             'format' => 'required|in:pdf,csv,xlsx',
             'bank_account_id' => 'nullable|integer',
             'transaction_type' => 'nullable|string|max:50',
-            'module_tag' => 'nullable|string|in:all,CHIT,LOAN,FD,TRANSFER,OTHER',
+            'module_tag' => 'nullable|string|in:all,LOAN,FD,TRANSFER,OTHER',
             'entry_tag' => 'nullable|string|max:40',
             'search' => 'nullable|string|max:255',
             'date_preset' => 'nullable|string|max:50',

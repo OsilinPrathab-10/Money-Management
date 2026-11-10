@@ -66,7 +66,6 @@ class MobileAppManagementController extends Controller
             'splash_image' => 'nullable|image|mimes:jpeg,png,jpg,gif,svg,webp|max:4096',
             'banner_images.*' => 'nullable|image|mimes:jpeg,png,jpg,gif,svg,webp|max:4096',
             'loan_banner_images.*' => 'nullable|image|mimes:jpeg,png,jpg,gif,svg,webp|max:4096',
-            'chit_banner_images.*' => 'nullable|image|mimes:jpeg,png,jpg,gif,svg,webp|max:4096',
             'fd_banner_images.*' => 'nullable|image|mimes:jpeg,png,jpg,gif,svg,webp|max:4096',
         ];
 
@@ -77,7 +76,6 @@ class MobileAppManagementController extends Controller
                 'background_color' => 'required|string|max:20',
                 'overview_tab_color' => 'nullable|string|max:20',
                 'loan_tab_color' => 'nullable|string|max:20',
-                'chit_tab_color' => 'nullable|string|max:20',
                 'fixed_deposit_tab_color' => 'nullable|string|max:20',
                 'theme_mode' => 'required|in:light,dark,system',
                 'welcome_message' => 'nullable|string|max:1000',
@@ -117,9 +115,6 @@ class MobileAppManagementController extends Controller
         $setting->loan_banner_images = $this->appendBannerUploads(
             $request, 'loan_banner_images', is_array($setting->loan_banner_images) ? $setting->loan_banner_images : [], $uploadPath, $dbAppType, 'loan_banner'
         );
-        $setting->chit_banner_images = $this->appendBannerUploads(
-            $request, 'chit_banner_images', is_array($setting->chit_banner_images) ? $setting->chit_banner_images : [], $uploadPath, $dbAppType, 'chit_banner'
-        );
         $setting->fd_banner_images = $this->appendBannerUploads(
             $request, 'fd_banner_images', is_array($setting->fd_banner_images) ? $setting->fd_banner_images : [], $uploadPath, $dbAppType, 'fd_banner'
         );
@@ -130,7 +125,6 @@ class MobileAppManagementController extends Controller
             $setting->background_color = $request->input('background_color');
             $setting->overview_tab_color = $request->input('overview_tab_color', '#696CFF');
             $setting->loan_tab_color = $request->input('loan_tab_color', '#00CFDD');
-            $setting->chit_tab_color = $request->input('chit_tab_color', '#7367F0');
             $setting->fixed_deposit_tab_color = $request->input('fixed_deposit_tab_color', '#FF4C51');
             $setting->theme_mode = $request->input('theme_mode');
             $setting->welcome_message = $request->input('welcome_message');
@@ -154,7 +148,6 @@ class MobileAppManagementController extends Controller
         $group = $request->input('banner_group', 'overview');
         $column = match ($group) {
             'loan' => 'loan_banner_images',
-            'chit' => 'chit_banner_images',
             'fd' => 'fd_banner_images',
             default => 'banner_images',
         };

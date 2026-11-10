@@ -63,9 +63,6 @@ class ClientManagementController extends Controller
     $loanProducts = \App\Models\LoanProduct::where('status', 'active')->get();
     $activePaymentMethods = \App\Models\PaymentMethod::where('is_enabled', true)->get();
     $activeGateways = \App\Models\PaymentGateway::where('enabled', true)->get();
-    $availableGroups = \App\Models\ChitGroup::with('scheme')
-        ->whereIn('status', ['forming', 'active'])
-        ->get();
     $fdSchemes = \App\Models\FixedDepositScheme::active()->orderBy('name')->get();
     $payoutOptions = \App\Models\FixedDepositScheme::payoutOptions();
 
@@ -82,7 +79,6 @@ class ClientManagementController extends Controller
       'loanProducts' => $loanProducts,
       'activePaymentMethods' => $activePaymentMethods,
       'activeGateways' => $activeGateways,
-      'availableGroups' => $availableGroups,
       'fdSchemes' => $fdSchemes,
       'payoutOptions' => $payoutOptions
     ]);
@@ -313,7 +309,7 @@ class ClientManagementController extends Controller
         return response()->json([
           'success' => false,
           'blocked' => true,
-          'message' => 'Cannot delete selected client(s). They have active loan(s) and/or active chit membership(s): '
+          'message' => 'Cannot delete selected client(s). They have active loan(s): '
             . implode(', ', $blocked) . '. Close those accounts first.',
         ], 422);
       }
@@ -322,7 +318,7 @@ class ClientManagementController extends Controller
 
       $message = "Successfully deleted {$count} client(s).";
       if (!empty($blocked)) {
-        $message .= ' Skipped (active loan/chit): ' . implode(', ', $blocked) . '.';
+        $message .= ' Skipped (active loan): ' . implode(', ', $blocked) . '.';
       }
 
       return response()->json([
@@ -382,12 +378,6 @@ class ClientManagementController extends Controller
                 ->orWhereHas('loanApplication.product', fn($p) => $p->where('loan_mode', 'interest_only'));
             });
         },
-        'groupMembers as group_members_count' => function ($q) {
-          $q->whereNotIn('status', \App\Models\GroupMember::INACTIVE_STATUSES)
-            ->whereHas('group', function ($gq) {
-              $gq->where('status', '!=', 'completed');
-            });
-        },
       ]);
 
       // Filter by agent if applicable
@@ -417,7 +407,7 @@ class ClientManagementController extends Controller
       if ($request->filled('status')) {
         $query->where('status', $request->status);
       }
-      // Account type filter (EMI / Open Loan / Chit)
+      // Account type filter (EMI / Open Loan)
       if ($request->filled('account_type')) {
         $accountType = $request->input('account_type');
         if ($accountType === 'emi') {
@@ -438,13 +428,6 @@ class ClientManagementController extends Controller
                   ->orWhereHas('loanApplication.product', fn($p) => $p->where('loan_mode', 'interest_only'));
               });
           });
-        } elseif ($accountType === 'chit') {
-          $query->whereHas('groupMembers', function ($q) {
-            $q->whereNotIn('status', \App\Models\GroupMember::INACTIVE_STATUSES)
-              ->whereHas('group', function ($gq) {
-                $gq->where('status', '!=', 'completed');
-              });
-          });
         } elseif ($accountType === 'any_loan') {
           $query->whereHas('loanAccounts', function ($q) {
             $q->where('status', '!=', 'closed');
@@ -452,11 +435,6 @@ class ClientManagementController extends Controller
         } elseif ($accountType === 'no_accounts') {
           $query->whereDoesntHave('loanAccounts', function ($q) {
             $q->where('status', '!=', 'closed');
-          })->whereDoesntHave('groupMembers', function ($q) {
-            $q->whereNotIn('status', \App\Models\GroupMember::INACTIVE_STATUSES)
-              ->whereHas('group', function ($gq) {
-                $gq->where('status', '!=', 'completed');
-              });
           });
         }
       }
@@ -498,7 +476,6 @@ class ClientManagementController extends Controller
           'loans_count' => $client->loan_accounts_count ?? 0,
           'emi_count' => $client->emi_accounts_count ?? 0,
           'open_loan_count' => $client->open_loan_accounts_count ?? 0,
-          'chits_count' => $client->group_members_count ?? 0,
           'status' => $client->status ?? 'inactive',
           'agent_name' => $client->agent ? $client->agent->agent_name : null,
           'added_by_name' => $client->creator ? $client->creator->agent_name : 'Admin',
@@ -1722,7 +1699,7 @@ class ClientManagementController extends Controller
   }
 
   /**
-   * List loan accounts or chit memberships for the client penalty popup.
+   * List loan accounts for the client penalty popup.
    */
   public function penaltyAccounts(Request $request, Client $client): JsonResponse
   {
@@ -1730,58 +1707,19 @@ class ClientManagementController extends Controller
       return response()->json(['success' => false, 'message' => 'Unauthorized.'], 403);
     }
 
-    $type = $request->query('type', 'loan');
-    if (! in_array($type, ['loan', 'chit'], true)) {
-      return response()->json(['success' => false, 'message' => 'Invalid type. Use loan or chit.'], 422);
-    }
-
-    if ($type === 'loan') {
-      $accounts = $client->loanAccounts()
-        ->orderByDesc('id')
-        ->get()
-        ->map(function ($account) {
-          return [
-            'id' => $account->id,
-            'label' => $account->account_number ?: ('Loan #' . $account->id),
-            'status' => $account->status,
-            'amount' => (float) ($account->loan_amount ?? 0),
-            'outstanding' => (float) ($account->outstanding_amount ?? 0),
-            'penalty' => (float) ($account->penalty ?? 0),
-            'penalty_type' => ($account->penalty_type === 'percentage') ? 'percentage' : 'fixed',
-            'grace_period_days' => (int) ($account->grace_period_days ?? 0),
-          ];
-        })
-        ->values();
-
-      return response()->json([
-        'success' => true,
-        'client_name' => $client->client_name,
-        'type' => 'loan',
-        'accounts' => $accounts,
-      ]);
-    }
-
-    $memberships = \App\Models\GroupMember::involvingClient($client->id)
-      ->whereNotIn('status', \App\Models\GroupMember::INACTIVE_STATUSES)
-      ->with('group')
+    $accounts = $client->loanAccounts()
       ->orderByDesc('id')
       ->get()
-      ->map(function ($member) use ($client) {
-        $groupCode = $member->group?->group_code ?? 'CHT';
-        $memberLabel = $member->memberNumberForClient((int) $client->id);
-
+      ->map(function ($account) {
         return [
-          'id' => $member->id,
-          'label' => $groupCode . ' · Member #' . $memberLabel,
-          'group_name' => $member->group?->group_code ?? '—',
-          'status' => $member->status,
-          'amount' => (float) ($member->group?->chit_value ?? 0),
-          'penalty_enabled' => (bool) ($member->penalty_enabled ?? false),
-          'penalty' => (float) ($member->penalty_value ?? 0),
-          'penalty_type' => $member->penalty_type ?: 'fixed',
-          'grace_period_days' => $member->penalty_grace_days !== null
-            ? (int) $member->penalty_grace_days
-            : null,
+          'id' => $account->id,
+          'label' => $account->account_number ?: ('Loan #' . $account->id),
+          'status' => $account->status,
+          'amount' => (float) ($account->loan_amount ?? 0),
+          'outstanding' => (float) ($account->outstanding_amount ?? 0),
+          'penalty' => (float) ($account->penalty ?? 0),
+          'penalty_type' => ($account->penalty_type === 'percentage') ? 'percentage' : 'fixed',
+          'grace_period_days' => (int) ($account->grace_period_days ?? 0),
         ];
       })
       ->values();
@@ -1789,8 +1727,8 @@ class ClientManagementController extends Controller
     return response()->json([
       'success' => true,
       'client_name' => $client->client_name,
-      'type' => 'chit',
-      'accounts' => $memberships,
+      'type' => 'loan',
+      'accounts' => $accounts,
     ]);
   }
 
@@ -1843,59 +1781,6 @@ class ClientManagementController extends Controller
       return response()->json([
         'success' => false,
         'message' => 'Failed to apply loan penalty: ' . $e->getMessage(),
-      ], 500);
-    }
-  }
-
-  /**
-   * Apply fixed/% penalty to one chit membership (settings + overdue installments).
-   */
-  public function applyChitPenalty(Request $request): JsonResponse
-  {
-    if (! $this->canManageClientPenalties()) {
-      return response()->json(['success' => false, 'message' => 'Unauthorized.'], 403);
-    }
-
-    $validated = $request->validate([
-      'group_member_id' => 'required|integer|exists:group_members,id',
-      'penalty_type' => 'required|in:fixed,percentage',
-      'penalty_value' => 'required|numeric|min:0',
-      'grace_period_days' => 'nullable|integer|min:0',
-    ]);
-
-    if ($validated['penalty_type'] === 'percentage' && (float) $validated['penalty_value'] > 100) {
-      return response()->json([
-        'success' => false,
-        'message' => 'Percentage penalty cannot exceed 100%.',
-      ], 422);
-    }
-
-    $member = \App\Models\GroupMember::findOrFail($validated['group_member_id']);
-
-    try {
-      $result = app(\App\Services\ClientPenaltyService::class)->applyChitPenalty(
-        $member,
-        $validated['penalty_type'],
-        (float) $validated['penalty_value'],
-        array_key_exists('grace_period_days', $validated) ? (int) $validated['grace_period_days'] : null
-      );
-
-      return response()->json([
-        'success' => true,
-        'message' => $result['updated_installments'] > 0
-          ? "Penalty applied to {$result['updated_installments']} overdue installment(s)."
-          : 'Penalty settings saved. No overdue installments past grace period.',
-        'data' => $result,
-      ]);
-    } catch (\Throwable $e) {
-      Log::error('Client chit penalty apply failed', [
-        'group_member_id' => $member->id,
-        'error' => $e->getMessage(),
-      ]);
-
-      return response()->json([
-        'success' => false,
-        'message' => 'Failed to apply chit penalty: ' . $e->getMessage(),
       ], 500);
     }
   }

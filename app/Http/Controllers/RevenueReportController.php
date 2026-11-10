@@ -14,7 +14,7 @@ class RevenueReportController extends Controller
     }
 
     /**
-     * Index view for tab-wise revenue report (Loan / Chit / Fixed Deposit).
+     * Index view for tab-wise revenue report (Loan / Fixed Deposit).
      */
     public function index(Request $request)
     {
@@ -28,7 +28,6 @@ class RevenueReportController extends Controller
         ];
 
         $report = match ($tab) {
-            'chit' => $this->reportService->chitReport($filters),
             'fd' => $this->reportService->fdReport($filters),
             default => $this->reportService->loanReport($filters),
         };
@@ -46,7 +45,6 @@ class RevenueReportController extends Controller
 
         if ($request->ajax()) {
             $partial = match ($tab) {
-                'chit' => 'admin.revenue.chit-table',
                 'fd' => 'admin.revenue.fd-table',
                 default => 'admin.revenue.table',
             };
@@ -73,13 +71,11 @@ class RevenueReportController extends Controller
         ];
 
         $data = match ($tab) {
-            'chit' => $this->reportService->chitExportRows($filters),
             'fd' => $this->reportService->fdExportRows($filters),
             default => $this->reportService->loanExportRows($filters),
         };
 
         $filename = match ($tab) {
-            'chit' => 'chit_revenue_report',
             'fd' => 'fd_revenue_report',
             default => 'loan_revenue_report',
         };
@@ -89,13 +85,12 @@ class RevenueReportController extends Controller
 
     private function resolveTab(?string $tab): string
     {
-        return in_array($tab, ['loan', 'chit', 'fd'], true) ? $tab : 'loan';
+        return in_array($tab, ['loan', 'fd'], true) ? $tab : 'loan';
     }
 
     private function exportData($data, $filename, $format = 'csv', string $tab = 'loan')
     {
         $title = match ($tab) {
-            'chit' => 'Chit Revenue Report',
             'fd' => 'Fixed Deposit Revenue Report',
             default => 'Loan Revenue Report',
         };

@@ -46,10 +46,10 @@
               </div>
 
               <div class="sds-app-actions">
-                <span class="sds-app-action" data-app-action="chit"><i class="ri-group-line"></i>Chit</span>
-                <span class="sds-app-action"><i class="ri-bank-line"></i>Loan</span>
+                <span class="sds-app-action" data-app-action="loan"><i class="ri-bank-line"></i>Loan</span>
                 <span class="sds-app-action"><i class="ri-safe-2-line"></i>FD</span>
-                <span class="sds-app-action"><i class="ri-bank-card-line"></i>Cards</span>
+                <span class="sds-app-action"><i class="ri-wallet-3-line"></i>Savings</span>
+                <span class="sds-app-action"><i class="ri-funds-line"></i>Invest</span>
               </div>
 
               <div class="sds-app-section">Recent Activity <span>See all</span></div>
@@ -57,7 +57,7 @@
                 <div class="sds-activity-row">
                   <i class="ri-hand-coin-line t-orange"></i>
                   <div>
-                    <div class="sds-activity-name">Chit Due · M8</div>
+                    <div class="sds-activity-name">EMI Due · #8</div>
                     <div class="sds-activity-date">Today</div>
                   </div>
                   <span class="sds-activity-amt wait">₹5,000</span>
@@ -81,7 +81,7 @@
               </div>
             </div>
 
-            {{-- 2. Pay chit due --}}
+            {{-- 2. Pay due --}}
             <div class="sds-app-view" data-view="pay">
               <div class="sds-app-top">
                 <i class="ri-arrow-left-s-line"></i>
@@ -90,12 +90,12 @@
               </div>
 
               <div class="sds-due-card">
-                <div class="sds-due-kicker">Chit collection</div>
-                <div class="sds-due-title">Group GR-2026-04</div>
-                <div class="sds-due-meta">Installment #8 · Due today</div>
+                <div class="sds-due-kicker">Loan EMI collection</div>
+                <div class="sds-due-title">Loan LN-2026-04</div>
+                <div class="sds-due-meta">EMI #8 · Due today</div>
                 <div class="sds-due-amt">₹ 5,000</div>
                 <div class="sds-due-progress" aria-hidden="true"><span></span></div>
-                <div class="sds-due-meta">3 of 5 months paid</div>
+                <div class="sds-due-meta">3 of 5 EMIs paid</div>
               </div>
 
               <div class="sds-activity">
@@ -118,7 +118,7 @@
                 <span class="sds-success-mark"><i class="ri-check-line"></i></span>
                 <h4>Payment sent</h4>
                 <strong>₹ 5,000</strong>
-                <p>Chit Inst #8 collected.<br>Status: In progress</p>
+                <p>Loan EMI #8 collected.<br>Status: In progress</p>
               </div>
               <div class="sds-activity">
                 <div class="sds-activity-row">

@@ -195,8 +195,7 @@ $(function () {
 
     $('#receiptPreviewModalTitle').text(title);
     $('#modalOpenReceiptBtn').attr('href', url);
-    $('#receiptPreviewSpinner').show();
-    $('#receiptPreviewFrame').hide().attr('src', url);
+    $('#receiptPreviewFrame').attr('src', url);
 
     const modalEl = document.getElementById('receiptPreviewModal');
     if (modalEl && window.bootstrap) {

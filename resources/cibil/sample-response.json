@@ -1,0 +1,62 @@
+{
+  "success": true,
+  "status_code": 200,
+  "message": "Multi bureau fetch completed (mock)",
+  "data": {
+    "pan": "ABCDE1234F",
+    "doc_id": "mbureau_mock_sample",
+    "pdf_url": "https://example.com/consolidated.pdf",
+    "results": {
+      "cibil": {
+        "success": true,
+        "message": "cibil report fetched successfully",
+        "credit_report_link": "https://example.com/signed-transunion.pdf",
+        "data": {
+          "name": "DEMO APPLICANT",
+          "mobile": "9876543210",
+          "pan": "ABCDE1234F",
+          "gender": "male",
+          "user_email": "demo@example.com",
+          "credit_score": "720",
+          "credit_report_link": "https://example.com/signed-transunion.pdf",
+          "credit_report": [
+            {
+              "names": [{"name": "DEMO APPLICANT", "birthDate": "1990-01-15", "gender": "Male"}],
+              "scores": [{"score": "720", "scoreName": "CIBILTUSC3", "scoreDate": "2026-01-01"}],
+              "enquiries": [{"enquiryDate": "2025-06-01", "memberShortName": "DEMO BANK", "enquiryAmount": "100000"}],
+              "accounts": []
+            }
+          ]
+        }
+      }
+    },
+    "analysis": {
+      "scores": {
+        "cibil": {"value": 720, "rating": "Good", "available": true}
+      },
+      "summary": {
+        "total_accounts": 2,
+        "active_accounts": 1,
+        "closed_accounts": 1,
+        "total_current_balance": 50000,
+        "total_past_due": 0,
+        "total_sanctioned": 200000,
+        "accounts_with_overdue": 0,
+        "credit_utilization": 25,
+        "on_time_payment_rate": 98.5
+      },
+      "inquiry_summary": {"last_90_days": 1},
+      "inquiries": [{"date": "2025-06-01", "lender": "DEMO BANK", "amount": "100000"}],
+      "observations": [{"type": "info", "text": "Mock sample data — enable live API in .env."}],
+      "account_summary": [],
+      "personal_info": {
+        "name": "DEMO APPLICANT",
+        "pan": "ABCDE1234F",
+        "mobile": "9876543210",
+        "email": "demo@example.com",
+        "dob": "1990-01-15",
+        "gender": "male"
+      }
+    }
+  }
+}

@@ -53,55 +53,7 @@ class LoanPortfolioController extends Controller
         ]);
     }
 
-    /**
-     * List chit memberships (group_members) for the accounting dashboard.
-     */
-    public function chitAccounts(Request $request)
-    {
-        abort_unless(
-            Auth::user()->can('manage-account-dashboard')
-                || Auth::user()->can('view-account-loan-accounts'),
-            403
-        );
 
-        $query = \App\Models\GroupMember::accounts()
-            ->with(['client', 'group.scheme'])
-            ->latest('id');
-
-        if ($request->filled('status')) {
-            $query->where('status', (string) $request->input('status'));
-        }
-
-        if ($request->filled('search')) {
-            $s = '%' . (string) $request->input('search') . '%';
-            $query->where(function ($q) use ($s) {
-                $q->where('member_number', 'like', $s)
-                    ->orWhereHas('group', function ($gq) use ($s) {
-                        $gq->where('group_code', 'like', $s);
-                    })
-                    ->orWhereHas('client', function ($cq) use ($s) {
-                        $cq->where(function ($inner) use ($s) {
-                            $inner->where('client_name', 'like', $s)
-                                ->orWhere('client_phone', 'like', $s);
-                        });
-                    })
-                    ->orWhereHas('shares.client', function ($cq) use ($s) {
-                        $cq->where(function ($inner) use ($s) {
-                            $inner->where('client_name', 'like', $s)
-                                ->orWhere('client_phone', 'like', $s);
-                        });
-                    });
-            });
-        }
-
-        $chitAccounts = $query
-            ->paginate((int) $request->get('per_page', 20))
-            ->withQueryString();
-
-        return view('admin.account.loan-portfolio.chit-accounts', [
-            'chitAccounts' => $chitAccounts,
-        ]);
-    }
 
     /**
      * List fixed deposits for the accounting dashboard.

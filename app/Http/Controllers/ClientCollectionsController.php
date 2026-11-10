@@ -6,9 +6,8 @@ use App\Http\Controllers\EmiController;
 use App\Models\Client;
 use App\Models\CompanyDetail;
 use App\Models\Emi;
-use App\Models\GroupMember;
-use App\Models\Installment;
 use App\Models\LoanAccount;
+use App\Models\CollectionNote;
 use App\Support\HashId;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
@@ -16,6 +15,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\View\View;
 
 class ClientCollectionsController extends Controller
@@ -33,8 +33,8 @@ class ClientCollectionsController extends Controller
     public function data(Request $request): JsonResponse
     {
         $module = $request->input('module', 'all');
-        if (! in_array($module, ['all', 'loan', 'chit'], true)) {
-            $module = 'all';
+        if (! in_array($module, ['all', 'loan'], true)) {
+            $module = 'loan';
         }
 
         $status = $request->input('status', 'all');
@@ -68,7 +68,7 @@ class ClientCollectionsController extends Controller
         $fromDate = $this->dateOrNull($request->input('from_date'));
         $toDate = $this->dateOrNull($request->input('to_date'));
 
-        // Query accounts matching filters (each LoanAccount or Chit Group Member Seat is a separate row)
+        // Query accounts matching filters (each LoanAccount is a separate row)
         $accounts = $this->queryMatchingAccounts($module, $status, $today, $agentId, $search, $fromDate, $toDate);
 
         $total = $accounts->count();
@@ -76,7 +76,6 @@ class ClientCollectionsController extends Controller
 
         // Collect IDs for bulk preloading
         $pageLoanIds = $pageAccounts->where('record_type', 'loan')->pluck('record_id')->map(fn ($id) => (int) $id)->unique()->all();
-        $pageMemberIds = $pageAccounts->where('record_type', 'chit')->pluck('record_id')->map(fn ($id) => (int) $id)->unique()->all();
         $pageClientIds = $pageAccounts->pluck('client_id')->map(fn ($id) => (int) $id)->unique()->all();
 
         $clients = $pageClientIds === []
@@ -95,14 +94,6 @@ class ClientCollectionsController extends Controller
                 ->get()
                 ->keyBy('id');
 
-        $groupMembers = $pageMemberIds === []
-            ? collect()
-            : GroupMember::query()
-                ->with(['group', 'shares.client'])
-                ->whereIn('id', $pageMemberIds)
-                ->get()
-                ->keyBy('id');
-
         // Preload EMIs for page loans
         $emisByLoan = $this->fetchEmisForLoanAccounts($pageLoanIds, $status, $today, $fromDate, $toDate);
         $overdueEmisByLoan = $status === 'overdue'
@@ -110,20 +101,12 @@ class ClientCollectionsController extends Controller
             : $this->fetchEmisForLoanAccounts($pageLoanIds, 'overdue', $today, null, null);
         $payableEmisByLoan = $this->fetchEmisForLoanAccounts($pageLoanIds, 'unpaid', $today, null, null);
 
-        // Preload Chit installments for page group members
-        $instsByMemberClient = $this->fetchInstallmentsForChits($pageMemberIds, $pageClientIds, $status, $today, $fromDate, $toDate);
-        $overdueInstsByMemberClient = $status === 'overdue'
-            ? $instsByMemberClient
-            : $this->fetchInstallmentsForChits($pageMemberIds, $pageClientIds, 'overdue', $today, null, null);
-        $payableInstsByMemberClient = $this->fetchInstallmentsForChits($pageMemberIds, $pageClientIds, 'unpaid', $today, null, null);
-
         $company = CompanyDetail::query()->first();
         $canPay = (bool) Auth::user()?->hasAnyRole(['Admin', 'Staff', 'Super Admin', 'admin', 'staff']);
 
         $data = $pageAccounts->map(function ($acc, $index) use (
-            $clients, $loanAccounts, $groupMembers,
+            $clients, $loanAccounts,
             $emisByLoan, $overdueEmisByLoan, $payableEmisByLoan,
-            $instsByMemberClient, $overdueInstsByMemberClient, $payableInstsByMemberClient,
             $company, $canPay, $start
         ) {
             $clientId = (int) $acc->client_id;
@@ -152,6 +135,10 @@ class ClientCollectionsController extends Controller
 
                 $statusCounts = $this->countStatuses($emis);
 
+                $loanReminders = $emis->filter(fn ($e) => !empty($e['reminder_date_raw']));
+                $hasLoanReminderToday = $emis->contains(fn ($e) => !empty($e['is_reminder_today']));
+                $latestLoanReminder = $loanReminders->sortByDesc('reminder_date_raw')->first();
+
                 return [
                     'id' => 'loan_' . $loanId,
                     'row_id' => 'loan_' . $loanId,
@@ -179,17 +166,27 @@ class ClientCollectionsController extends Controller
                     'zone' => $zone,
                     'can_pay' => $canPay && ($loanPayable > 0.009 || ($isOpenLoan && $principalRemaining > 0.009)),
                     'has_overdue' => $overdueEmis->isNotEmpty(),
+                    'has_reminder' => $loanReminders->isNotEmpty(),
+                    'has_reminder_today' => $hasLoanReminderToday,
+                    'reminder_date' => $latestLoanReminder['reminder_date'] ?? null,
+                    'reminder_date_raw' => $latestLoanReminder['reminder_date_raw'] ?? null,
+                    'is_reminder_today' => $hasLoanReminderToday,
+                    'is_reminder_overdue' => !empty($latestLoanReminder['is_reminder_overdue']),
+                    'latest_note' => $latestLoanReminder['latest_note'] ?? null,
+                    'note_status' => $latestLoanReminder['note_status'] ?? null,
+                    'latest_reminder_date' => $latestLoanReminder['reminder_date'] ?? null,
+                    'latest_reminder_date_raw' => $latestLoanReminder['reminder_date_raw'] ?? null,
+                    'latest_reminder_note' => $latestLoanReminder['latest_note'] ?? null,
+                    'reminder_status' => $latestLoanReminder['note_status'] ?? null,
                     'total_due' => $loanDue,
                     'total_due_formatted' => '₹' . number_format($loanDue, 2),
                     'payable_amount' => $loanPayable,
                     'payable_amount_formatted' => '₹' . number_format($loanPayable, 2),
                     'status_summary' => $this->formatStatusBadges($statusCounts),
                     'loan_items' => $emis->values()->all(),
-                    'chit_items' => [],
                     'items' => $emis->values()->all(),
                     'loan_items_grouped' => $this->groupByDisplayStatus($emis),
                     'payable_loan_ids' => $payableEmis->pluck('id')->filter()->values()->all(),
-                    'payable_chit_items' => [],
                     'public_url' => $publicUrl,
                     'whatsapp_url' => $waMessages['whatsapp'],
                     'sms_url' => $waMessages['sms'],
@@ -198,75 +195,8 @@ class ClientCollectionsController extends Controller
                 ];
             }
 
-            // Chit Row
-            $memberId = (int) $acc->record_id;
-            $member = $groupMembers->get($memberId);
-            $key = $memberId . '_' . $clientId;
-            $insts = $instsByMemberClient->get($key, collect());
-            $overdueInsts = $overdueInstsByMemberClient->get($key, collect());
-            $payableInsts = $payableInstsByMemberClient->get($key, collect());
-
-            $chitDue = round((float) $insts->sum(fn ($row) => (float) ($row['balance'] ?? $row['amount'] ?? 0)), 2);
-            $chitPayable = round((float) $payableInsts->sum(fn ($row) => (float) ($row['balance'] ?? 0)), 2);
-            $groupCode = $member?->group?->group_code ?? $acc->identifier ?? 'Chit';
-            $memberNumber = $member
-                ? ($member->is_shared ? ($member->memberNumberForClient($clientId) ?? '—') : ($member->display_member_number ?? $member->member_number ?? '—'))
-                : '—';
-            $chitsUrl = route('chit.installments.client', HashId::encode((int) $clientId));
-
-            $targetChitInsts = $overdueInsts->isNotEmpty() ? $overdueInsts : ($payableInsts->isNotEmpty() ? $payableInsts : $insts->filter(fn ($i) => (float) ($i['balance'] ?? 0) > 0));
-            $waMessages = $this->buildChitOverdueMessage($client?->client_phone, $client?->client_name ?? 'Client', $groupCode, $memberNumber, $targetChitInsts, $company, $publicUrl);
-
-            $statusCounts = $this->countStatuses($insts);
-
-            return [
-                'id' => 'chit_' . $memberId . '_' . $clientId,
-                'row_id' => 'chit_' . $memberId . '_' . $clientId,
-                'sno' => $start + $index + 1,
-                'record_type' => 'chit',
-                'record_id' => $memberId,
-                'member_id' => $memberId,
-                'client_id' => $clientId,
-                'client_name' => $client?->client_name ?? 'Client',
-                'client_nickname' => $client?->nickname,
-                'client_phone' => $client?->client_phone ?? 'N/A',
-                'client_url' => $client ? route('client-view-account', $client) : '#',
-                'account_number' => $groupCode,
-                'member_number' => $memberNumber,
-                'account_title' => 'Chit: ' . $groupCode . ' (' . ($memberNumber !== '—' ? 'Member #' . $memberNumber : 'Seat') . ')',
-                'account_url' => $chitsUrl,
-                'account_badge' => '<span class="badge bg-label-info"><i class="ri-group-line me-1"></i>Chit</span>',
-                'loan_mode' => 'chit',
-                'is_open_loan' => false,
-                'principal_outstanding' => 0.0,
-                'principal_outstanding_formatted' => '—',
-                'loan_amount' => 0.0,
-                'agent_name' => $agentName,
-                'zone' => $zone,
-                'can_pay' => $canPay && ($chitPayable > 0.009),
-                'has_overdue' => $overdueInsts->isNotEmpty(),
-                'total_due' => $chitDue,
-                'total_due_formatted' => '₹' . number_format($chitDue, 2),
-                'payable_amount' => $chitPayable,
-                'payable_amount_formatted' => '₹' . number_format($chitPayable, 2),
-                'status_summary' => $this->formatStatusBadges($statusCounts),
-                'loan_items' => [],
-                'chit_items' => $insts->values()->all(),
-                'items' => $insts->values()->all(),
-                'chit_items_grouped' => $this->groupByDisplayStatus($insts),
-                'payable_loan_ids' => [],
-                'payable_chit_items' => $payableInsts->map(fn ($row) => [
-                    'installment_id' => (int) ($row['installment_id'] ?? 0),
-                    'client_id' => $clientId,
-                    'amount' => (float) ($row['balance'] ?? $row['amount'] ?? 0),
-                ])->filter(fn ($row) => $row['installment_id'] > 0 && $row['amount'] > 0.009)->values()->all(),
-                'public_url' => $publicUrl,
-                'whatsapp_url' => $waMessages['whatsapp'],
-                'sms_url' => $waMessages['sms'],
-                'company_slogan' => $company?->company_slogan ?: ($company?->company_name ?: 'Finance'),
-                'company_phone' => $company?->company_mobile ?: ($company?->support_mobile ?: ''),
-            ];
-        })->values();
+            return null;
+        })->filter()->values();
 
         return response()->json([
             'draw' => (int) $request->input('draw', 1),
@@ -274,6 +204,199 @@ class ClientCollectionsController extends Controller
             'recordsFiltered' => $total,
             'data' => $data,
             'stats' => $this->computeStats($module, $today, $agentId, $search, $fromDate, $toDate),
+        ]);
+    }
+
+    public function getNotes(Request $request): JsonResponse
+    {
+        $type = $request->input('type', 'loan');
+        $rawId = $request->input('id');
+
+        $emiId = $request->input('emi_id');
+        $installmentId = $request->input('installment_id');
+        $loanAccountId = $request->input('loan_account_id');
+        $groupMemberId = $request->input('group_member_id') ?: $request->input('member_id');
+        $clientId = $request->input('client_id');
+
+        if ($rawId) {
+            if (is_string($rawId) && str_starts_with($rawId, 'loan_')) {
+                $type = 'loan';
+                $clean = substr($rawId, 5);
+                if (is_numeric($clean)) {
+                    $loanAccountId = (int) $clean;
+                }
+            } elseif (is_numeric($rawId)) {
+                $emiId = (int) $rawId;
+            }
+        }
+
+        $query = CollectionNote::with(['user', 'agent'])->orderBy('created_at', 'desc');
+
+        $entityInfo = [
+            'type' => 'loan',
+            'label' => '',
+            'account_number' => '',
+            'client_name' => '',
+            'client_phone' => '',
+            'amount_due' => 0,
+            'due_date' => '—',
+        ];
+
+        if ($type === 'loan') {
+            if ($emiId) {
+                $query->where('emi_id', $emiId);
+                $emi = Emi::with(['loanAccount.client'])->find($emiId);
+                if ($emi) {
+                    $isPaid = ($emi->status === 'paid') || ((float) ($emi->pending_amount ?? 0) <= 0.009);
+                    $due = $isPaid ? 0.0 : (float) ($emi->pending_amount ?? 0);
+                    $entityInfo = [
+                        'type' => 'loan',
+                        'emi_id' => $emi->id,
+                        'loan_account_id' => $emi->loan_account_id,
+                        'client_id' => $emi->loanAccount?->client_id,
+                        'label' => 'EMI #' . $emi->instalment_number,
+                        'account_number' => $emi->loanAccount?->account_number ?? 'N/A',
+                        'client_name' => $emi->loanAccount?->client?->client_name ?? 'N/A',
+                        'client_phone' => $emi->loanAccount?->client?->client_phone ?? 'N/A',
+                        'amount_due' => round(max(0, $due), 2),
+                        'is_paid' => $isPaid,
+                        'status' => $emi->status,
+                        'due_date' => $emi->due_date ? Carbon::parse($emi->due_date)->format('d-m-Y') : '—',
+                    ];
+                }
+            } elseif ($loanAccountId) {
+                $query->where(function ($q) use ($loanAccountId) {
+                    $q->where('loan_account_id', $loanAccountId)
+                      ->orWhereHas('emi', fn ($eq) => $eq->where('loan_account_id', $loanAccountId));
+                });
+                $loan = LoanAccount::with('client')->find($loanAccountId);
+                if ($loan) {
+                    $due = (float) ($loan->outstanding_principal ?: $loan->outstanding_amount ?: 0);
+                    $isPaid = $due <= 0.009;
+                    $entityInfo = [
+                        'type' => 'loan',
+                        'loan_account_id' => $loan->id,
+                        'client_id' => $loan->client_id,
+                        'label' => 'Loan Account ' . $loan->account_number,
+                        'account_number' => $loan->account_number ?? 'N/A',
+                        'client_name' => $loan->client?->client_name ?? 'N/A',
+                        'client_phone' => $loan->client?->client_phone ?? 'N/A',
+                        'amount_due' => round(max(0, $due), 2),
+                        'is_paid' => $isPaid,
+                        'status' => $isPaid ? 'paid' : 'active',
+                        'due_date' => '—',
+                    ];
+                }
+            }
+        }
+
+        $notes = $query->get()->map(function ($note) {
+            $isToday = $note->reminder_date && Carbon::parse($note->reminder_date)->isToday();
+            $isPast = $note->reminder_date && Carbon::parse($note->reminder_date)->startOfDay()->lt(now()->startOfDay());
+            return [
+                'id' => $note->id,
+                'note' => $note->note,
+                'reminder_date' => $note->reminder_date ? Carbon::parse($note->reminder_date)->format('Y-m-d') : null,
+                'reminder_date_formatted' => $note->reminder_date ? Carbon::parse($note->reminder_date)->format('d-m-Y') : null,
+                'reminder_time' => $note->reminder_time,
+                'status' => $note->status ?: 'postponed',
+                'is_today' => $isToday,
+                'is_overdue' => $isPast && !$note->is_completed,
+                'created_by' => $note->creator_name,
+                'created_at' => $note->created_at->format('d-m-Y h:i A'),
+                'created_at_human' => $note->created_at->diffForHumans(),
+            ];
+        });
+
+        return response()->json([
+            'success' => true,
+            'entity' => $entityInfo,
+            'notes' => $notes,
+        ]);
+    }
+
+    public function saveNote(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'type' => 'required|in:loan',
+            'note' => 'required|string|max:2000',
+            'reminder_date' => 'nullable|date',
+            'status' => 'nullable|string|max:50',
+            'emi_id' => 'nullable|integer',
+            'loan_account_id' => 'nullable|integer',
+            'client_id' => 'nullable|integer',
+        ]);
+
+        $user = Auth::user();
+        $agent = $user?->agent;
+        $agentId = $agent?->id;
+
+        $type = 'loan';
+        $clientId = $validated['client_id'] ?? null;
+        $loanAccountId = $validated['loan_account_id'] ?? null;
+        $emiId = $validated['emi_id'] ?? null;
+
+        $dueAmount = 0.0;
+        if ($emiId) {
+            $emi = Emi::with('loanAccount')->find($emiId);
+            if ($emi) {
+                $loanAccountId = $loanAccountId ?: $emi->loan_account_id;
+                $clientId = $clientId ?: $emi->loanAccount?->client_id;
+                $dueAmount = ($emi->status !== 'paid') ? (float) ($emi->pending_amount ?? 0) : 0.0;
+            }
+        } elseif ($loanAccountId && !$clientId) {
+            $loan = LoanAccount::find($loanAccountId);
+            $clientId = $loan?->client_id;
+            $dueAmount = $loan ? (float) ($loan->outstanding_principal ?: $loan->outstanding_amount ?: 0) : 0.0;
+        }
+
+        // If due amount is 0, do not allow adding a reminder
+        if (!empty($validated['reminder_date']) && $dueAmount <= 0.009) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Due amount is ₹0.00. Adding a reminder is not allowed for completed/cleared dues.',
+            ], 422);
+        }
+
+        $note = CollectionNote::create([
+            'type' => $type,
+            'client_id' => $clientId,
+            'loan_account_id' => $loanAccountId,
+            'emi_id' => $emiId,
+            'user_id' => $user?->id,
+            'agent_id' => $agentId,
+            'note' => $validated['note'],
+            'reminder_date' => $validated['reminder_date'] ?? null,
+            'status' => $validated['status'] ?? 'postponed',
+        ]);
+
+        // Sync with emi_followups if loan EMI and agent exists
+        if ($type === 'loan' && $emiId && $agentId) {
+            try {
+                \App\Models\EmiFollowup::create([
+                    'emi_id' => $emiId,
+                    'agent_id' => $agentId,
+                    'status' => $validated['status'] ?? 'appointment_to_visit',
+                    'followup_at' => $validated['reminder_date'] ? Carbon::parse($validated['reminder_date'])->format('Y-m-d H:i:s') : null,
+                    'remarks' => $validated['note'],
+                ]);
+            } catch (\Throwable $e) {
+                Log::warning('Could not sync to emi_followups: ' . $e->getMessage());
+            }
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Note and reminder saved successfully.',
+            'note' => [
+                'id' => $note->id,
+                'note' => $note->note,
+                'reminder_date' => $note->reminder_date ? Carbon::parse($note->reminder_date)->format('Y-m-d') : null,
+                'reminder_date_formatted' => $note->reminder_date ? Carbon::parse($note->reminder_date)->format('d-m-Y') : null,
+                'status' => $note->status,
+                'created_by' => $note->creator_name,
+                'created_at' => $note->created_at->format('d-m-Y h:i A'),
+            ]
         ]);
     }
 
@@ -290,7 +413,7 @@ class ClientCollectionsController extends Controller
         }
 
         $validated = $request->validate([
-            'module' => 'required|in:loan,chit',
+            'module' => 'required|in:loan',
             'pay_type' => 'required|in:full,partial',
             'paid_amount' => 'required|numeric|min:0',
             'principal_amount' => 'nullable|numeric|min:0',
@@ -301,12 +424,7 @@ class ClientCollectionsController extends Controller
             'emi_ids' => 'nullable|array',
             'emi_id' => 'nullable',
             'loan_account_id' => 'nullable|integer',
-            'installment_id' => 'nullable',
             'client_id' => 'nullable|integer',
-            'items' => 'nullable|array',
-            'items.*.installment_id' => 'nullable|integer',
-            'items.*.client_id' => 'nullable|integer',
-            'items.*.amount' => 'nullable|numeric',
         ]);
 
         $paidAmount = (float) $validated['paid_amount'];
@@ -411,80 +529,7 @@ class ClientCollectionsController extends Controller
             return app(EmiController::class)->bulkPay($loanRequest);
         }
 
-        // Chit single pay
-        $items = collect($request->input('items', []));
-        if ($items->isEmpty() && $request->filled('installment_id')) {
-            $items = collect([[
-                'installment_id' => (int) $request->input('installment_id'),
-                'client_id' => (int) ($request->input('client_id') ?? 0),
-                'amount' => $paidAmount,
-            ]]);
-        }
-        $items = $items->filter(fn ($item) => (int) ($item['installment_id'] ?? 0) > 0 && (float) ($item['amount'] ?? 0) > 0.009)->values();
-
-        if ($items->isEmpty()) {
-            return response()->json(['success' => false, 'message' => 'No unpaid chit installments selected.'], 422);
-        }
-
-        $paymentService = app(\App\Services\ChitPaymentService::class);
-        $collectedBy = $user->id;
-        $mode = $method === 'in_hand' ? 'cash' : $method;
-        $paid = 0;
-        $count = 0;
-        $pool = $paidAmount;
-        $isPartial = ($validated['pay_type'] === 'partial');
-
-        DB::beginTransaction();
-        try {
-            foreach ($items as $item) {
-                $installment = Installment::with(['member.shares', 'group'])->find((int) $item['installment_id']);
-                if (! $installment) {
-                    continue;
-                }
-                $itemAmount = (float) ($item['amount'] ?? 0);
-                if ($isPartial) {
-                    if ($pool <= 0.009) {
-                        break;
-                    }
-                    $itemAmount = min($pool, $itemAmount);
-                }
-                if ($itemAmount <= 0.009) {
-                    continue;
-                }
-
-                $result = $paymentService->collectInstallment($installment, [
-                    'paid_amount' => $itemAmount,
-                    'payment_mode' => $mode,
-                    'payment_type' => $isPartial ? 'partial' : 'full',
-                    'paid_date' => $validated['paid_date'],
-                    'remarks' => $validated['remarks'] ?? 'Client collections pay',
-                    'client_id' => (int) ($item['client_id'] ?? 0) ?: null,
-                    'single_seat_only' => 1,
-                    'internal_bank_account_id' => $request->input('internal_bank_account_id'),
-                    'bypass_min_validation' => true,
-                ], $collectedBy);
-
-                $paid += $itemAmount;
-                $count++;
-
-                if ($isPartial) {
-                    $pool -= $itemAmount;
-                }
-            }
-            DB::commit();
-        } catch (\Throwable $e) {
-            DB::rollBack();
-            return response()->json(['success' => false, 'message' => $e->getMessage()], 422);
-        }
-
-        if ($count === 0) {
-            return response()->json(['success' => false, 'message' => 'No chit installment could be collected.'], 422);
-        }
-
-        return response()->json([
-            'success' => true,
-            'message' => "Collected ₹" . number_format($paid, 2) . " across {$count} chit installment(s).",
-        ]);
+        return response()->json(['success' => false, 'message' => 'Invalid collection payment request.'], 422);
     }
 
     public function bulkPay(Request $request): JsonResponse
@@ -500,7 +545,7 @@ class ClientCollectionsController extends Controller
             'internal_bank_account_id' => 'nullable',
             'remarks' => 'nullable|string',
             'items' => 'required|array|min:1',
-            'items.*.record_type' => 'required|in:loan,chit',
+            'items.*.record_type' => 'required|in:loan',
             'items.*.account_id' => 'required|integer',
             'items.*.client_id' => 'nullable|integer',
             'items.*.amount' => 'nullable|numeric|min:0',
@@ -518,13 +563,11 @@ class ClientCollectionsController extends Controller
         $batchKey = \App\Support\BulkPaymentGroup::generateKey();
         $bulkRemarks = \App\Support\BulkPaymentGroup::appendRemarks($customRemarks, $batchKey, \App\Support\BulkPaymentGroup::ADMIN_MARKER);
         $loanPaymentService = app(\App\Services\LoanPaymentService::class);
-        $chitPaymentService = app(\App\Services\ChitPaymentService::class);
         $mode = $method === 'in_hand' ? 'cash' : $method;
         $collectedBy = $user->id;
 
         $totalPaid = 0.0;
         $loanSuccessCount = 0;
-        $chitSuccessCount = 0;
 
         DB::beginTransaction();
         try {
@@ -625,56 +668,6 @@ class ClientCollectionsController extends Controller
                         }
                         $loanSuccessCount++;
                     }
-                } elseif ($recordType === 'chit') {
-                    $groupMember = GroupMember::with(['group', 'shares'])->find($accountId);
-                    if (! $groupMember) {
-                        continue;
-                    }
-
-                    $unpaidInsts = Installment::with(['member.shares', 'group'])
-                        ->where('group_id', $groupMember->group_id)
-                        ->where('member_id', $groupMember->id)
-                        ->whereNull('deleted_at')
-                        ->whereIn('status', ['pending', 'overdue', 'partial'])
-                        ->orderBy('month_number')
-                        ->get();
-
-                    if ($unpaidInsts->isEmpty()) {
-                        continue;
-                    }
-
-                    $rem = $amount;
-                    foreach ($unpaidInsts as $inst) {
-                        if ($rem <= 0.009) {
-                            break;
-                        }
-                        $balance = (float) $inst->clientBalanceShare($clientId ?: (int) $groupMember->client_id);
-                        if ($balance <= 0.009) {
-                            continue;
-                        }
-
-                        $payThisInst = min($rem, $balance);
-                        $res = $chitPaymentService->collectInstallment($inst, [
-                            'paid_amount' => $payThisInst,
-                            'payment_mode' => $mode,
-                            'payment_type' => $payThisInst >= ($balance - 0.01) ? 'full' : 'partial',
-                            'paid_date' => $paidDate,
-                            'reference_no' => $batchKey,
-                            'remarks' => $bulkRemarks . ' [Bulk Chit Pay]',
-                            'client_id' => $clientId ?: (int) $groupMember->client_id,
-                            'single_seat_only' => 1,
-                            'internal_bank_account_id' => $bankAccountId,
-                            'bypass_min_validation' => true,
-                        ], $collectedBy);
-
-                        if (! ($res['success'] ?? false)) {
-                            throw new \Exception("Chit Group {$groupMember->group?->group_code} Month #{$inst->month_number} failed: " . ($res['message'] ?? 'Unknown error'));
-                        }
-
-                        $rem -= $payThisInst;
-                        $totalPaid += $payThisInst;
-                    }
-                    $chitSuccessCount++;
                 }
             }
 
@@ -684,142 +677,83 @@ class ClientCollectionsController extends Controller
             return response()->json(['success' => false, 'message' => $e->getMessage()], 422);
         }
 
-        if ($loanSuccessCount === 0 && $chitSuccessCount === 0) {
+        if ($loanSuccessCount === 0) {
             return response()->json(['success' => false, 'message' => 'No accounts were processed.'], 422);
-        }
-
-        $parts = [];
-        if ($loanSuccessCount > 0) {
-            $parts[] = "{$loanSuccessCount} loan account(s)";
-        }
-        if ($chitSuccessCount > 0) {
-            $parts[] = "{$chitSuccessCount} chit seat(s)";
         }
 
         return response()->json([
             'success' => true,
-            'message' => "Bulk payment of ₹" . number_format($totalPaid, 2) . " processed successfully across " . implode(' and ', $parts) . ".",
+            'message' => "Bulk payment of ₹" . number_format($totalPaid, 2) . " processed successfully across {$loanSuccessCount} loan account(s).",
         ]);
     }
 
     protected function queryMatchingAccounts(string $module, string $status, Carbon $today, ?int $agentId, string $search, ?string $fromDate, ?string $toDate): Collection
     {
-        $loanAccounts = collect();
-        $chitSeats = collect();
+        $loanQ = DB::table('loan_accounts')
+            ->join('clients', 'clients.id', '=', 'loan_accounts.client_id')
+            ->leftJoin('agents', 'agents.id', '=', 'clients.assigned_to')
+            ->leftJoin('locations', 'locations.id', '=', 'clients.location_id')
+            ->whereNull('loan_accounts.deleted_at')
+            ->where('loan_accounts.status', '!=', 'closed');
 
-        if ($module !== 'chit') {
-            $loanQ = DB::table('loan_accounts')
-                ->join('clients', 'clients.id', '=', 'loan_accounts.client_id')
-                ->leftJoin('agents', 'agents.id', '=', 'clients.assigned_to')
-                ->leftJoin('locations', 'locations.id', '=', 'clients.location_id')
-                ->whereNull('loan_accounts.deleted_at')
-                ->where('loan_accounts.status', '!=', 'closed');
-
-            if ($agentId) {
-                $loanQ->where(function ($q) use ($agentId) {
-                    $q->where('clients.assigned_to', $agentId)
-                      ->orWhere('clients.added_by', $agentId);
-                });
-            }
-
-            if ($search !== '') {
-                $cleanDigits = preg_replace('/\D+/', '', $search);
-                $loanQ->where(function ($q) use ($search, $cleanDigits) {
-                    $q->where('loan_accounts.account_number', 'like', "%{$search}%")
-                      ->orWhere('loan_accounts.customer_loan_account_number', 'like', "%{$search}%")
-                      ->orWhere('loan_accounts.application_number', 'like', "%{$search}%")
-                      ->orWhere('loan_accounts.loan_code', 'like', "%{$search}%")
-                      ->orWhere('clients.client_name', 'like', "%{$search}%")
-                      ->orWhere('clients.nickname', 'like', "%{$search}%")
-                      ->orWhere('clients.client_phone', 'like', "%{$search}%")
-                      ->orWhere('agents.agent_name', 'like', "%{$search}%")
-                      ->orWhere('locations.name', 'like', "%{$search}%");
-
-                    if ($cleanDigits !== '') {
-                        $q->orWhere('clients.client_phone', 'like', "%{$cleanDigits}%");
-                    }
-                });
-            }
-
-            $loanQ->whereExists(function ($sub) use ($status, $today, $fromDate, $toDate) {
-                $sub->select(DB::raw(1))
-                    ->from('emis')
-                    ->whereColumn('emis.loan_account_id', 'loan_accounts.id')
-                    ->whereNull('emis.deleted_at');
-                $this->applyLoanStatus($sub, $status, $today);
-                $this->applyDateRange($sub, 'emis.due_date', $fromDate, $toDate);
+        if ($agentId) {
+            $loanQ->where(function ($q) use ($agentId) {
+                $q->where('clients.assigned_to', $agentId)
+                  ->orWhere('clients.added_by', $agentId);
             });
-
-            $loanAccounts = $loanQ->select([
-                DB::raw("'loan' as record_type"),
-                'loan_accounts.id as record_id',
-                'loan_accounts.client_id',
-                'clients.client_name',
-                'clients.nickname as client_nickname',
-                'loan_accounts.account_number as identifier',
-            ])->get();
         }
 
-        if ($module !== 'loan') {
-            $clientExpr = 'COALESCE(group_member_shares.client_id, group_members.client_id)';
-            $chitQ = DB::table('group_members')
-                ->join('chit_groups', 'chit_groups.id', '=', 'group_members.group_id')
-                ->leftJoin('group_member_shares', function ($j) {
-                    $j->on('group_member_shares.group_member_id', '=', 'group_members.id')
-                      ->where('group_members.is_shared', '=', 1);
-                })
-                ->join('clients', 'clients.id', '=', DB::raw($clientExpr))
-                ->leftJoin('agents', 'agents.id', '=', 'clients.assigned_to')
-                ->leftJoin('locations', 'locations.id', '=', 'clients.location_id')
-                ->whereNull('group_members.deleted_at')
-                ->whereNotIn('group_members.status', GroupMember::INACTIVE_STATUSES);
+        if ($search !== '') {
+            $cleanDigits = preg_replace('/\D+/', '', $search);
+            $loanQ->where(function ($q) use ($search, $cleanDigits) {
+                $q->where('loan_accounts.account_number', 'like', "%{$search}%")
+                  ->orWhere('loan_accounts.customer_loan_account_number', 'like', "%{$search}%")
+                  ->orWhere('loan_accounts.application_number', 'like', "%{$search}%")
+                  ->orWhere('loan_accounts.loan_code', 'like', "%{$search}%")
+                  ->orWhere('clients.client_name', 'like', "%{$search}%")
+                  ->orWhere('clients.nickname', 'like', "%{$search}%")
+                  ->orWhere('clients.client_phone', 'like', "%{$search}%")
+                  ->orWhere('agents.agent_name', 'like', "%{$search}%")
+                  ->orWhere('locations.name', 'like', "%{$search}%");
 
-            if ($agentId) {
-                $chitQ->where(function ($q) use ($agentId) {
-                    $q->where('clients.assigned_to', $agentId)
-                      ->orWhere('clients.added_by', $agentId);
-                });
-            }
-
-            if ($search !== '') {
-                $cleanDigits = preg_replace('/\D+/', '', $search);
-                $chitQ->where(function ($q) use ($search, $cleanDigits) {
-                    $q->where('chit_groups.group_code', 'like', "%{$search}%")
-                      ->orWhere('group_members.member_number', 'like', "%{$search}%")
-                      ->orWhere('clients.client_name', 'like', "%{$search}%")
-                      ->orWhere('clients.nickname', 'like', "%{$search}%")
-                      ->orWhere('clients.client_phone', 'like', "%{$search}%")
-                      ->orWhere('agents.agent_name', 'like', "%{$search}%")
-                      ->orWhere('locations.name', 'like', "%{$search}%");
-
-                    if ($cleanDigits !== '') {
-                        $q->orWhere('clients.client_phone', 'like', "%{$cleanDigits}%")
-                          ->orWhere('group_members.member_number', '=', $cleanDigits);
-                    }
-                });
-            }
-
-            $chitQ->whereExists(function ($sub) use ($status, $today, $fromDate, $toDate) {
-                $sub->select(DB::raw(1))
-                    ->from('installments')
-                    ->whereColumn('installments.group_id', 'group_members.group_id')
-                    ->whereColumn('installments.member_id', 'group_members.id')
-                    ->whereNull('installments.deleted_at');
-                $this->applyChitStatus($sub, $status, $today);
-                $this->applyDateRange($sub, 'installments.due_date', $fromDate, $toDate);
+                if ($cleanDigits !== '') {
+                    $q->orWhere('clients.client_phone', 'like', "%{$cleanDigits}%");
+                }
             });
-
-            $chitSeats = $chitQ->select([
-                DB::raw("'chit' as record_type"),
-                'group_members.id as record_id',
-                DB::raw("{$clientExpr} as client_id"),
-                'clients.client_name',
-                'clients.nickname as client_nickname',
-                'chit_groups.group_code as identifier',
-            ])->distinct()->get();
         }
 
-        return $loanAccounts->merge($chitSeats)->sortBy(function ($item) {
+        $loanQ->whereExists(function ($sub) use ($status, $today, $fromDate, $toDate) {
+            $sub->select(DB::raw(1))
+                ->from('emis')
+                ->whereColumn('emis.loan_account_id', 'loan_accounts.id')
+                ->whereNull('emis.deleted_at')
+                ->where(function ($emiCond) use ($status, $today, $fromDate, $toDate) {
+                    $emiCond->where(function ($subQ) use ($status, $today, $fromDate, $toDate) {
+                        $this->applyLoanStatus($subQ, $status, $today);
+                        $this->applyDateRange($subQ, 'emis.due_date', $fromDate, $toDate);
+                    });
+                    if ($fromDate || $toDate) {
+                        $emiCond->orWhereExists(function ($noteSub) use ($fromDate, $toDate) {
+                            $noteSub->select(DB::raw(1))
+                                ->from('collection_notes')
+                                ->whereColumn('collection_notes.emi_id', 'emis.id')
+                                ->where('collection_notes.is_completed', false);
+                            $this->applyDateRange($noteSub, 'collection_notes.reminder_date', $fromDate, $toDate);
+                        });
+                    }
+                });
+        });
+
+        $loanAccounts = $loanQ->select([
+            DB::raw("'loan' as record_type"),
+            'loan_accounts.id as record_id',
+            'loan_accounts.client_id',
+            'clients.client_name',
+            'clients.nickname as client_nickname',
+            'loan_accounts.account_number as identifier',
+        ])->get();
+
+        return $loanAccounts->sortBy(function ($item) {
             return strtolower(trim($item->client_name)) . '_' . $item->record_type . '_' . $item->identifier;
         })->values();
     }
@@ -830,11 +764,22 @@ class ClientCollectionsController extends Controller
             return collect();
         }
 
-        $query = Emi::with(['loanAccount.loanApplication'])
+        $query = Emi::with(['loanAccount.loanApplication', 'latestCollectionNote.user', 'latestCollectionNote.agent'])
             ->whereIn('loan_account_id', $loanAccountIds);
 
-        $this->applyLoanStatus($query, $status, $today);
-        $this->applyDateRange($query, 'emis.due_date', $fromDate, $toDate);
+        if ($fromDate || $toDate) {
+            $query->where(function ($q) use ($status, $today, $fromDate, $toDate) {
+                $q->where(function ($sub) use ($status, $today, $fromDate, $toDate) {
+                    $this->applyLoanStatus($sub, $status, $today);
+                    $this->applyDateRange($sub, 'emis.due_date', $fromDate, $toDate);
+                })->orWhereHas('collectionNotes', function ($noteSub) use ($fromDate, $toDate) {
+                    $noteSub->where('is_completed', false);
+                    $this->applyDateRange($noteSub, 'reminder_date', $fromDate, $toDate);
+                });
+            });
+        } else {
+            $this->applyLoanStatus($query, $status, $today);
+        }
 
         return $query->orderBy('instalment_number')
             ->get()
@@ -850,9 +795,15 @@ class ClientCollectionsController extends Controller
                         ? route('emi-details', $applicationNumber)
                         : route('emi-repayments-show', $emi);
 
+                    $latestNote = $emi->latestCollectionNote;
+                    $remDate = $latestNote?->reminder_date ? Carbon::parse($latestNote->reminder_date) : null;
+                    $isRemToday = $remDate ? $remDate->isToday() : false;
+                    $isRemOverdue = $remDate ? ($remDate->startOfDay()->lt(now()->startOfDay()) && !$latestNote->is_completed) : false;
+
                     return [
                         'id' => $emi->getRouteKey(),
                         'raw_id' => (int) $emi->id,
+                        'emi_id' => (int) $emi->id,
                         'label' => ($isOpen ? 'Cycle #' : 'EMI #') . $emi->instalment_number,
                         'instalment_number' => $emi->instalment_number,
                         'account' => $emi->loanAccount?->customer_loan_account_number
@@ -876,80 +827,16 @@ class ClientCollectionsController extends Controller
                         'is_open_loan' => $isOpen,
                         'can_pay' => $display !== 'paid' && ($pending > 0.009 || $isOpen),
                         'url' => $scheduleUrl,
+                        'reminder_date' => $remDate ? $remDate->format('d-m-Y') : null,
+                        'reminder_date_raw' => $remDate ? $remDate->format('Y-m-d') : null,
+                        'is_reminder_today' => $isRemToday,
+                        'is_reminder_overdue' => $isRemOverdue,
+                        'latest_note' => $latestNote?->note,
+                        'note_status' => $latestNote?->status,
+                        'has_reminder' => (bool) $remDate,
                     ];
                 });
             });
-    }
-
-    protected function fetchInstallmentsForChits(array $memberIds, array $clientIds, string $status, Carbon $today, ?string $fromDate, ?string $toDate): Collection
-    {
-        if ($memberIds === [] || $clientIds === []) {
-            return collect();
-        }
-
-        $installments = Installment::with(['group', 'member.shares'])
-            ->whereIn('member_id', $memberIds);
-
-        $this->applyChitStatus($installments, $status, $today);
-        $this->applyDateRange($installments, 'installments.due_date', $fromDate, $toDate);
-
-        $rows = collect();
-        foreach ($installments->orderBy('month_number')->get() as $inst) {
-            $member = $inst->member;
-            if (! $member) {
-                continue;
-            }
-
-            $ownerIds = $member->is_shared
-                ? $member->resolveOwnershipShares()->pluck('client_id')->map(fn ($id) => (int) $id)
-                : collect([(int) $member->client_id]);
-
-            foreach ($ownerIds->intersect($clientIds) as $clientId) {
-                $paid = (float) $inst->clientPaidShare((int) $clientId);
-                $balance = (float) $inst->clientBalanceShare((int) $clientId);
-                $amount = (float) ($inst->amount ?? 0);
-                $penalty = (float) ($inst->penalty_amount ?? 0);
-                $display = $this->chitDisplayStatus($inst, $today, $paid, $balance);
-                if ($balance <= 0.009 && $display !== 'paid' && $inst->status !== 'paid') {
-                    continue;
-                }
-
-                $key = $member->id . '_' . $clientId;
-                $rows->push([
-                    'member_client_key' => $key,
-                    'client_id' => (int) $clientId,
-                    'label' => 'Month #' . $inst->month_number,
-                    'period_label' => 'Month ' . $inst->month_number,
-                    'account' => $inst->group?->group_code ?? 'Chit',
-                    'group_id' => (int) ($inst->group_id ?? 0),
-                    'member_id' => (int) ($member->id ?? 0),
-                    'member_number' => $member->is_shared
-                        ? ($member->memberNumberForClient((int) $clientId) ?? '—')
-                        : ($member->display_member_number ?? $member->member_number ?? '—'),
-                    'group_code' => $inst->group?->group_code ?? 'Chit',
-                    'due_date' => $inst->due_date ? Carbon::parse($inst->due_date)->format('d-m-Y') : '—',
-                    'amount_formatted' => '₹' . number_format($amount, 2),
-                    'penalty_formatted' => $penalty > 0 ? '₹' . number_format($penalty, 2) : '—',
-                    'paid_amount' => $paid,
-                    'paid_formatted' => $paid > 0 ? '₹' . number_format($paid, 2) : '—',
-                    'paid_date' => $inst->paid_date ? Carbon::parse($inst->paid_date)->format('d-m-Y') : '',
-                    'balance_formatted' => $balance > 0.009 ? '₹' . number_format($balance, 2) : '—',
-                    'balance' => $balance,
-                    'amount' => $display === 'paid' ? $paid : $balance,
-                    'status' => $display,
-                    'status_badge' => $this->statusBadge($display),
-                    'url' => route('chit.installments.client', HashId::encode((int) $clientId)),
-                    'group_url' => $inst->group
-                        ? route('chit.installments.show', [$inst->group, (int) $inst->month_number])
-                        : '#',
-                    'installment_id' => (int) $inst->id,
-                    'month_number' => (int) $inst->month_number,
-                    'can_collect' => $display !== 'paid' && $balance > 0.009,
-                ]);
-            }
-        }
-
-        return $rows->groupBy('member_client_key');
     }
 
     protected function agentId(): ?int
@@ -1011,50 +898,6 @@ class ClientCollectionsController extends Controller
         return $query;
     }
 
-    protected function chitBaseQuery(?int $agentId, string $search)
-    {
-        $clientExpr = 'COALESCE(group_member_shares.client_id, group_members.client_id)';
-        $query = Installment::query()
-            ->join('group_members', function ($j) {
-                $j->on('installments.member_id', '=', 'group_members.id')
-                    ->whereNull('group_members.deleted_at')
-                    ->whereNotIn('group_members.status', GroupMember::INACTIVE_STATUSES);
-            })
-            ->leftJoin('group_member_shares', 'group_member_shares.group_member_id', '=', 'group_members.id')
-            ->join('chit_groups', 'chit_groups.id', '=', 'installments.group_id')
-            ->join('clients as chit_clients', 'chit_clients.id', '=', DB::raw($clientExpr))
-            ->leftJoin('agents as chit_agents', 'chit_agents.id', '=', 'chit_clients.assigned_to')
-            ->leftJoin('locations as chit_locations', 'chit_locations.id', '=', 'chit_clients.location_id')
-            ->whereNull('installments.deleted_at');
-
-        if ($agentId) {
-            $query->where(function ($q) use ($agentId) {
-                $q->where('chit_clients.assigned_to', $agentId)
-                    ->orWhere('chit_clients.added_by', $agentId);
-            });
-        }
-
-        if ($search !== '') {
-            $cleanDigits = preg_replace('/\D+/', '', $search);
-            $query->where(function ($q) use ($search, $cleanDigits) {
-                $q->where('chit_groups.group_code', 'like', "%{$search}%")
-                    ->orWhere('group_members.member_number', 'like', "%{$search}%")
-                    ->orWhere('chit_clients.client_name', 'like', "%{$search}%")
-                    ->orWhere('chit_clients.nickname', 'like', "%{$search}%")
-                    ->orWhere('chit_clients.client_phone', 'like', "%{$search}%")
-                    ->orWhere('chit_agents.agent_name', 'like', "%{$search}%")
-                    ->orWhere('chit_locations.name', 'like', "%{$search}%");
-
-                if ($cleanDigits !== '') {
-                    $q->orWhere('chit_clients.client_phone', 'like', "%{$cleanDigits}%")
-                      ->orWhere('group_members.member_number', '=', $cleanDigits);
-                }
-            });
-        }
-
-        return $query;
-    }
-
     protected function applyLoanStatus($query, string $status, Carbon $today): void
     {
         if ($status === 'all') {
@@ -1104,43 +947,6 @@ class ClientCollectionsController extends Controller
         }
     }
 
-    protected function applyChitStatus($query, string $status, Carbon $today): void
-    {
-        if ($status === 'all') {
-            return;
-        }
-
-        $monthEnd = $today->copy()->endOfMonth()->toDateString();
-        $todayDate = $today->toDateString();
-
-        if ($status === 'overdue') {
-            $query->whereDate('installments.due_date', '<', $todayDate)
-                ->whereIn('installments.status', ['pending', 'overdue', 'partial']);
-            return;
-        }
-        if ($status === 'pending') {
-            $query->whereDate('installments.due_date', '>=', $todayDate)
-                ->whereDate('installments.due_date', '<=', $monthEnd)
-                ->whereIn('installments.status', ['pending', 'overdue', 'partial']);
-            return;
-        }
-        if ($status === 'upcoming') {
-            $query->whereDate('installments.due_date', '>', $monthEnd)
-                ->whereIn('installments.status', ['pending', 'overdue', 'partial']);
-            return;
-        }
-        if ($status === 'partial') {
-            $query->where('installments.status', 'partial');
-            return;
-        }
-        if ($status === 'paid') {
-            $query->where('installments.status', 'paid');
-            return;
-        }
-        if ($status === 'unpaid') {
-            $query->whereIn('installments.status', ['pending', 'overdue', 'partial']);
-        }
-    }
 
     protected function applyDateRange($query, string $column, ?string $fromDate, ?string $toDate): void
     {
@@ -1155,43 +961,25 @@ class ClientCollectionsController extends Controller
     protected function computeStats(string $module, Carbon $today, ?int $agentId, string $search, ?string $fromDate, ?string $toDate): array
     {
         $loan = ['overdue' => 0, 'pending' => 0, 'upcoming' => 0, 'partial' => 0, 'paid' => 0, 'collected' => 0.0, 'pending_amount' => 0.0];
-        $chit = $loan;
 
-        if ($module !== 'chit') {
-            $base = $this->loanBaseQuery($agentId, $search);
-            $this->applyDateRange($base, 'emis.due_date', $fromDate, $toDate);
-            foreach (['overdue', 'pending', 'upcoming', 'partial', 'paid'] as $bucket) {
-                $q = clone $base;
-                $this->applyLoanStatus($q, $bucket, $today);
-                $loan[$bucket] = (int) (clone $q)->distinct()->count('loan_accounts.id');
-                if ($bucket === 'paid') {
-                    $loan['collected'] = (float) (clone $q)->sum('emis.paid_amount');
-                } else {
-                    $loan['pending_amount'] += (float) (clone $q)->sum('emis.pending_amount');
-                }
+        $base = $this->loanBaseQuery($agentId, $search);
+        $this->applyDateRange($base, 'emis.due_date', $fromDate, $toDate);
+        foreach (['overdue', 'pending', 'upcoming', 'partial', 'paid'] as $bucket) {
+            $q = clone $base;
+            $this->applyLoanStatus($q, $bucket, $today);
+            $loan[$bucket] = (int) (clone $q)->distinct()->count('loan_accounts.id');
+            if ($bucket === 'paid') {
+                $loan['collected'] = (float) (clone $q)->sum('emis.paid_amount');
+            } else {
+                $loan['pending_amount'] += (float) (clone $q)->sum('emis.pending_amount');
             }
         }
 
-        if ($module !== 'loan') {
-            $base = $this->chitBaseQuery($agentId, $search);
-            $this->applyDateRange($base, 'installments.due_date', $fromDate, $toDate);
-            foreach (['overdue', 'pending', 'upcoming', 'partial', 'paid'] as $bucket) {
-                $q = clone $base;
-                $this->applyChitStatus($q, $bucket, $today);
-                $chit[$bucket] = (int) (clone $q)->distinct()->count('installments.id');
-                if ($bucket === 'paid') {
-                    $chit['collected'] = (float) (clone $q)->sum('installments.paid_amount');
-                } else {
-                    $chit['pending_amount'] += (float) (clone $q)->sum(DB::raw('GREATEST(0, installments.amount + COALESCE(installments.penalty_amount, 0) - COALESCE(installments.paid_amount, 0))'));
-                }
-            }
-        }
-
-        $overdue = $loan['overdue'] + $chit['overdue'];
-        $pending = $loan['pending'] + $chit['pending'];
-        $upcoming = $loan['upcoming'] + $chit['upcoming'];
-        $partial = $loan['partial'] + $chit['partial'];
-        $paid = $loan['paid'] + $chit['paid'];
+        $overdue = $loan['overdue'];
+        $pending = $loan['pending'];
+        $upcoming = $loan['upcoming'];
+        $partial = $loan['partial'];
+        $paid = $loan['paid'];
 
         return [
             'total' => $overdue + $pending + $upcoming + $partial + $paid,
@@ -1200,8 +988,8 @@ class ClientCollectionsController extends Controller
             'upcoming' => $upcoming,
             'partial' => $partial,
             'paid' => $paid,
-            'collected' => round($loan['collected'] + $chit['collected'], 2),
-            'pending_amount' => round($loan['pending_amount'] + $chit['pending_amount'], 2),
+            'collected' => round($loan['collected'], 2),
+            'pending_amount' => round($loan['pending_amount'], 2),
         ];
     }
 
@@ -1254,56 +1042,6 @@ class ClientCollectionsController extends Controller
         ];
     }
 
-    protected function buildChitOverdueMessage(?string $phone, string $clientName, string $groupCode, string $memberNumber, $overdueInsts, $company, ?string $publicUrl = null): array
-    {
-        $empty = ['whatsapp' => null, 'sms' => null];
-        $digits = preg_replace('/\D+/', '', (string) $phone);
-        if ($digits === '' || $overdueInsts->isEmpty()) {
-            return $empty;
-        }
-        if (strlen($digits) === 10) {
-            $digits = '91' . $digits;
-        }
-
-        $seatText = ($memberNumber !== '—') ? " (Member #{$memberNumber})" : '';
-        $hasOverdue = collect($overdueInsts)->contains(fn ($r) => ($r['status'] ?? '') === 'overdue');
-        $dueLabel = $hasOverdue ? 'overdue dues' : 'dues';
-        $wa = ["Dear *{$clientName}*,", '', "Your {$dueLabel} for chit group *{$groupCode}*{$seatText} are:"];
-        $sms = ["Dear {$clientName},", '', "Your {$dueLabel} for chit group {$groupCode}{$seatText} are:"];
-        $total = 0.0;
-
-        foreach ($overdueInsts as $row) {
-            $amount = (float) ($row['balance'] ?? $row['amount'] ?? 0);
-            $total += $amount;
-            $line = '- ' . ($row['period_label'] ?? $row['label'] ?? 'Month') . ' — Due ' . ($row['due_date'] ?? '—') . ' — Rs.' . number_format($amount, 2);
-            $wa[] = $line;
-            $sms[] = $line;
-        }
-
-        $slogan = $company?->company_slogan ?: ($company?->company_name ?: 'Finance');
-        $companyPhone = $company?->company_mobile ?: ($company?->support_mobile ?: '');
-        $link = ($publicUrl && $publicUrl !== '#') ? $publicUrl : '';
-        $wa[] = '';
-        $wa[] = '*Total due: Rs.' . number_format($total, 2) . '*';
-        $sms[] = '';
-        $sms[] = 'Total due: Rs.' . number_format($total, 2);
-        if ($link !== '') {
-            $wa[] = '';
-            $wa[] = 'View schedule: ' . $link;
-            $sms[] = '';
-            $sms[] = 'View schedule: ' . $link;
-        }
-        $wa[] = '';
-        $wa[] = 'Thank you, ' . $slogan . '.' . ($companyPhone !== '' ? ' For queries: ' . $companyPhone . '.' : '');
-        $sms[] = '';
-        $sms[] = 'Thank you, ' . $slogan . '.' . ($companyPhone !== '' ? ' For queries: ' . $companyPhone . '.' : '');
-
-        return [
-            'whatsapp' => 'https://wa.me/' . $digits . '?text=' . rawurlencode(implode("\n", $wa)),
-            'sms' => 'sms:+' . $digits . '?body=' . rawurlencode(implode("\n", $sms)),
-        ];
-    }
-
     protected function loanDisplayStatus(Emi $emi, Carbon $today): string
     {
         if ($emi->status === 'paid') {
@@ -1327,28 +1065,6 @@ class ClientCollectionsController extends Controller
         return $dueDate->lte($today->copy()->endOfMonth()->startOfDay()) ? 'pending' : 'upcoming';
     }
 
-    protected function chitDisplayStatus(Installment $inst, Carbon $today, float $paid, float $balance): string
-    {
-        if ($inst->status === 'paid' || ($balance <= 0.009 && $paid > 0.009)) {
-            return 'paid';
-        }
-        if ($inst->status === 'waived') {
-            return 'waived';
-        }
-
-        $dueDate = $inst->due_date ? Carbon::parse($inst->due_date)->startOfDay() : null;
-        if (! $dueDate) {
-            return $paid > 0.009 ? 'partial' : 'pending';
-        }
-        if ($dueDate->lt($today)) {
-            return 'overdue';
-        }
-        if ($paid > 0.009 && $balance > 0.009) {
-            return 'partial';
-        }
-
-        return $dueDate->lte($today->copy()->endOfMonth()->startOfDay()) ? 'pending' : 'upcoming';
-    }
 
     protected function statusBadge(string $status): string
     {

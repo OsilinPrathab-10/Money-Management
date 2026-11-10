@@ -30,7 +30,7 @@
 <div class="account-module">
   @include('admin.account.shared.page-header', [
     'title' => __('Operational Ledger Management'),
-    'subtitle' => __('Tagged Chit / Loan / FD bank, revenue, expense & dividend movements.'),
+    'subtitle' => __('Tagged Loan / FD bank, revenue, expense movements.'),
   ])
 
   <div class="mb-4">
@@ -57,15 +57,7 @@
         </div>
       </div>
     </div>
-    <div class="col-sm-6 col-xl-2">
-      <div class="card h-100 shadow-sm border-0">
-        <div class="card-body">
-          <span class="text-muted d-block">{{ __('Chit fees') }}</span>
-          <h5 class="mb-0">₹{{ number_format((float) ($totals['chit_fees'] ?? 0), 2) }}</h5>
-        </div>
-      </div>
-    </div>
-    <div class="col-sm-6 col-xl-2">
+    <div class="col-sm-6 col-xl-3">
       <div class="card h-100 shadow-sm border-0">
         <div class="card-body">
           <span class="text-muted d-block">{{ __('Loan fees') }}</span>
@@ -73,7 +65,7 @@
         </div>
       </div>
     </div>
-    <div class="col-sm-6 col-xl-2">
+    <div class="col-sm-6 col-xl-3">
       <div class="card h-100 shadow-sm border-0">
         <div class="card-body">
           <span class="text-muted d-block">{{ __('FD fees') }}</span>

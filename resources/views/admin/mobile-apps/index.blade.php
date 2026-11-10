@@ -426,28 +426,6 @@
                   </div>
                 </div>
 
-                <!-- Chit Tab Color -->
-                <div class="col-md-6">
-                  <label for="chit_tab_color" class="form-label fw-semibold">Chit Tab Color</label>
-                  <div class="input-group color-picker-group">
-                    <label class="input-group-text p-1 cursor-pointer bg-light" title="Click to open color picker">
-                      <input type="color" class="form-control form-control-color border-0" id="chitTabColorPicker" value="{{ str_starts_with($setting->chit_tab_color ?? '', '#') ? $setting->chit_tab_color : '#' . ($setting->chit_tab_color ?? '7367F0') }}" onchange="syncColorInput(this, '#chit_tab_color')" oninput="syncColorInput(this, '#chit_tab_color')">
-                    </label>
-                    <input type="text" class="form-control fw-monospace text-uppercase" id="chit_tab_color" name="chit_tab_color" value="{{ $setting->chit_tab_color ?? '#7367F0' }}" maxlength="7" oninput="syncColorPicker(this, '#chitTabColorPicker')" onkeyup="syncColorPicker(this, '#chitTabColorPicker')">
-                    <button type="button" class="btn btn-outline-secondary px-2" onclick="document.getElementById('chitTabColorPicker').click()" title="Pick Color">
-                      <i class="ri-palette-line"></i>
-                    </button>
-                  </div>
-                  <div class="d-flex align-items-center gap-1 mt-2 flex-wrap">
-                    <span class="color-swatch-btn" style="background-color: #7367F0;" onclick="applySwatch('#7367F0', '#chitTabColorPicker', '#chit_tab_color')" title="Purple"></span>
-                    <span class="color-swatch-btn" style="background-color: #FF9F43;" onclick="applySwatch('#FF9F43', '#chitTabColorPicker', '#chit_tab_color')" title="Orange"></span>
-                    <span class="color-swatch-btn" style="background-color: #696CFF;" onclick="applySwatch('#696CFF', '#chitTabColorPicker', '#chit_tab_color')" title="Indigo"></span>
-                    <span class="color-swatch-btn" style="background-color: #28C76F;" onclick="applySwatch('#28C76F', '#chitTabColorPicker', '#chit_tab_color')" title="Green"></span>
-                    <span class="color-swatch-btn" style="background-color: #FF4C51;" onclick="applySwatch('#FF4C51', '#chitTabColorPicker', '#chit_tab_color')" title="Red"></span>
-                    <span class="color-swatch-btn" style="background-color: #00CFDD;" onclick="applySwatch('#00CFDD', '#chitTabColorPicker', '#chit_tab_color')" title="Cyan"></span>
-                  </div>
-                </div>
-
                 <!-- Fixed Deposit / Collection Tab Color -->
                 <div class="col-md-6">
                   <label for="fixed_deposit_tab_color" class="form-label fw-semibold">{{ $dbAppType === 'agent' ? 'Collection / FD Tab Color' : 'Fixed Deposit Tab Color' }}</label>
@@ -493,7 +471,6 @@
                     <div class="d-flex align-items-center gap-1 flex-wrap">
                       <span id="previewPillOverview" class="badge rounded-pill text-white px-2 py-1 small" style="background-color: {{ $setting->overview_tab_color ?? '#696CFF' }};">Overview</span>
                       <span id="previewPillLoan" class="badge rounded-pill text-white px-2 py-1 small" style="background-color: {{ $setting->loan_tab_color ?? '#00CFDD' }};">Loan</span>
-                      <span id="previewPillChit" class="badge rounded-pill text-white px-2 py-1 small" style="background-color: {{ $setting->chit_tab_color ?? '#7367F0' }};">Chit</span>
                       <span id="previewPillFd" class="badge rounded-pill text-white px-2 py-1 small" style="background-color: {{ $setting->fixed_deposit_tab_color ?? '#FF4C51' }};">{{ $dbAppType === 'agent' ? 'Collection' : 'FD' }}</span>
                     </div>
                   </div>
@@ -538,7 +515,7 @@
             <h5 class="card-title mb-0 d-flex align-items-center gap-2 text-primary">
               <i class="ri-slideshow-3-line"></i> In-App Banner Media Sliders
             </h5>
-            <small class="text-muted">Upload promotional banners for Overview, Loan, Chit, and FD screens</small>
+            <small class="text-muted">Upload promotional banners for Overview, Loan, and FD screens</small>
           </div>
         </div>
         <div class="card-body p-4">
@@ -546,7 +523,6 @@
             $bannerGroups = [
               ['key' => 'overview', 'input' => 'banner_images', 'label' => 'Overview / Home', 'images' => $setting->banner_images ?? []],
               ['key' => 'loan', 'input' => 'loan_banner_images', 'label' => 'Loan', 'images' => $setting->loan_banner_images ?? []],
-              ['key' => 'chit', 'input' => 'chit_banner_images', 'label' => 'Chit', 'images' => $setting->chit_banner_images ?? []],
               ['key' => 'fd', 'input' => 'fd_banner_images', 'label' => 'Fixed Deposit', 'images' => $setting->fd_banner_images ?? []],
             ];
           @endphp
@@ -1062,14 +1038,12 @@
     const bg = $('#background_color').val() || '#F5F5F9';
     const overview = $('#overview_tab_color').val() || '#696CFF';
     const loan = $('#loan_tab_color').val() || '#00CFDD';
-    const chit = $('#chit_tab_color').val() || '#7367F0';
     const fd = $('#fixed_deposit_tab_color').val() || '#FF4C51';
 
     $('#livePreviewHeader').css('background-color', primary);
     $('#livePreviewBody').css('background-color', bg);
     $('#previewPillOverview').css('background-color', overview);
     $('#previewPillLoan').css('background-color', loan);
-    $('#previewPillChit').css('background-color', chit);
     $('#previewPillFd').css('background-color', fd);
   }
 

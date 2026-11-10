@@ -50,7 +50,7 @@ document.addEventListener('DOMContentLoaded', function () {
   const views = Array.from(document.querySelectorAll('.sds-app-view'));
   const tabs = Array.from(document.querySelectorAll('.sds-app-tab'));
   const payBtn = document.querySelector('.sds-pay-btn');
-  const chitAction = document.querySelector('[data-app-action="chit"]');
+  const loanAction = document.querySelector('[data-app-action="loan"]');
   if (!views.length || reduceMotion) return;
 
   const tabFor = [0, 1, 1];
@@ -68,10 +68,10 @@ document.addEventListener('DOMContentLoaded', function () {
       tab.classList.toggle('is-active', idx === tabFor[step]);
     });
     if (payBtn) payBtn.classList.remove('is-paying');
-    if (chitAction) chitAction.classList.remove('is-hit');
+    if (loanAction) loanAction.classList.remove('is-hit');
 
     if (step === 1) {
-      if (chitAction) chitAction.classList.add('is-hit');
+      if (loanAction) loanAction.classList.add('is-hit');
       setTimeout(function () { if (payBtn) payBtn.classList.add('is-paying'); }, 900);
     }
     if (prev) setTimeout(function () { prev.classList.remove('is-leave'); }, 450);

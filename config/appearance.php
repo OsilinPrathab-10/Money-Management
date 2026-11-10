@@ -23,7 +23,7 @@ return array (
     'logo' => '',
     'logo_dark' => '',
     'favicon' => '',
-    'footer_text' => '',
+    'footer_text' => '@2026',
     'loader_animation' => 'loader_favicon',
   ),
 );

@@ -37,6 +37,8 @@
                 </div>
               </div>
             </div>
+
+            @include('admin.clients.modals.partials.open-loan-interest-source')
             
             <!-- Client Selection -->
             <div class="col-12">
@@ -51,13 +53,7 @@
               </select>
             </div>
 
-            <!-- Chit Fund Details Panel (shown when client has chit memberships) -->
-            <div class="col-12" id="chitDetailsPanel" style="display: none;">
-              <div class="alert alert-info border d-flex align-items-start gap-2 mb-0 py-2 px-3">
-                <i class="ri-hand-coin-line ri-20px mt-1"></i>
-                <div id="chitSummaryText"></div>
-              </div>
-            </div>
+
 
             @php
               $modalLoanTypes = collect();
@@ -148,6 +144,8 @@
                 <option value="daily">Daily</option>
               </select>
             </div>
+
+            @include('admin.clients.modals.partials.open-loan-manual-interest-field')
 
             <div class="col-md-4">
                <div class="d-flex justify-content-between align-items-center mb-2">

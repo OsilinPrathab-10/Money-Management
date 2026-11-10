@@ -9,7 +9,7 @@
 
 <!-- Vendor Scripts -->
 @section('vendor-script')
-  @vite(['resources/assets/vendor/libs/moment/moment.js', 'resources/assets/vendor/libs/datatables-bs5/datatables-bootstrap5.js', 'resources/assets/vendor/libs/select2/select2.js', 'resources/assets/vendor/libs/@form-validation/popular.js', 'resources/assets/vendor/libs/@form-validation/bootstrap5.js', 'resources/assets/vendor/libs/@form-validation/auto-focus.js', 'resources/assets/vendor/libs/cleave-zen/cleave-zen.js', 'resources/assets/vendor/libs/sweetalert2/sweetalert2.js', 'resources/assets/vendor/libs/flatpickr/flatpickr.js', 'resources/assets/custom-js/loan-applications.js', 'resources/assets/custom-js/chit-applications.js', 'resources/assets/custom-js/chit-need-month.js', 'resources/assets/custom-js/fd-applications.js'])
+  @vite(['resources/assets/vendor/libs/moment/moment.js', 'resources/assets/vendor/libs/datatables-bs5/datatables-bootstrap5.js', 'resources/assets/vendor/libs/select2/select2.js', 'resources/assets/vendor/libs/@form-validation/popular.js', 'resources/assets/vendor/libs/@form-validation/bootstrap5.js', 'resources/assets/vendor/libs/@form-validation/auto-focus.js', 'resources/assets/vendor/libs/cleave-zen/cleave-zen.js', 'resources/assets/vendor/libs/sweetalert2/sweetalert2.js', 'resources/assets/vendor/libs/flatpickr/flatpickr.js', 'resources/assets/custom-js/loan-applications.js', 'resources/assets/custom-js/fd-applications.js'])
 @endsection
 
 @section('page-style')
@@ -185,7 +185,6 @@
             <option value="">All Accounts</option>
             <option value="emi">Standard EMI Loan</option>
             <option value="interest_only">Open Loan</option>
-            <option value="chit">Chit Fund</option>
             <option value="any_loan">Any Loan Account</option>
             <option value="no_accounts">Without Accounts</option>
           </select>
@@ -234,7 +233,6 @@
             <th>Mobile</th>
             <th>Area</th>
             <th>Loans</th>
-            <th>Chits</th>
             <th>Assigned Agent</th>
             <th>Added By</th>
             <th>Status</th>
@@ -255,7 +253,7 @@
           </div>
           <h5 class="mb-2">Move to Recycle Bin?</h5>
           <p class="text-muted mb-0">
-            The client and their loan, chit and deposit accounts will be archived.
+            The client and their loan and deposit accounts will be archived.
             You can restore them from the Recycle Bin.
           </p>
         </div>
@@ -414,7 +412,7 @@
     </div>
   </div>
 
-  <!-- Per-account Loan / Chit Penalty Modal -->
+  <!-- Per-account Loan Penalty Modal -->
   <div class="modal fade" id="clientPenaltyModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable">
       <div class="modal-content">
@@ -444,11 +442,6 @@
   </div>
 
   @include('admin.clients.modals.modal-apply-loan-generic')
-  @include('admin.clients.modals.modal-apply-chit', [
-      'verifiedClients' => $verifiedClients ?? collect(),
-      'availableGroups' => $availableGroups ?? collect(),
-      'agents' => $agents ?? collect(),
-  ])
   @include('admin.clients.modals.modal-apply-fd-generic', [
       'verifiedClients' => $verifiedClients ?? collect(),
       'fdSchemes' => $fdSchemes ?? collect(),

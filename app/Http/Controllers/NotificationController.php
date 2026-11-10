@@ -16,7 +16,7 @@ class NotificationController extends Controller
     {
         $query = AdminNotification::orderByDesc('created_at');
 
-        // 1. Category Filter (Client/KYC, Loan, Chit, Ticket/Support, FD)
+        // 1. Category Filter (Client/KYC, Loan, Ticket/Support, FD)
         if ($request->filled('category') && $request->category !== 'all') {
             $category = $request->category;
             if ($category === 'client') {
@@ -36,14 +36,7 @@ class NotificationController extends Controller
                       ->orWhere('type', 'like', '%emi%')
                       ->orWhere('type', 'like', '%payment%')
                       ->orWhere('title', 'like', '%loan%')
-                      ->orWhere('title', 'like', '%emi%')
-                      ->orWhere('title', 'like', '%payment%');
-                });
-            } elseif ($category === 'chit') {
-                $query->where(function ($q) {
-                    $q->whereIn('type', ['new_chit_application', 'chit_application_approved', 'chit_application_rejected', 'chit_installment_collected', 'chit_settlement_paid', 'chit'])
-                      ->orWhere('type', 'like', '%chit%')
-                      ->orWhere('title', 'like', '%chit%');
+                      ->orWhere('title', 'like', '%emi%');
                 });
             } elseif ($category === 'ticket') {
                 $query->where(function ($q) {
@@ -135,6 +128,10 @@ class NotificationController extends Controller
     public function getLatest(Request $request): JsonResponse
     {
         try {
+            if (session()->isStarted()) {
+                session()->save();
+            }
+
             $limit = (int) $request->input('limit', 10);
             
             $notifications = AdminNotification::orderByDesc('created_at')
@@ -178,6 +175,10 @@ class NotificationController extends Controller
     public function getUnreadCount(): JsonResponse
     {
         try {
+            if (session()->isStarted()) {
+                session()->save();
+            }
+
             $count = AdminNotification::unread()->count();
 
             return response()->json([

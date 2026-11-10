@@ -127,20 +127,4 @@ class CollectedDocuments
 
         return array_values($docs);
     }
-
-    /**
-     * Chit settlement: settlement deed / collateral / other / additional files.
-     *
-     * @return list<array<string, mixed>>
-     */
-    public static function forChitSettlement(object $payout): array
-    {
-        $docs = self::named($payout, [
-            'settlement_document' => 'Settlement Deed / Release Document',
-            'collateral_document' => 'Collateral Document',
-            'other_document' => 'Collateral & Other Document',
-        ]);
-
-        return array_values(array_merge($docs, self::additional($payout->additional_documents ?? null)));
-    }
 }

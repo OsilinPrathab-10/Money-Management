@@ -21,7 +21,6 @@ use App\Http\Controllers\LoanApplicationsController;
 use App\Http\Controllers\FdApplicationsController;
 use App\Http\Controllers\ClientViewAccountController;
 use App\Http\Controllers\ClientViewLoansController;
-use App\Http\Controllers\ClientViewChitsController;
 use App\Http\Controllers\UserViewNotifications;
 use App\Http\Controllers\pages\UserProfile;
 // use App\Http\Controllers\pages\Faq;
@@ -31,6 +30,8 @@ use App\Http\Controllers\icons\RiIcons;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\ClientManagementController;
 use App\Http\Controllers\KycVerificationController;
+use App\Http\Controllers\CibilReportController;
+use App\Http\Controllers\ClientViewCibilController;
 use App\Http\Controllers\CreditScoreController;
 use App\Http\Controllers\RolesPermissionController;
 use App\Http\Controllers\RoleMenuController;
@@ -85,6 +86,12 @@ Route::middleware(['auth', 'admin'])->group(function () {
     //prepayment
     Route::get('/loan-accounts/{id}/prepayment-info', [\App\Http\Controllers\LoanAccountsController::class, 'prepaymentInfo'])->name('loan-account.prepayment-info');
     Route::post('/loan-accounts/{id}/prepayment', [\App\Http\Controllers\LoanAccountsController::class, 'processPrepayment'])->name('loan-account.prepayment');
+
+    //topup
+    Route::get('/loan-accounts/{id}/topup-info', [\App\Http\Controllers\LoanAccountsController::class, 'topupInfo'])->name('loan-account.topup-info');
+    Route::post('/loan-accounts/{id}/topup', [\App\Http\Controllers\LoanAccountsController::class, 'processTopup'])->name('loan-account.topup');
+    Route::get('/loan/loan-accounts/{id}/topup-info', [\App\Http\Controllers\LoanAccountsController::class, 'topupInfo']);
+    Route::post('/loan/loan-accounts/{id}/topup', [\App\Http\Controllers\LoanAccountsController::class, 'processTopup']);
 
     //support tickets
     Route::post('/support/tickets/{id}/assign', [\App\Http\Controllers\SupportTicketController::class, 'assign'])->name('support-tickets.assign');
@@ -330,7 +337,6 @@ Route::middleware(['auth', 'adminOrStaff'])->group(function () {
     Route::post('/clients/{id}/blacklist', [ClientViewAccountController::class, 'blacklist'])->name('client-blacklist');
     Route::post('/clients/{id}/unblacklist', [ClientViewAccountController::class, 'unblacklist'])->name('client-unblacklist');
     Route::get('/client/view/loans/{id}', [ClientViewLoansController::class, 'index'])->name('client-view-loans');
-    Route::get('/client/view/chits/{id}', [ClientViewChitsController::class, 'index'])->name('client-view-chits');
     Route::get('/clients/view/ledger/{id}', [ClientViewAccountController::class, 'ledger'])->name('client-view-ledger');
     Route::get('/clients/view/notifications/{id}', [ClientViewAccountController::class, 'notifications'])->name('client-view-notifications');
     Route::get('/client/loan/{loanId}/emis', [ClientViewLoansController::class, 'getEmiDetails'])->name('client-loan-emis');
@@ -413,7 +419,6 @@ Route::middleware(['auth', 'adminOrStaff'])->group(function () {
     Route::get('/app/agents/agent-collections', [AgentCollectionController::class, 'index'])->name('agent-collections');
     Route::get('/app/agents/agent-collections/stats', [AgentCollectionController::class, 'stats'])->name('agent-collections.stats');
     Route::get('/app/agents/agent-collections/list', [AgentCollectionController::class, 'list'])->name('agent-collections.list');
-    Route::get('/app/agents/agent-collections/chit-list', [AgentCollectionController::class, 'chitList'])->name('agent-collections.chit-list');
     Route::get('/app/agents/agent-collections/search-emis', [AgentCollectionController::class, 'searchEmis'])->name('agent-collections.search-emis');
     Route::get('/app/agents/agent-collections/assigned-dues', [AgentCollectionController::class, 'assignedDues'])->name('agent-collections.assigned-dues');
     Route::get('/app/agents/agent-collections/get-emi-info/{id}', [AgentCollectionController::class, 'getEmiInfo'])->name('agent-collections.get-emi-info');
@@ -473,7 +478,7 @@ Route::middleware(['auth', 'adminStaffOrAgent'])->group(function () {
     Route::get('/emi/repayments/emi/{emiId}/history', [\App\Http\Controllers\EmiController::class, 'getCollectionHistory'])->name('emi-repayments-history');
     Route::get('/emi/repayments/view/{applicationNumber}', [\App\Http\Controllers\EmiController::class, 'view'])->name('emi-details');
 
-    // Common payment receipts (All / Loan / Chit / FD)
+    // Common payment receipts (All / Loan / FD)
     Route::get('/payment-receipts', [\App\Http\Controllers\PaymentReceiptController::class, 'index'])
         ->defaults('module', 'all')
         ->name('payment-receipts');
@@ -483,20 +488,17 @@ Route::middleware(['auth', 'adminStaffOrAgent'])->group(function () {
     Route::get('/payment-receipts/loan', [\App\Http\Controllers\PaymentReceiptController::class, 'index'])
         ->defaults('module', 'loan')
         ->name('loan-payment-receipts');
-    Route::get('/payment-receipts/chit', [\App\Http\Controllers\PaymentReceiptController::class, 'index'])
-        ->defaults('module', 'chit')
-        ->name('chit-payment-receipts');
     Route::get('/payment-receipts/fd', [\App\Http\Controllers\PaymentReceiptController::class, 'index'])
         ->defaults('module', 'fd')
         ->name('fd-payment-receipts');
     Route::get('/payment-receipts/{module}/data', [\App\Http\Controllers\PaymentReceiptController::class, 'data'])
-        ->where('module', 'all|loan|chit|fd')
+        ->where('module', 'all|loan|fd')
         ->name('payment-receipts.data');
     Route::get('/payment-receipts/{module}/{id}/print', [\App\Http\Controllers\PaymentReceiptController::class, 'print'])
-        ->where('module', 'loan|chit|fd')
+        ->where('module', 'loan|fd')
         ->name('payment-receipts.print');
 
-    // Combined applications (All / Loan / Chit / FD)
+    // Combined applications (All / Loan / FD)
     Route::get('/applications', [\App\Http\Controllers\ApplicationListController::class, 'index'])
         ->defaults('module', 'all')
         ->name('applications');
@@ -506,15 +508,9 @@ Route::middleware(['auth', 'adminStaffOrAgent'])->group(function () {
     Route::get('/applications/loan', [\App\Http\Controllers\ApplicationListController::class, 'index'])
         ->defaults('module', 'loan')
         ->name('applications.loan');
-    Route::get('/applications/chit', [\App\Http\Controllers\ApplicationListController::class, 'index'])
-        ->defaults('module', 'chit')
-        ->name('applications.chit');
     Route::get('/applications/fd', [\App\Http\Controllers\ApplicationListController::class, 'index'])
         ->defaults('module', 'fd')
         ->name('applications.fd');
-    Route::get('/applications/settlement', [\App\Http\Controllers\ApplicationListController::class, 'index'])
-        ->defaults('module', 'settlement')
-        ->name('applications.settlement');
 
     Route::get('/client-collections', [\App\Http\Controllers\ClientCollectionsController::class, 'index'])
         ->name('client-collections');
@@ -524,6 +520,10 @@ Route::middleware(['auth', 'adminStaffOrAgent'])->group(function () {
         ->name('client-collections.pay');
     Route::post('/client-collections/bulk-pay', [\App\Http\Controllers\ClientCollectionsController::class, 'bulkPay'])
         ->name('client-collections.bulk-pay');
+    Route::get('/client-collections/notes', [\App\Http\Controllers\ClientCollectionsController::class, 'getNotes'])
+        ->name('client-collections.notes');
+    Route::post('/client-collections/notes', [\App\Http\Controllers\ClientCollectionsController::class, 'saveNote'])
+        ->name('client-collections.notes.store');
 
 
     // Legacy loan receipt URLs
@@ -581,7 +581,6 @@ Route::middleware(['auth', 'adminStaffOrAgent'])->group(function () {
     Route::post('/client-management/{id}/toggle-status', [\App\Http\Controllers\ClientManagementController::class, 'toggleStatus'])->name('client-toggle-status');
     Route::get('/client-management/{client}/penalty-accounts', [\App\Http\Controllers\ClientManagementController::class, 'penaltyAccounts'])->name('client-penalty-accounts');
     Route::post('/client-management/penalty/apply-loan', [\App\Http\Controllers\ClientManagementController::class, 'applyLoanPenalty'])->name('client-penalty-apply-loan');
-    Route::post('/client-management/penalty/apply-chit', [\App\Http\Controllers\ClientManagementController::class, 'applyChitPenalty'])->name('client-penalty-apply-chit');
 
     // Loan applications
     Route::get('/loan/loan-applications', [LoanApplicationsController::class, 'index'])->name('loan-applications');
@@ -745,6 +744,17 @@ Route::middleware(['auth', 'adminOrStaff'])->group(function () {
 
 // Credit score / CIBIL — Admin or CreditVerifier only
 Route::middleware(['auth', 'credit_access'])->group(function () {
+    Route::get('/cibil-report', [CibilReportController::class, 'index'])->name('cibil-report.index');
+    Route::post('/cibil-report', [CibilReportController::class, 'store'])->name('cibil-report.store');
+    Route::get('/cibil-report/{id}', [CibilReportController::class, 'show'])->name('cibil-report.show');
+    Route::get('/cibil-report/{id}/pdf', [CibilReportController::class, 'pdf'])->name('cibil-report.pdf');
+    Route::post('/cibil-report/{id}/pdf', [CibilReportController::class, 'retryPdf'])->name('cibil-report.retry-pdf');
+    Route::post('/cibil-report/{id}/link', [CibilReportController::class, 'link'])->name('cibil-report.link');
+    Route::get('/cibil-report/{id}/create-client', [CibilReportController::class, 'createClient'])->name('cibil-report.create-client');
+    Route::delete('/cibil-report/{id}', [CibilReportController::class, 'destroy'])->name('cibil-report.destroy');
+
+    Route::get('/clients/view/cibil/{clientId}', [ClientViewCibilController::class, 'index'])->name('client-view-cibil');
+
     Route::get('/verification/credit-score-history', [CreditScoreController::class, 'index'])->name('verification-credit-score-history');
     Route::post('/verification/credit-score-history/fetch', [CreditScoreController::class, 'fetch'])->name('verification-credit-score-fetch');
     Route::get('/verification/credit-score-history/{creditScoreHistory}', [CreditScoreController::class, 'show'])->name('verification-credit-score-show');
@@ -778,9 +788,8 @@ Route::get('/privacy-policy', [PageConfigurationController::class, 'show'])->def
 Route::get('/terms-and-conditions', [PageConfigurationController::class, 'show'])->defaults('slug', 'terms-and-conditions')->name('public.terms-and-conditions');
 Route::get('/page/{slug}', [PageConfigurationController::class, 'show'])->name('public.page');
 
-// Unified Public Client Schedule (Loans + Chits)
+// Unified Public Client Schedule (Loans)
 Route::get('/view-schedule/{token}', [\App\Http\Controllers\PublicClientScheduleController::class, 'viewSchedule'])->name('public.view-schedule');
-Route::get('/view-chit-schedule/{token}', [\App\Http\Controllers\PublicClientScheduleController::class, 'viewSchedule'])->name('public.view-chit-schedule');
 Route::get('/view-client-schedule/{token}', [\App\Http\Controllers\PublicClientScheduleController::class, 'viewSchedule'])->name('public.view-client-schedule');
 
 // Public Credit Check & KYC
@@ -810,156 +819,6 @@ Route::prefix('client')->name('client.')->group(function () {
         Route::post('/logout', [App\Http\Controllers\Auth\ClientAuthController::class, 'logout'])->name('logout');
     });
 });
-
-// ─── Chit Fund Management ────────────────────────────────────────────────────
-Route::middleware(['auth', 'adminOrStaff'])->prefix('admin/chit')->name('chit.')->group(function () {
-
-    // Dashboard
-    Route::get('/dashboard', [\App\Http\Controllers\ChitDashboardController::class, 'index'])->name('dashboard');
-
-    // Reports — loan-style analytics pages first so they are not captured by {report}
-    Route::get('/reports/applications', [\App\Http\Controllers\ModuleReportAnalyticsController::class, 'chitApplications'])->name('reports.applications');
-    Route::get('/reports/applications/export', [\App\Http\Controllers\ModuleReportAnalyticsController::class, 'chitApplications'])->name('reports.applications.export');
-    Route::get('/reports/accounts-analytics', [\App\Http\Controllers\ModuleReportAnalyticsController::class, 'chitAccounts'])->name('reports.accounts');
-    Route::get('/reports/accounts-analytics/export', [\App\Http\Controllers\ModuleReportAnalyticsController::class, 'chitAccounts'])->name('reports.accounts.export');
-    Route::get('/reports/installments-analytics', [\App\Http\Controllers\ModuleReportAnalyticsController::class, 'chitInstallments'])->name('reports.installments-analytics');
-    Route::get('/reports/installments-analytics/export', [\App\Http\Controllers\ModuleReportAnalyticsController::class, 'chitInstallments'])->name('reports.installments-analytics.export');
-    Route::get('/reports/payments', [\App\Http\Controllers\ModuleReportAnalyticsController::class, 'chitPayments'])->name('reports.payments');
-    Route::get('/reports/payments/export', [\App\Http\Controllers\ModuleReportAnalyticsController::class, 'chitPayments'])->name('reports.payments.export');
-    Route::get('/reports', [\App\Http\Controllers\ChitReportsController::class, 'index'])->name('reports.index');
-    Route::get('/reports/{report}', [\App\Http\Controllers\ChitReportsController::class, 'show'])->name('reports.show');
-    Route::get('/reports/{report}/export', [\App\Http\Controllers\ChitReportsController::class, 'export'])->name('reports.export');
-
-    // Chit Applications
-    Route::get('/applications',              [\App\Http\Controllers\ChitApplicationController::class, 'index'])->name('applications.index');
-    Route::get('/applications/data',         [\App\Http\Controllers\ChitApplicationController::class, 'data'])->name('applications.data');
-    Route::post('/applications/apply',       [\App\Http\Controllers\ChitApplicationController::class, 'apply'])->name('applications.apply');
-    Route::get('/applications/{member}',         [\App\Http\Controllers\ChitApplicationController::class, 'show'])->name('applications.show');
-    Route::post('/applications/{member}/approve', [\App\Http\Controllers\ChitApplicationController::class, 'approve'])->name('applications.approve');
-    Route::post('/applications/{member}/reject',  [\App\Http\Controllers\ChitApplicationController::class, 'reject'])->name('applications.reject');
-
-    // Chit Accounts
-    Route::get('/accounts',                    [\App\Http\Controllers\ChitAccountsController::class, 'index'])->name('accounts.index');
-    Route::get('/accounts/data',               [\App\Http\Controllers\ChitAccountsController::class, 'data'])->name('accounts.data');
-    Route::get('/accounts/{member}',           [\App\Http\Controllers\ChitAccountsController::class, 'view'])->name('accounts.show');
-
-    // Schemes
-    Route::get('/schemes',                    [\App\Http\Controllers\ChitSchemeController::class,      'index'])  ->name('schemes.index');
-    Route::get('/schemes/create',             [\App\Http\Controllers\ChitSchemeController::class,      'create']) ->name('schemes.create');
-    Route::post('/schemes',                   [\App\Http\Controllers\ChitSchemeController::class,      'store'])  ->name('schemes.store');
-    Route::post('/schemes/payout-template/pdf', [\App\Http\Controllers\ChitSchemeController::class,    'payoutTemplatePdf'])->name('schemes.payout-template-pdf');
-    Route::get('/schemes/{scheme}',           [\App\Http\Controllers\ChitSchemeController::class,      'show'])   ->name('schemes.show');
-    Route::get('/schemes/{scheme}/flyer',     [\App\Http\Controllers\ChitSchemeController::class,      'flyer'])  ->name('schemes.flyer');
-    Route::get('/schemes/{scheme}/edit',      [\App\Http\Controllers\ChitSchemeController::class,      'edit'])   ->name('schemes.edit');
-    Route::put('/schemes/{scheme}',           [\App\Http\Controllers\ChitSchemeController::class,      'update']) ->name('schemes.update');
-    Route::delete('/schemes/{scheme}',        [\App\Http\Controllers\ChitSchemeController::class,      'destroy'])->name('schemes.destroy');
-    Route::patch('/schemes/{scheme}/toggle-status', [\App\Http\Controllers\ChitSchemeController::class, 'toggleStatus'])->name('schemes.toggle-status');
-    Route::post('/schemes/{id}/restore',      [\App\Http\Controllers\ChitSchemeController::class,      'restore'])->name('schemes.restore');
-    Route::delete('/schemes/{id}/force-delete', [\App\Http\Controllers\ChitSchemeController::class,    'forceDelete'])->name('schemes.force-delete');
-
-    // Groups
-    Route::get('/groups',                     [\App\Http\Controllers\ChitGroupController::class,       'index'])  ->name('groups.index');
-    Route::get('/groups/create',              [\App\Http\Controllers\ChitGroupController::class,       'create']) ->name('groups.create');
-    Route::post('/groups',                    [\App\Http\Controllers\ChitGroupController::class,       'store'])  ->name('groups.store');
-    Route::get('/groups/{group}',             [\App\Http\Controllers\ChitGroupController::class,       'show'])   ->name('groups.show');
-    Route::get('/groups/{group}/edit',        [\App\Http\Controllers\ChitGroupController::class,       'edit'])   ->name('groups.edit');
-    Route::put('/groups/{group}',             [\App\Http\Controllers\ChitGroupController::class,       'update']) ->name('groups.update');
-    Route::post('/groups/{group}/activate',   [\App\Http\Controllers\ChitGroupController::class,       'activate'])->name('groups.activate');
-    Route::post('/groups/{group}/close',      [\App\Http\Controllers\ChitGroupController::class,       'close'])   ->name('groups.close');
-    Route::post('/groups/{group}/reopen',     [\App\Http\Controllers\ChitGroupController::class,       'reopen'])  ->name('groups.reopen');
-    Route::post('/groups/{group}/cancel-termination', [\App\Http\Controllers\ChitGroupController::class, 'cancelTermination'])->name('groups.cancel-termination');
-    Route::delete('/groups/{group}',          [\App\Http\Controllers\ChitGroupController::class,       'destroy'])->name('groups.destroy');
-    Route::post('/groups/{id}/restore',       [\App\Http\Controllers\ChitGroupController::class,       'restore'])->name('groups.restore');
-    Route::delete('/groups/{id}/force-delete', [\App\Http\Controllers\ChitGroupController::class,      'forceDelete'])->name('groups.force-delete');
-
-    // Members
-    Route::get('/members',                    [\App\Http\Controllers\ChitMemberController::class,      'index'])  ->name('members.index');
-    Route::get('/members/create',             [\App\Http\Controllers\ChitMemberController::class,      'create']) ->name('members.create');
-    Route::post('/members',                   [\App\Http\Controllers\ChitMemberController::class,      'store'])  ->name('members.store');
-    Route::get('/members/{member}/edit',      [\App\Http\Controllers\ChitMemberController::class,      'edit'])   ->name('members.edit');
-    Route::put('/members/{member}',           [\App\Http\Controllers\ChitMemberController::class,      'update'])->name('members.update');
-    Route::post('/members/{member}/approve',  [\App\Http\Controllers\ChitMemberController::class,      'approve'])->name('members.approve');
-    Route::post('/members/{member}/reject',   [\App\Http\Controllers\ChitMemberController::class,      'reject']) ->name('members.reject');
-    Route::post('/members/{member}/cancel',   [\App\Http\Controllers\ChitMemberController::class,      'cancel']) ->name('members.cancel');
-    Route::delete('/members/{member}',        [\App\Http\Controllers\ChitMemberController::class,      'destroy'])->name('members.destroy');
-
-    // Member Transfers
-    Route::get('/transfers',                              [\App\Http\Controllers\ChitMemberTransferController::class, 'index'])->name('transfers.index');
-    Route::get('/transfers/{transfer}',                   [\App\Http\Controllers\ChitMemberTransferController::class, 'show'])->name('transfers.show');
-    Route::post('/transfers/{transfer}/release-outgoing-settlement', [\App\Http\Controllers\ChitMemberTransferController::class, 'releaseOutgoingSettlement'])->name('transfers.release-outgoing-settlement');
-    Route::get('/members/{member}/transfer',              [\App\Http\Controllers\ChitMemberTransferController::class, 'create'])->name('members.transfer.create');
-    Route::get('/members/{member}/transfer/preview',      [\App\Http\Controllers\ChitMemberTransferController::class, 'preview'])->name('members.transfer.preview');
-    Route::post('/members/{member}/transfer',             [\App\Http\Controllers\ChitMemberTransferController::class, 'store'])->name('members.transfer.store');
-
-    // Families
-    Route::get('/families',                                      [\App\Http\Controllers\ChitFamilyController::class, 'index'])       ->name('families.index');
-    Route::post('/families',                                     [\App\Http\Controllers\ChitFamilyController::class, 'store'])       ->name('families.store');
-    Route::get('/families/{family}',                             [\App\Http\Controllers\ChitFamilyController::class, 'show'])        ->name('families.show');
-    Route::put('/families/{family}',                             [\App\Http\Controllers\ChitFamilyController::class, 'update'])      ->name('families.update');
-    Route::delete('/families/{family}',                          [\App\Http\Controllers\ChitFamilyController::class, 'destroy'])     ->name('families.destroy');
-    Route::post('/families/{family}/members',                    [\App\Http\Controllers\ChitFamilyController::class, 'addMember'])   ->name('families.members.store');
-    Route::delete('/families/{family}/members/{member}',         [\App\Http\Controllers\ChitFamilyController::class, 'removeMember']) ->name('families.members.destroy');
-    Route::post('/families/{family}/bulk-collect',               [\App\Http\Controllers\ChitFamilyController::class, 'bulkCollect'])  ->name('families.bulk-collect');
-
-    // Installments
-    Route::get('/installments',                              [\App\Http\Controllers\ChitInstallmentController::class, 'index'])  ->name('installments.index');
-    Route::get('/installments/data',                         [\App\Http\Controllers\ChitInstallmentController::class, 'getData'])->name('installments.data');
-    Route::get('/installments/client/{client}',              [\App\Http\Controllers\ChitInstallmentController::class, 'clientShow'])->name('installments.client');
-    Route::post('/installments/bulk-collect',                [\App\Http\Controllers\ChitInstallmentController::class, 'bulkCollect'])->name('installments.bulk-collect');
-    Route::get('/installments/{group}/{month}',              [\App\Http\Controllers\ChitInstallmentController::class, 'show'])   ->name('installments.show')->whereNumber('month');
-    Route::post('/installments/{installment}/collect',       [\App\Http\Controllers\ChitInstallmentController::class, 'collect'])->name('installments.collect');
-    Route::get('/installments/{installment}/partial-rules',  [\App\Http\Controllers\ChitInstallmentController::class, 'partialPaymentRules'])->name('installments.partial-rules');
-    Route::post('/installments/{installment}/undo',          [\App\Http\Controllers\ChitInstallmentController::class, 'undo'])->name('installments.undo');
-
-    // Auctions
-    Route::get('/auctions',                           [\App\Http\Controllers\ChitAuctionController::class,  'index'])         ->name('auctions.index');
-    Route::get('/auctions/create',                    [\App\Http\Controllers\ChitAuctionController::class,  'create'])        ->name('auctions.create');
-    Route::post('/auctions',                          [\App\Http\Controllers\ChitAuctionController::class,  'store'])         ->name('auctions.store');
-    Route::get('/auctions/{auction}',                 [\App\Http\Controllers\ChitAuctionController::class,  'show'])          ->name('auctions.show');
-    Route::post('/auctions/{auction}/bid',            [\App\Http\Controllers\ChitAuctionController::class,  'bid'])           ->name('auctions.bid');
-    Route::post('/auctions/{auction}/declare-winner', [\App\Http\Controllers\ChitAuctionController::class,  'declareWinner']) ->name('auctions.declare-winner');
-
-    // Dividends
-    Route::get('/dividends',                       [\App\Http\Controllers\ChitDividendController::class, 'index'])     ->name('dividends.index');
-    Route::get('/dividends/pool/{group}',          [\App\Http\Controllers\ChitDividendController::class, 'showPool'])  ->name('dividends.pool');
-    Route::get('/dividends/{dividend}',            [\App\Http\Controllers\ChitDividendController::class, 'show'])      ->name('dividends.show');
-    Route::post('/dividends/{dividend}/distribute',[\App\Http\Controllers\ChitDividendController::class, 'distribute'])->name('dividends.distribute');
-
-    // Settlements
-    Route::get('/settlements',                                      [\App\Http\Controllers\ChitSettlementController::class, 'manage'])  ->name('settlements.manage');
-    Route::get('/settlements/history',                              [\App\Http\Controllers\ChitSettlementController::class, 'history']) ->name('settlements.history');
-    Route::get('/settlements/export',                               [\App\Http\Controllers\ChitSettlementController::class, 'export'])  ->name('settlements.export');
-    Route::post('/settlements/apply',                               [\App\Http\Controllers\ChitSettlementController::class, 'apply'])   ->name('settlements.apply');
-    Route::get('/settlements/{group}/{member}/confirm',           [\App\Http\Controllers\ChitSettlementController::class, 'confirm'])  ->name('settlements.confirm');
-    Route::post('/settlements/{group}/{member}/process',          [\App\Http\Controllers\ChitSettlementController::class, 'process'])  ->name('settlements.process');
-    Route::post('/settlements/{group}/{member}/update-future-installment', [\App\Http\Controllers\ChitSettlementController::class, 'updateFutureInstallment'])->name('settlements.update-future-installment');
-    Route::get('/settlements/{payout}/promissory-note',           [\App\Http\Controllers\ChitSettlementController::class, 'promissoryNote'])->name('settlements.promissory-note');
-    Route::get('/settlements/{payout}/promissory-note/pdf',       [\App\Http\Controllers\ChitSettlementController::class, 'promissoryNotePdf'])->name('settlements.promissory-note.pdf');
-    Route::post('/settlements/{payout}/cancel',                     [\App\Http\Controllers\ChitSettlementController::class, 'cancel'])   ->name('settlements.cancel');
-
-    // Chit Settlement Applications (Dedicated Module)
-    Route::get('/settlement-applications',          [\App\Http\Controllers\ChitSettlementApplicationController::class, 'index'])->name('settlement-applications.index');
-    Route::get('/settlement-applications/data',     [\App\Http\Controllers\ChitSettlementApplicationController::class, 'data'])->name('settlement-applications.data');
-    Route::get('/settlement-applications/{payout}', [\App\Http\Controllers\ChitSettlementApplicationController::class, 'show'])->name('settlement-applications.show');
-    Route::post('/settlement-applications/{payout}/update-month', [\App\Http\Controllers\ChitSettlementApplicationController::class, 'updateMonth'])->name('settlement-applications.update-month');
-
-    // Payouts (legacy routes — redirect to settlements)
-    Route::get('/payouts',                     [\App\Http\Controllers\ChitPayoutController::class, 'index'])  ->name('payouts.index');
-    Route::post('/payouts',                    [\App\Http\Controllers\ChitPayoutController::class, 'store'])  ->name('payouts.store');
-    Route::get('/payouts/{payout}',            [\App\Http\Controllers\ChitPayoutController::class, 'show'])   ->name('payouts.show');
-    Route::post('/payouts/{payout}/process',   [\App\Http\Controllers\ChitPayoutController::class, 'process'])->name('payouts.process');
-
-    // Chit Configuration
-    Route::get('/chit-configuration',          [\App\Http\Controllers\ChitConfigurationController::class, 'index'])->name('configuration.index');
-    Route::post('/chit-configuration',         [\App\Http\Controllers\ChitConfigurationController::class, 'update'])->name('configuration.update');
-
-    // Referral Bonuses
-    Route::get('/referral-bonuses',            [\App\Http\Controllers\ChitReferralBonusController::class, 'index'])->name('referral-bonuses.index');
-    Route::get('/referral-bonuses/options',    [\App\Http\Controllers\ChitReferralBonusController::class, 'getOptions'])->name('referral-bonuses.options');
-    Route::post('/referral-bonuses',           [\App\Http\Controllers\ChitReferralBonusController::class, 'store'])->name('referral-bonuses.store');
-    Route::post('/referral-bonuses/{bonus}/pay', [\App\Http\Controllers\ChitReferralBonusController::class, 'pay'])->name('referral-bonuses.pay');
-});
-// ─────────────────────────────────────────────────────────────────────────────
 
 // ─── Fixed Deposit Management ────────────────────────────────────────────────
 Route::middleware(['auth', 'adminOrStaff'])->prefix('admin/fd')->name('fd.')->group(function () {
@@ -1017,43 +876,26 @@ Route::middleware(['auth', 'adminOrStaff'])->prefix('admin/fd')->name('fd.')->gr
 
 // Public receipt and statement view routes (for Customer Mobile App view links)
 Route::get('/payment-receipts/{module}/{id}', [\App\Http\Controllers\PaymentReceiptController::class, 'print'])
-    ->where('module', 'loan|chit|fd')
+    ->where('module', 'loan|fd')
     ->name('public-payment-receipts.print');
 Route::get('/payment-receipts/{module}/{id}/print', [\App\Http\Controllers\PaymentReceiptController::class, 'print'])
-    ->where('module', 'loan|chit|fd')
+    ->where('module', 'loan|fd')
     ->name('payment-receipts.print');
-Route::get('/chit/receipt/{id}', function ($id) {
-    return app(\App\Http\Controllers\PaymentReceiptController::class)->print('chit', $id);
-});
 Route::get('/emi/receipt/{id}', [\App\Http\Controllers\EmiController::class, 'printReceipt'])->name('public-view-receipt');
 Route::get('/loan/statement/{id}', [\App\Http\Controllers\EmiController::class, 'printStatement'])->name('public-print-statement');
 
 // Backward-compatibility: legacy /public/ prefixed routes
 Route::get('/public/payment-receipts/{module}/{id}', [\App\Http\Controllers\PaymentReceiptController::class, 'print'])
-    ->where('module', 'loan|chit|fd')
+    ->where('module', 'loan|fd')
     ->name('public-payment-receipts.print.legacy');
 Route::get('/public/payment-receipts/{module}/{id}/print', [\App\Http\Controllers\PaymentReceiptController::class, 'print'])
-    ->where('module', 'loan|chit|fd');
-Route::get('/public/chit/receipt/{id}', function ($id) {
-    return app(\App\Http\Controllers\PaymentReceiptController::class)->print('chit', $id);
-});
+    ->where('module', 'loan|fd');
 Route::get('/public/emi/receipt/{id}', [\App\Http\Controllers\EmiController::class, 'printReceipt'])->name('public-view-receipt.legacy');
 Route::get('/public/loan/statement/{id}', [\App\Http\Controllers\EmiController::class, 'printStatement'])->name('public-print-statement.legacy');
-Route::get('/schemes/{scheme}/flyer.pdf', [\App\Http\Controllers\ChitSchemeController::class, 'flyerPdf'])
-    ->name('public.schemes.flyer.pdf');
-Route::get('/schemes/{scheme}/flyer', [\App\Http\Controllers\ChitSchemeController::class, 'flyer'])
-    ->name('public.schemes.flyer');
-Route::get('/public/schemes/{scheme}/flyer.pdf', [\App\Http\Controllers\ChitSchemeController::class, 'flyerPdf'])
-    ->name('public.schemes.flyer.pdf.legacy-public');
-Route::get('/public/schemes/{scheme}/flyer', [\App\Http\Controllers\ChitSchemeController::class, 'flyer'])
-    ->name('public.schemes.flyer.legacy-public');
 
 // Accounting module (integrated from ERPSoftware / WorkDo Account — see app/Modules/Account)
 require __DIR__ . '/account.php';
 
 // authentication - handled by auth.php
 require __DIR__ . '/auth.php';
-
-// Card to Cash module
-require __DIR__ . '/card_cash.php';
 

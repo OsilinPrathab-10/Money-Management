@@ -7,13 +7,13 @@ use Illuminate\Support\Facades\Log;
 
 /**
  * Posts Fixed Deposit deposits and payouts into the Accounts module cashbook
- * (bank / Cash in Hand), aligned with ChitAccountingService resolution rules.
+ * (bank / Cash in Hand), aligned with SocietyBankAccountingService resolution rules.
  */
 class FdAccountingService
 {
     public function __construct(
         protected BankTransactionsService $bankTransactionsService,
-        protected ChitAccountingService $chitAccounting
+        protected SocietyBankAccountingService $bankAccounting
     ) {}
 
     /**
@@ -70,7 +70,7 @@ class FdAccountingService
         }
 
         try {
-            $bankAccountId = $this->chitAccounting->resolveCollectionBankAccountId(
+            $bankAccountId = $this->bankAccounting->resolveCollectionBankAccountId(
                 $paymentMode,
                 (int) ($data['internal_bank_account_id'] ?? $data['bank_account_id'] ?? 0)
             );
@@ -104,7 +104,7 @@ class FdAccountingService
 
     /**
      * Debit company bank/cash for FD maturity / premature / close payouts.
-     * Wallet and chit allocation do not move company cash (liability / internal).
+     * Wallet allocation does not move company cash (liability / internal).
      *
      * @param  array{
      *   payment_mode?: string,
@@ -128,7 +128,7 @@ class FdAccountingService
             ?? 'cash'
         ));
 
-        if (in_array($mode, ['wallet', 'chit'], true)) {
+        if ($mode === 'wallet') {
             $this->recordRetainedFees($fd, $options);
 
             return null;
@@ -142,7 +142,7 @@ class FdAccountingService
 
         try {
             $companyOutflow = round($netAmount + max(0, $bankingCharges), 2);
-            $bankAccountId = $this->chitAccounting->resolvePayoutBankAccountId(
+            $bankAccountId = $this->bankAccounting->resolvePayoutBankAccountId(
                 $mode,
                 (int) ($options['internal_bank_account_id'] ?? $fd->internal_bank_account_id ?? 0),
                 $companyOutflow
@@ -175,7 +175,7 @@ class FdAccountingService
             );
 
             if ($bankingCharges > 0.009) {
-                $this->chitAccounting->recordBankTransferCharges(
+                $this->bankAccounting->recordBankTransferCharges(
                     $bankAccountId,
                     $bankingCharges,
                     $ref . '-BANKCHG',
@@ -221,7 +221,7 @@ class FdAccountingService
         }
 
         $mode = strtolower(trim($paymentMode));
-        $resolvedId = $this->chitAccounting->resolvePayoutBankAccountId(
+        $resolvedId = $this->bankAccounting->resolvePayoutBankAccountId(
             $mode,
             (int) ($bankAccountId ?? 0),
             $amount
@@ -289,7 +289,7 @@ class FdAccountingService
             }
 
             try {
-                $this->chitAccounting->postExternalRevenue(
+                $this->bankAccounting->postExternalRevenue(
                     $fee['name'],
                     $fee['code'],
                     $fee['amount'],

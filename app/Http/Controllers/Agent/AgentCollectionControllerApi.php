@@ -4,10 +4,8 @@ namespace App\Http\Controllers\Agent;
 
 use App\Http\Controllers\Controller;
 use App\Models\EmiCollection;
-use App\Models\ChitCollection;
 use App\Models\Agent;
 use App\Models\Emi;
-use App\Models\Installment;
 use App\Models\User;
 use Illuminate\Auth\Access\AuthorizationException;
 use App\Models\Client;
@@ -22,43 +20,11 @@ use App\Support\BulkPaymentGroup;
 use App\Support\RupeeRound;
 use App\Services\PaymentReceiptService;
 use Illuminate\Pagination\LengthAwarePaginator;
+use App\Models\CollectionNote;
+use Carbon\Carbon;
 
 class AgentCollectionControllerApi extends Controller
 {
-    /**
-     * Chit installments for clients assigned/referred to this agent.
-     */
-    private function applyChitAgentScope($query, int $agentId, ?int $userId = null): void
-    {
-        $query->whereHas('member', function ($mq) use ($agentId, $userId) {
-            $mq->where(function ($memberQ) use ($agentId, $userId) {
-                $memberQ->whereHas('client', function ($cq) use ($agentId, $userId) {
-                    $cq->where('assigned_to', $agentId)
-                       ->orWhere('added_by', $agentId);
-                    if ($userId) {
-                        $cq->orWhere('assigned_to', $userId)
-                           ->orWhere('added_by', $userId);
-                    }
-                })
-                ->orWhere('referred_by_agent_id', $agentId)
-                ->orWhereHas('shares', function ($sq) use ($agentId, $userId) {
-                    $sq->whereHas('client', function ($cq) use ($agentId, $userId) {
-                        $cq->where('assigned_to', $agentId)
-                           ->orWhere('added_by', $agentId);
-                        if ($userId) {
-                            $cq->orWhere('assigned_to', $userId)
-                               ->orWhere('added_by', $userId);
-                        }
-                    });
-                });
-
-                if ($userId) {
-                    $memberQ->orWhere('referred_by_agent_id', $userId);
-                }
-            });
-        });
-    }
-
     private function agentCanAccessLoanEmi(Emi $emi, int $agentId, ?int $userId = null): bool
     {
         $client = $emi->loanAccount?->client;
@@ -78,49 +44,6 @@ class AgentCollectionControllerApi extends Controller
                 }
             })
             ->exists();
-    }
-
-    private function agentCanAccessChitInstallment(Installment $installment, int $agentId, ?int $userId = null): bool
-    {
-        return Installment::query()
-            ->whereKey($installment->id)
-            ->where(function ($q) use ($agentId, $userId) {
-                $this->applyChitAgentScope($q, $agentId, $userId);
-            })
-            ->exists();
-    }
-
-    private function resolveChitCollectionClientId(Installment $installment, ?int $preferredClientId = null): ?int
-    {
-        $installment->loadMissing(['member.shares', 'sharePayments']);
-        $member = $installment->member;
-        if (!$member) {
-            return $preferredClientId ?: null;
-        }
-
-        $ownerIds = $member->resolveOwnershipShares()
-            ->pluck('client_id')
-            ->map(fn ($id) => (int) $id)
-            ->filter()
-            ->unique()
-            ->values()
-            ->all();
-
-        if ($preferredClientId && $preferredClientId > 0) {
-            array_unshift($ownerIds, $preferredClientId);
-            $ownerIds = array_values(array_unique($ownerIds));
-        } elseif ($member->client_id) {
-            array_unshift($ownerIds, (int) $member->client_id);
-            $ownerIds = array_values(array_unique($ownerIds));
-        }
-
-        foreach ($ownerIds as $clientId) {
-            if ($installment->clientBalanceShare($clientId) > 0.009) {
-                return $clientId;
-            }
-        }
-
-        return $preferredClientId ?: ((int) ($member->client_id ?? 0) ?: ($ownerIds[0] ?? null));
     }
 
     private function loanHasUnpaidPriorEmi(Emi $emi): ?Emi
@@ -150,119 +73,6 @@ class AgentCollectionControllerApi extends Controller
         return $ends[$number % 10];
     }
 
-    /**
-     * Resolves an Installment model and optional period index from various ID formats
-     * that might be sent by mobile clients or web (e.g. "chit_1848_p_1", "chit_18481", 18481, "1848").
-     *
-     * @param string|int|array $target
-     * @param int|null $explicitPeriod
-     * @return array{0: Installment|null, 1: ?int}
-     */
-    private function resolveChitInstallmentAndPeriod(string|int|array $target, ?int $explicitPeriod = null): array
-    {
-        $rawId = '';
-        $explicitInstId = null;
-
-        if (is_array($target)) {
-            $rawId = (string) ($target['id'] ?? $target['chit_installment_id'] ?? $target['due_id'] ?? '');
-            $explicitInstId = $target['chit_installment_id'] ?? $target['installment_id'] ?? $target['due_id'] ?? null;
-            if ($explicitPeriod === null) {
-                $explicitPeriod = isset($target['period_index']) && $target['period_index'] !== ''
-                    ? (int) $target['period_index']
-                    : (isset($target['period_number']) && $target['period_number'] !== '' ? (int) $target['period_number'] : null);
-            }
-        } else {
-            $rawId = (string) $target;
-        }
-
-        // 1. Check if rawId matches pattern "chit_{id}_p_{period}" or "{id}_p_{period}"
-        if (preg_match('/^(?:chit_)?(\d+)_p_?(\d+)$/', $rawId, $m)) {
-            $instId = (int) $m[1];
-            $period = (int) $m[2];
-            $inst = Installment::with(['member.client', 'group'])->find($instId);
-            if ($inst) {
-                return [$inst, $period];
-            }
-        }
-
-        // 2. Direct lookup: check if clean numeric ID exists directly in database
-        $cleanId = preg_replace('/^chit_/', '', $rawId);
-        if (is_numeric($cleanId)) {
-            $inst = Installment::with(['member.client', 'group'])->find((int) $cleanId);
-            if ($inst) {
-                return [$inst, $explicitPeriod];
-            }
-        }
-
-        // 3. Check explicit installment ID if different from cleanId
-        if ($explicitInstId && is_numeric($explicitInstId) && (int) $explicitInstId !== (int) $cleanId) {
-            $inst = Installment::with(['member.client', 'group'])->find((int) $explicitInstId);
-            if ($inst) {
-                return [$inst, $explicitPeriod];
-            }
-        }
-
-        // 4. Handle concatenated digits from mobile clients (e.g. "chit_18481" or "18481" where 1848 is installment and 1 is period)
-        $digitsOnly = preg_replace('/\D/', '', $rawId);
-        if (strlen($digitsOnly) >= 2) {
-            // Check 1-digit period suffix (periods 1 to 9): e.g. 18481 -> id 1848, period 1
-            $candidateId1 = (int) substr($digitsOnly, 0, -1);
-            $candidatePeriod1 = (int) substr($digitsOnly, -1);
-            $inst1 = Installment::with(['member.client', 'group'])->find($candidateId1);
-            if ($inst1 && $candidatePeriod1 >= 1) {
-                $freq = $inst1->member?->collection_frequency ?? 'monthly';
-                if ($freq === 'weekly' && $candidatePeriod1 <= 5) {
-                    return [$inst1, $candidatePeriod1];
-                }
-                if ($freq === 'daily' && $candidatePeriod1 <= 9) {
-                    return [$inst1, $candidatePeriod1];
-                }
-                return [$inst1, $candidatePeriod1];
-            }
-
-            // Check 2-digit period suffix (periods 10 to 31 for daily): e.g. 184825 -> id 1848, period 25
-            if (strlen($digitsOnly) >= 3) {
-                $candidateId2 = (int) substr($digitsOnly, 0, -2);
-                $candidatePeriod2 = (int) substr($digitsOnly, -2);
-                if ($candidatePeriod2 >= 10 && $candidatePeriod2 <= 31) {
-                    $inst2 = Installment::with(['member.client', 'group'])->find($candidateId2);
-                    if ($inst2 && ($inst2->member?->collection_frequency ?? '') === 'daily') {
-                        return [$inst2, $candidatePeriod2];
-                    }
-                }
-            }
-        }
-
-        // 5. Also check if $explicitInstId had concatenated digits
-        if ($explicitInstId && is_numeric($explicitInstId)) {
-            $digitsOnlyExp = (string) $explicitInstId;
-            if (strlen($digitsOnlyExp) >= 2 && $digitsOnlyExp !== $digitsOnly) {
-                $candidateId1 = (int) substr($digitsOnlyExp, 0, -1);
-                $candidatePeriod1 = (int) substr($digitsOnlyExp, -1);
-                $inst1 = Installment::with(['member.client', 'group'])->find($candidateId1);
-                if ($inst1 && $candidatePeriod1 >= 1) {
-                    return [$inst1, $candidatePeriod1];
-                }
-                if (strlen($digitsOnlyExp) >= 3) {
-                    $candidateId2 = (int) substr($digitsOnlyExp, 0, -2);
-                    $candidatePeriod2 = (int) substr($digitsOnlyExp, -2);
-                    if ($candidatePeriod2 >= 10 && $candidatePeriod2 <= 31) {
-                        $inst2 = Installment::with(['member.client', 'group'])->find($candidateId2);
-                        if ($inst2) {
-                            return [$inst2, $candidatePeriod2];
-                        }
-                    }
-                }
-            }
-        }
-
-        return [null, null];
-    }
-
-
-    /**
-     * Get active collection bank accounts.
-     */
     public function collectionBankAccounts()
     {
         $bankAccounts = \App\Models\Account\BankAccount::where('is_active', true)
@@ -298,7 +108,7 @@ class AgentCollectionControllerApi extends Controller
     }
 
     /**
-     * Return loan and chit dues available to the logged-in agent for collection.
+     * Return loan dues available to the logged-in agent for collection.
      */
     public function assignedDues(Request $request)
     {
@@ -311,7 +121,7 @@ class AgentCollectionControllerApi extends Controller
         $userId = $agent instanceof \App\Models\Agent ? $agent->user_id : $agent->id;
 
         $validated = $request->validate([
-            'type' => 'nullable|in:loan,chit,all',
+            'type' => 'nullable|in:loan,all',
             'search' => 'nullable|string|max:100',
         ]);
 
@@ -319,8 +129,7 @@ class AgentCollectionControllerApi extends Controller
         $search = trim($validated['search'] ?? '');
         $rows = collect();
 
-        if ($type !== 'chit') {
-            $loanQuery = Emi::with(['loanAccount.client', 'collections'])
+        $loanQuery = Emi::with(['loanAccount.client', 'collections', 'latestCollectionNote'])
                 ->whereIn('status', ['pending', 'overdue', 'partial']);
             $loanQuery->where(function ($q) use ($agentId, $userId) {
                 $q->whereHas('loanAccount.client', function ($clientQ) use ($agentId, $userId) {
@@ -394,11 +203,12 @@ class AgentCollectionControllerApi extends Controller
                 $status = $emi->status;
                 $isDueToday = $emi->due_date && \Carbon\Carbon::parse($emi->due_date)->startOfDay()->equalTo(now()->startOfDay());
 
-                if ($status === 'pending' && $emi->due_date && \Carbon\Carbon::parse($emi->due_date)->startOfDay()->lt(now()->startOfDay())) {
-                    $status = 'overdue';
-                }
+                $latestNote = $emi->latestCollectionNote;
+                $remDate = $latestNote?->reminder_date ? Carbon::parse($latestNote->reminder_date) : null;
+                $isRemToday = $remDate ? $remDate->isToday() : false;
+                $isRemOverdue = $remDate ? ($remDate->startOfDay()->lt(now()->startOfDay()) && !$latestNote->is_completed) : false;
 
-                $forceEnable = $status === 'overdue' || ($status === 'pending' && $isDueToday);
+                $forceEnable = $status === 'overdue' || ($status === 'pending' && $isDueToday) || $isRemToday;
                 $disabled = $forceEnable ? false : ($amount <= 0 || $unpaidPrior);
 
                 $row = [
@@ -426,6 +236,12 @@ class AgentCollectionControllerApi extends Controller
                     'principal_amount' => $principalBalance,
                     'principal_balance' => $principalBalance,
                     'can_pay_principal' => $isOpenLoan && $principalBalance > 0.01,
+                    'reminder_date' => $remDate ? $remDate->format('Y-m-d') : null,
+                    'reminder_date_formatted' => $remDate ? $remDate->format('d-m-Y') : null,
+                    'is_reminder_today' => $isRemToday,
+                    'is_reminder_overdue' => $isRemOverdue,
+                    'latest_note' => $latestNote?->note,
+                    'followup_status' => $latestNote?->status,
                 ];
 
                 return $amount > 0 ? [$row] : [];
@@ -434,165 +250,6 @@ class AgentCollectionControllerApi extends Controller
                 ->reject(fn ($row) => $this->isOpenLoanPrincipalDueRow($row))
                 ->values();
             $rows = $rows->concat($loanRows);
-        }
-
-        if ($type !== 'loan') {
-            $chitQuery = Installment::with(['member.client', 'member.shares', 'group', 'collections', 'sharePayments'])
-                ->whereIn('status', ['pending', 'overdue', 'partial']);
-            $this->applyChitAgentScope($chitQuery, $agentId, $userId);
-
-            if ($search !== '') {
-                $chitQuery->where(function ($q) use ($search) {
-                    $q->whereHas('member.client', function ($clientQ) use ($search) {
-                        $clientQ->where('client_name', 'LIKE', "%{$search}%")
-                            ->orWhere('client_phone', 'LIKE', "%{$search}%")
-                            ->orWhere('alternate_phone', 'LIKE', "%{$search}%");
-                    })->orWhereHas('group', fn ($groupQ) => $groupQ->where('group_code', 'LIKE', "%{$search}%"));
-                });
-            }
-
-            $chitInstallments = $chitQuery->orderBy('due_date')->get();
-            $memberIds = $chitInstallments->pluck('member_id')->filter()->unique()->values()->all();
-
-            $minUnpaidChitMonthMap = collect();
-            if (!empty($memberIds)) {
-                $minUnpaidChitMonthMap = Installment::whereIn('member_id', $memberIds)
-                    ->whereNotIn('status', ['paid', 'waived'])
-                    ->select('member_id', 'group_id', DB::raw('MIN(month_number) as min_month'))
-                    ->groupBy('member_id', 'group_id')
-                    ->get()
-                    ->keyBy(fn ($item) => $item->member_id . '_' . $item->group_id);
-            }
-
-            $isInstallmentCollectibleFast = function (Installment $installment) use ($minUnpaidChitMonthMap) {
-                if ($installment->is_consolidated) {
-                    return (bool) $installment->consolidated_collectible;
-                }
-
-                if (in_array($installment->status, ['paid', 'waived'], true)) {
-                    return false;
-                }
-
-                if ($installment->status === 'overdue') {
-                    return true;
-                }
-
-                if ($installment->due_date && \Carbon\Carbon::parse($installment->due_date)->startOfDay()->lt(now()->startOfDay())) {
-                    return true;
-                }
-
-                $key = $installment->member_id . '_' . $installment->group_id;
-                $minMonthRow = $minUnpaidChitMonthMap->get($key);
-                if (!$minMonthRow) {
-                    return true;
-                }
-
-                return (int) $installment->month_number <= (int) $minMonthRow->min_month;
-            };
-
-            $chitRows = $chitInstallments->flatMap(function (Installment $installment) use ($isInstallmentCollectibleFast) {
-                $member = $installment->member;
-                $memberFreq = $member?->collection_frequency ?? 'monthly';
-                $clientId = (int) ($member?->client_id ?? 0);
-                $isCollectible = $isInstallmentCollectibleFast($installment);
-                $clientName = $member?->client?->client_name ?? 'N/A';
-                $clientPhone = $member?->client?->client_phone;
-                $groupCode = $installment->group?->group_code ?? 'N/A';
-                $inProgressAmount = $installment->collections ? $installment->collections->where('status', 'in_progress')->sum('amount') : 0;
-
-                if (in_array($memberFreq, ['weekly', 'daily'], true)) {
-                    $instAmount = (float) $member->displayAmountForInstallment($installment, $clientId);
-                    $paidAmt = (float) $installment->clientPaidShare($clientId);
-                    $effectivePaid = $paidAmt + (float) $inProgressAmount;
-                    $periods = $member->collectionPeriodSchedule($installment->due_date, $instAmount, $effectivePaid);
-
-                    $unpaidPeriods = collect($periods)->filter(fn ($p) => (float) $p['balance'] > 0.009);
-                    if ($unpaidPeriods->isNotEmpty()) {
-                        return $unpaidPeriods->map(function ($p) use ($installment, $clientName, $clientPhone, $groupCode, $isCollectible, $memberFreq, $clientId) {
-                            $pBalance = round((float) $p['balance'], 2);
-                            $pTotal = round((float) $p['amount'], 2);
-                            $pDueDate = $p['due_date'] ? \Carbon\Carbon::parse($p['due_date'])->startOfDay() : null;
-                            $isDueToday = $pDueDate && $pDueDate->equalTo(now()->startOfDay());
-                            $pStatus = $p['status'];
-                            if ($pStatus === 'pending' && $pDueDate && $pDueDate->lt(now()->startOfDay())) {
-                                $pStatus = 'overdue';
-                            }
-                            $isNext = (bool) ($p['is_next'] ?? false);
-                            $disabled = !$isCollectible || !$isNext;
-                            $disabledReason = !$isCollectible
-                                ? 'Previous installment must be paid first.'
-                                : (!$isNext ? 'Previous ' . ($memberFreq === 'weekly' ? 'week' : 'day') . ' must be paid first.' : null);
-
-                            return [
-                                'id' => 'chit_' . $installment->id . '_p_' . $p['index'],
-                                'type' => 'chit',
-                                'chit_installment_id' => $installment->id,
-                                'installment_id' => $installment->id,
-                                'period_index' => (int) $p['index'],
-                                'period_number' => (int) $p['index'],
-                                'period_label' => (string) $p['label'],
-                                'month_number' => (int) $installment->month_number,
-                                'frequency' => $memberFreq,
-                                'frequency_label' => ucfirst($memberFreq),
-                                'client_id' => $clientId,
-                                'client_name' => $clientName,
-                                'client_phone' => $clientPhone,
-                                'label' => 'Month ' . $installment->month_number . ' - ' . $p['label'],
-                                'account_or_group' => $groupCode,
-                                'due_date' => $pDueDate ? $pDueDate->format('Y-m-d') : optional($installment->due_date)->format('Y-m-d'),
-                                'period_end' => ! empty($p['period_end']) ? \Carbon\Carbon::parse($p['period_end'])->format('Y-m-d') : null,
-                                'is_current' => (bool) ($p['is_current'] ?? false),
-                                'amount' => $pBalance,
-                                'balance' => $pBalance,
-                                'total_amount' => $pTotal,
-                                'status' => $pStatus,
-                                'disabled' => $disabled,
-                                'disabled_reason' => $disabledReason,
-                            ];
-                        });
-                    }
-                }
-
-                $amount = max(0, (float) $installment->balance - (float) $inProgressAmount);
-                $status = $installment->status;
-                $isDueToday = $installment->due_date && \Carbon\Carbon::parse($installment->due_date)->startOfDay()->equalTo(now()->startOfDay());
-
-                if ($status === 'pending' && $installment->due_date && \Carbon\Carbon::parse($installment->due_date)->startOfDay()->lt(now()->startOfDay())) {
-                    $status = 'overdue';
-                }
-
-                $forceEnable = $status === 'overdue' || ($status === 'pending' && $isDueToday);
-
-                return [[
-                    'id' => 'chit_' . $installment->id,
-                    'type' => 'chit',
-                    'chit_installment_id' => $installment->id,
-                    'installment_id' => $installment->id,
-                    'period_index' => null,
-                    'period_number' => null,
-                    'period_label' => null,
-                    'month_number' => (int) $installment->month_number,
-                    'frequency' => 'monthly',
-                    'frequency_label' => 'Monthly',
-                    'client_id' => $clientId,
-                    'client_name' => $clientName,
-                    'client_phone' => $clientPhone,
-                    'label' => 'Installment #' . $installment->month_number,
-                    'account_or_group' => $groupCode,
-                    'due_date' => optional($installment->due_date)->format('Y-m-d'),
-                    'amount' => round($amount, 2),
-                    'balance' => round($amount, 2),
-                    'total_amount' => round((float) $installment->total_due, 2),
-                    'status' => $status,
-                    'disabled' => $forceEnable ? false : ($amount <= 0 || !$isCollectible),
-                    'disabled_reason' => $forceEnable ? null : (!$isCollectible
-                        ? 'Previous installment must be paid first.'
-                        : ($amount <= 0 ? 'No amount is due.' : null)),
-                ]];
-            })->filter(fn ($row) => $row['amount'] > 0);
-            $rows = $rows->concat($chitRows);
-        }
-
         $rows = $rows->sortBy(fn ($row) => $row['due_date'] ?? '9999-12-31')->values();
 
         $seenAccounts = [];
@@ -639,8 +296,6 @@ class AgentCollectionControllerApi extends Controller
             
             if ($row['type'] === 'loan') {
                 $groupedData[$groupKey]['loans'][] = $row;
-            } else if ($row['type'] === 'chit') {
-                $groupedData[$groupKey]['chits'][] = $row;
             }
         }
         
@@ -688,181 +343,6 @@ class AgentCollectionControllerApi extends Controller
         $paymentType = (string) ($row['payment_type'] ?? '');
 
         return $paymentType === 'principal' || str_ends_with($id, '_principal');
-    }
-
-    public function pendingFollowUps(Request $request)
-    {
-        $agent = Auth::user();
-        if (!$agent) {
-            return response()->json(['success' => false, 'message' => 'Agent data not found'], 404);
-        }
-
-        $agentId = $agent->id;
-
-        $validated = $request->validate([
-            'type' => 'nullable|in:loan,chit,all',
-            'search' => 'nullable|string|max:100',
-        ]);
-
-        $type = $validated['type'] ?? 'all';
-        $search = trim($validated['search'] ?? '');
-        $rows = collect();
-
-        if ($type !== 'chit') {
-            $loanQuery = \App\Models\EmiAgentAssignment::with(['emi.loanAccount.client', 'emi.collections'])
-                ->where('agent_id', $agentId)
-                ->active()
-                ->onActiveLoan()
-                ->whereHas('emi', function ($q) {
-                    $q->whereIn('status', ['pending', 'overdue', 'partial'])
-                        ->whereDate('due_date', '=', now());
-                });
-
-            if ($search !== '') {
-                $loanQuery->whereHas('emi', function ($emiQ) use ($search) {
-                    $emiQ->where(function ($q) use ($search) {
-                        $q->whereHas('loanAccount.client', function ($clientQ) use ($search) {
-                            $clientQ->where('client_name', 'LIKE', "%{$search}%")
-                                ->orWhere('client_phone', 'LIKE', "%{$search}%")
-                                ->orWhere('alternate_phone', 'LIKE', "%{$search}%");
-                        })->orWhereHas('loanAccount', fn ($accountQ) => $accountQ->where('account_number', 'LIKE', "%{$search}%"));
-                    });
-                });
-            }
-
-            if ($request->has('start_date') && !empty($request->start_date)) {
-                $loanQuery->whereHas('emi', fn($q) => $q->whereDate('due_date', '>=', $request->start_date));
-            }
-            if ($request->has('end_date') && !empty($request->end_date)) {
-                $loanQuery->whereHas('emi', fn($q) => $q->whereDate('due_date', '<=', $request->end_date));
-            }
-            if ($request->has('date') && !empty($request->date)) {
-                $loanQuery->whereHas('emi', fn($q) => $q->whereDate('due_date', '=', $request->date));
-            }
-
-            $partialService = app(PartialPaymentConfigService::class);
-            $loanRows = $loanQuery->get()
-                ->sortBy(fn ($assignment) => $assignment->emi->due_date)
-                ->map(function ($assignment) use ($partialService) {
-                $emi = $assignment->emi;
-                $inProgressSum = $emi->collections ? $emi->collections->where('status', 'in_progress')->sum('amount') : 0;
-                
-                if ($emi->status !== 'paid' && $inProgressSum > 0) {
-                    $emi->status = 'in_progress';
-                }
-
-                $unpaidPrior = $this->loanHasUnpaidPriorEmi($emi) !== null;
-                $amount = max(0, (float) $partialService->getOutstandingDueAmount($emi, $emi->loanAccount));
-
-                return [
-                    'id' => 'loan_' . $emi->id,
-                    'type' => 'loan',
-                    'client_name' => $emi->loanAccount?->client?->client_name ?? 'N/A',
-                    'label' => 'EMI #' . $emi->instalment_number,
-                    'account_or_group' => $emi->loanAccount?->account_number ?? 'N/A',
-                    'due_date' => optional($emi->due_date)->format('Y-m-d'),
-                    'amount' => round($amount, 2),
-                    'balance' => round($amount, 2),
-                    'total_amount' => round((float) ($emi->total_amount ?? $emi->total_due ?? 0), 2),
-                    'status' => $emi->status,
-                    'disabled' => $amount <= 0 || $unpaidPrior,
-                    'disabled_reason' => $unpaidPrior ? 'Previous EMI is still pending.' : ($amount <= 0 ? 'No amount is due.' : null),
-                ];
-            })->filter(fn ($row) => $row['amount'] > 0);
-            $rows = $rows->concat($loanRows);
-        }
-
-        if ($type !== 'loan') {
-            $chitQuery = Installment::with(['member.client', 'group', 'collections'])
-                ->whereDate('due_date', '=', now())
-                ->whereIn('status', ['pending', 'overdue', 'partial']);
-            $this->applyChitAgentScope($chitQuery, $agentId);
-
-            if ($search !== '') {
-                $chitQuery->where(function ($q) use ($search) {
-                    $q->whereHas('member.client', function ($clientQ) use ($search) {
-                        $clientQ->where('client_name', 'LIKE', "%{$search}%")
-                            ->orWhere('client_phone', 'LIKE', "%{$search}%")
-                            ->orWhere('alternate_phone', 'LIKE', "%{$search}%");
-                    })->orWhereHas('group', fn ($groupQ) => $groupQ->where('group_code', 'LIKE', "%{$search}%"));
-                });
-            }
-
-            if ($request->has('start_date') && !empty($request->start_date)) {
-                $chitQuery->whereDate('due_date', '>=', $request->start_date);
-            }
-            if ($request->has('end_date') && !empty($request->end_date)) {
-                $chitQuery->whereDate('due_date', '<=', $request->end_date);
-            }
-            if ($request->has('date') && !empty($request->date)) {
-                $chitQuery->whereDate('due_date', '=', $request->date);
-            }
-
-            $chitRows = $chitQuery->orderBy('due_date')->get()->map(function (Installment $installment) {
-                $inProgressSum = $installment->collections ? $installment->collections->where('status', 'in_progress')->sum('amount') : 0;
-                
-                if ($installment->status !== 'paid' && $inProgressSum > 0) {
-                    $installment->status = 'in_progress';
-                }
-
-                $amount = max(0, (float) $installment->balance - (float) $inProgressSum);
-                $isCollectible = $installment->isCollectible();
-
-                return [
-                    'id' => 'chit_' . $installment->id,
-                    'type' => 'chit',
-                    'client_name' => $installment->member?->client?->client_name ?? 'N/A',
-                    'label' => 'Installment #' . $installment->month_number,
-                    'account_or_group' => $installment->group?->group_code ?? 'N/A',
-                    'due_date' => optional($installment->due_date)->format('Y-m-d'),
-                    'amount' => round($amount, 2),
-                    'balance' => round($amount, 2),
-                    'total_amount' => round((float) $installment->total_due, 2),
-                    'status' => $installment->status,
-                    'disabled' => $amount <= 0 || !$isCollectible,
-                    'disabled_reason' => !$isCollectible
-                        ? 'Previous installment must be paid first.'
-                        : ($amount <= 0 ? 'No amount is due.' : null),
-                ];
-            })->filter(fn ($row) => $row['amount'] > 0);
-            $rows = $rows->concat($chitRows);
-        }
-
-        $rows = $rows->sortBy(fn ($row) => $row['due_date'] ?? '9999-12-31')->values();
-
-        $seenAccounts = [];
-        $rows->transform(function ($row) use (&$seenAccounts) {
-            $account = $row['account_or_group'];
-            if (!isset($seenAccounts[$account])) {
-                $seenAccounts[$account] = ['prev_status' => $row['status']];
-                $row['disabled'] = false;
-                $row['disabled_reason'] = null;
-            } else {
-                if ($seenAccounts[$account]['prev_status'] === 'in_progress') {
-                    $row['disabled'] = false;
-                    $row['disabled_reason'] = null;
-                }
-                $seenAccounts[$account]['prev_status'] = $row['status'];
-            }
-            return $row;
-        });
-
-        $page = $request->input('page', 1);
-        $perPage = $request->input('per_page', 15);
-        $total = $rows->count();
-        
-        $paginatedRows = $rows->forPage($page, $perPage)->values();
-
-        return response()->json([
-            'success' => true,
-            'data' => $paginatedRows,
-            'meta' => [
-                'current_page' => (int) $page,
-                'last_page' => ceil($total / $perPage),
-                'per_page' => (int) $perPage,
-                'total' => $total,
-            ]
-        ]);
     }
 
     private function isOpenLoanAccount($loanAccount): bool
@@ -1035,13 +515,12 @@ class AgentCollectionControllerApi extends Controller
         $userId = $agent instanceof Agent ? $agent->user_id : $agent->id;
 
         $hasLoan = $request->filled('loan_emi_id') || 
-                   ($request->filled('emi_id') && !str_starts_with((string)$request->emi_id, 'chit_'));
+                   $request->filled('emi_id');
                    
-        $hasChit = $request->filled('chit_installment_id') || 
-                   ($request->filled('emi_id') && str_starts_with((string)$request->emi_id, 'chit_'));
 
-        if (!$hasLoan && !$hasChit) {
-            return response()->json(['success' => false, 'message' => 'Please provide either Loan EMI or Chit Installment details.'], 422);
+
+        if (!$hasLoan) {
+            return response()->json(['success' => false, 'message' => 'Loan EMI details are required.'], 422);
         }
 
         $rules = [
@@ -1061,89 +540,13 @@ class AgentCollectionControllerApi extends Controller
             $rules['amount'] = 'nullable|numeric|min:0';
         }
 
-        if ($hasChit) {
-            $rules['chit_installment_id'] = 'required_without:emi_id';
-            $rules['chit_amount'] = 'required_without:amount|numeric|min:0.01';
-        }
+
 
         $request->validate($rules);
 
         DB::beginTransaction();
         try {
             $messages = [];
-
-            // 1. Process Chit Installment
-            if ($hasChit) {
-                [$installment, $resolvedPeriod] = $this->resolveChitInstallmentAndPeriod([
-                    'id' => $request->input('chit_installment_id') ?? $request->input('emi_id'),
-                    'chit_installment_id' => $request->input('chit_installment_id'),
-                    'due_id' => $request->input('due_id'),
-                    'period_index' => $request->input('period_index'),
-                    'period_number' => $request->input('period_number'),
-                ]);
-                $periodIndex = $resolvedPeriod ?: ($request->filled('period_index') ? (int) $request->period_index : null);
-                $chitAmount = (float) ($request->input('chit_amount') ?? $request->input('amount'));
-
-                if (!$installment) {
-                    DB::rollBack();
-                    return response()->json(['success' => false, 'message' => 'Invalid Chit Installment ID.'], 404);
-                }
-
-                if (!$this->agentCanAccessChitInstallment($installment, $collectorAgentId, $userId)) {
-                    DB::rollBack();
-                    return response()->json(['success' => false, 'message' => 'You can only collect installments for your assigned clients.'], 403);
-                }
-
-                if (!$installment->isCollectible()) {
-                    DB::rollBack();
-                    return response()->json(['success' => false, 'message' => 'Please pay the previous installment(s) before collecting this installment.'], 422);
-                }
-
-                $outstanding = round((float) $installment->balance, 2);
-                $inProgressSum = \App\Models\ChitCollection::where('installment_id', $installment->id)
-                    ->where('status', 'in_progress')
-                    ->sum('amount');
-
-                if (($inProgressSum + $chitAmount) > ($outstanding + 0.01)) {
-                    DB::rollBack();
-                    $remaining = max(0, $outstanding - $inProgressSum);
-                    return response()->json(['success' => false, 'message' => 'Collection amount exceeds remaining collectible balance (₹' . number_format($remaining, 2) . ' remaining).'], 422);
-                }
-
-                $clientId = $this->resolveChitCollectionClientId(
-                    $installment,
-                    $request->filled('client_id') ? (int) $request->client_id : null
-                );
-
-                $remarks = (string) ($request->remarks ?? '');
-                if ($periodIndex && $installment->member && in_array($installment->member->collection_frequency, ['weekly', 'daily'], true)) {
-                    $periodUnit = $installment->member->collection_frequency === 'weekly' ? 'Week' : 'Day';
-                    $periodTag = "[{$periodUnit} {$periodIndex}]";
-                    if (!str_contains($remarks, $periodTag)) {
-                        $remarks = trim($remarks . ' ' . $periodTag);
-                    }
-                }
-                $remarks = trim($remarks . ' [Agent Collected]');
-
-                \App\Models\ChitCollection::create([
-                    'installment_id'    => $installment->id,
-                    'group_id'          => $installment->group_id,
-                    'member_id'         => $installment->member_id,
-                    'client_id'         => $clientId,
-                    'agent_id'          => $collectorAgentId,
-                    'amount'            => $chitAmount,
-                    'share_percentage'  => $installment->member?->effective_share_percentage,
-                    'payment_method'    => $request->payment_method === 'in_hand' ? 'cash' : $request->payment_method,
-                    'bank_account_id'   => $request->internal_bank_account_id,
-                    'payment_type'      => $request->payment_type ?? 'full',
-                    'payment_reference' => $request->payment_reference,
-                    'status'            => 'in_progress',
-                    'collected_at'      => $request->collected_at,
-                    'remarks'           => $remarks,
-                ]);
-
-                $messages[] = 'Chit collection recorded';
-            }
 
             // 2. Process Loan EMI (Open Loan: interest and/or principal, same as admin Pay Now)
             if ($hasLoan) {
@@ -1293,7 +696,7 @@ class AgentCollectionControllerApi extends Controller
             return response()->json([
                 'success' => true,
                 'message' => count($messages) > 1 
-                    ? 'Both Loan and Chit collections recorded and sent for admin verification.' 
+                    ? 'Loan collections recorded and sent for admin verification.' 
                     : ($messages[0] . ' and sent for admin verification.'),
             ]);
 
@@ -1332,13 +735,9 @@ class AgentCollectionControllerApi extends Controller
             $itemsModified = false;
             foreach ($rawItems as $idx => $it) {
                 if (is_array($it)) {
-                    $rawId = (string) ($it['id'] ?? $it['chit_installment_id'] ?? $it['due_id'] ?? $it['emi_id'] ?? '');
-                    $type = $it['type'] ?? (str_starts_with($rawId, 'loan') ? 'loan' : 'chit');
-                    if (!preg_match('/^(loan|chit)_/', $rawId) && $rawId !== '') {
-                        $newId = ($type === 'loan' ? 'loan_' : 'chit_') . $rawId;
-                        if (isset($it['period_index']) && $it['period_index'] !== '' && !str_contains($newId, '_p_')) {
-                            $newId .= '_p_' . $it['period_index'];
-                        }
+                    $rawId = (string) ($it['id'] ?? $it['due_id'] ?? $it['emi_id'] ?? '');
+                    if (!str_starts_with($rawId, 'loan_') && $rawId !== '') {
+                        $newId = 'loan_' . $rawId;
                         $rawItems[$idx]['id'] = $newId;
                         $itemsModified = true;
                     }
@@ -1357,7 +756,7 @@ class AgentCollectionControllerApi extends Controller
             'remarks' => 'nullable|string|max:1000',
             'client_id' => 'nullable|integer',
             'items' => 'required|array|min:1|max:100',
-            'items.*.id' => ['required', 'string', 'distinct', 'regex:/^(loan|chit)_[A-Za-z0-9_\-]+$/'],
+            'items.*.id' => ['required', 'string', 'distinct', 'regex:/^loan_[A-Za-z0-9_\-]+$/'],
             'items.*.amount' => 'required|numeric|min:0.01',
             'items.*.payment_type' => 'nullable|in:full,partial,principal,interest,emi',
             'items.*.principal_amount' => 'nullable|numeric|min:0',
@@ -1376,256 +775,164 @@ class AgentCollectionControllerApi extends Controller
                     BulkPaymentGroup::AGENT_MARKER
                 );
                 $paymentReference = ($validated['payment_reference'] ?? null) ?: $batchKey;
-                $priorInProgressChit = [];
-                $batchChitCollected = [];
-                $preferredRootClientId = $request->filled('client_id') ? (int) $request->input('client_id') : null;
+                                $preferredRootClientId = $request->filled('client_id') ? (int) $request->input('client_id') : null;
 
                 foreach ($validated['items'] as $item) {
                     $itemId = (string) $item['id'];
-                    $type = str_starts_with($itemId, 'loan') ? 'loan' : 'chit';
+                    $type = 'loan';
                     $amount = round((float) $item['amount'], 2);
                     $paymentType = $item['payment_type'] ?? 'full';
 
-                    if ($type === 'loan') {
-                        [$emiId, $isPrincipalId] = $this->parseLoanCollectionId($itemId);
-                        $requestedType = (string) ($item['payment_type'] ?? '');
-                        $isPrincipalItem = $isPrincipalId || $requestedType === 'principal';
-                        $principalExtra = round((float) ($item['principal_amount'] ?? 0), 2);
-                        $interestExtra = round((float) ($item['interest_amount'] ?? 0), 2);
 
-                        if ($isPrincipalItem) {
-                            $interestAmount = $interestExtra;
-                            $principalAmount = $amount;
-                        } else {
-                            $interestAmount = $interestExtra > 0.01 ? $interestExtra : $amount;
-                            $principalAmount = $principalExtra;
-                        }
 
-                        $emi = Emi::with(['loanAccount.client', 'activeAssignment'])
-                            ->lockForUpdate()
-                            ->findOrFail($emiId);
+                    [$emiId, $isPrincipalId] = $this->parseLoanCollectionId($itemId);
+                    $requestedType = (string) ($item['payment_type'] ?? '');
+                    $isPrincipalItem = $isPrincipalId || $requestedType === 'principal';
+                    $principalExtra = round((float) ($item['principal_amount'] ?? 0), 2);
+                    $interestExtra = round((float) ($item['interest_amount'] ?? 0), 2);
 
-                        if (!$this->agentCanAccessLoanEmi($emi, $agentId, $userId)) {
-                            throw new AuthorizationException('You can only collect EMIs for your assigned clients.');
-                        }
-
-                        $loanAccount = $emi->loanAccount;
-                        $isOpenLoan = $this->isOpenLoanAccount($loanAccount);
-                        $partialService = app(PartialPaymentConfigService::class);
-                        $outstanding = round((float) $partialService->getOutstandingDueAmount($emi, $loanAccount), 2);
-                        $maxPrincipal = $isOpenLoan
-                            ? (float) RupeeRound::one(max(0, (float) $loanAccount->remaining_principal_balance))
-                            : round(max(0, (float) ($loanAccount->outstanding_amount ?? 0)), 2);
-
-                        if ($principalAmount > 0.01 && ! $isOpenLoan) {
-                            throw ValidationException::withMessages(['items' => 'Principal collection is only allowed for Open Loan accounts.']);
-                        }
-
-                        $paymentDetails = [
-                            'payment_method' => $validated['payment_method'],
-                            'bank_account_id' => $validated['internal_bank_account_id'] ?? null,
-                            'payment_reference' => $paymentReference,
-                            'collected_at' => $validated['collected_at'],
-                            'remarks' => $bulkRemarks,
-                        ];
-
-                        $itemCreated = 0;
-                        $itemTotal = 0.0;
-                        $recordedInterest = 0.0;
-                        $recordedPrincipal = 0.0;
-
-                        if ($interestAmount > 0.01) {
-                            if (!in_array($emi->status, ['pending', 'overdue', 'partial'], true)) {
-                                // Interest already settled — skip only the interest part
-                            } elseif (
-                                EmiCollection::where('emi_id', $emi->id)
-                                    ->where('status', 'in_progress')
-                                    ->where(function ($q) {
-                                        $q->whereNull('payment_type')->orWhere('payment_type', '!=', 'principal');
-                                    })
-                                    ->lockForUpdate()
-                                    ->exists()
-                            ) {
-                                // Interest already pending verification
-                            } else {
-                                $unpaidPriorEmi = $this->loanHasUnpaidPriorEmi($emi);
-                                if ($unpaidPriorEmi) {
-                                    $ordinal = $this->getOrdinal($unpaidPriorEmi->instalment_number);
-                                    throw ValidationException::withMessages(['items' => "Your previous {$unpaidPriorEmi->instalment_number}{$ordinal} #EMI is pending."]);
-                                }
-
-                                $interestError = $this->validateLoanInterestAmount(
-                                    $emi,
-                                    $loanAccount,
-                                    $interestAmount,
-                                    $outstanding,
-                                    $isOpenLoan,
-                                    $partialService
-                                );
-                                if ($interestError) {
-                                    throw ValidationException::withMessages(['items' => $interestError['message']]);
-                                }
-
-                                $interestType = in_array($requestedType, ['partial', 'full', 'interest', 'emi'], true)
-                                    ? $requestedType
-                                    : ($interestAmount < ($outstanding - 0.01)
-                                        ? 'partial'
-                                        : ($isOpenLoan ? 'interest' : 'full'));
-
-                                $this->upsertAgentLoanCollection($emi, $interestAmount, $interestType, $agentId, $paymentDetails, $outstanding);
-                                $itemCreated++;
-                                $itemTotal += $interestAmount;
-                                $recordedInterest = $interestAmount;
-                            }
-                        }
-
-                        if ($principalAmount > 0.01) {
-                            if ($principalAmount > ($maxPrincipal + 0.01)) {
-                                throw ValidationException::withMessages([
-                                    'items' => "Open Loan principal cannot exceed ₹" . number_format($maxPrincipal, 2) . '.',
-                                ]);
-                            }
-
-                            $principalInProgress = EmiCollection::where('emi_id', $emi->id)
-                                ->where('status', 'in_progress')
-                                ->where('payment_type', 'principal')
-                                ->lockForUpdate()
-                                ->exists();
-
-                            if ($principalInProgress || $maxPrincipal <= 0.01) {
-                                // Already submitted or no principal left
-                            } else {
-                                $this->upsertAgentLoanCollection($emi, $principalAmount, 'principal', $agentId, $paymentDetails, $outstanding);
-                                $itemCreated++;
-                                $itemTotal += $principalAmount;
-                                $recordedPrincipal = $principalAmount;
-                            }
-                        }
-
-                        if ($itemCreated === 0) {
-                            $skipped++;
-                            continue;
-                        }
-
-                        $activityParts = [];
-                        if ($recordedInterest > 0.01) {
-                            $activityParts[] = '₹' . number_format($recordedInterest, 2) . ($isOpenLoan ? ' interest' : '');
-                        }
-                        if ($recordedPrincipal > 0.01) {
-                            $activityParts[] = '₹' . number_format($recordedPrincipal, 2) . ' principal';
-                        }
-
-                        \App\Models\AgentActivity::create([
-                            'emi_id' => $emi->id,
-                            'agent_id' => $agentId,
-                            'type' => 'payment',
-                            'description' => implode(' + ', $activityParts) ?: ('₹' . number_format($itemTotal, 2)),
-                            'method' => strtoupper(str_replace('_', ' ', $validated['payment_method'])),
-                            'reference' => $paymentReference,
-                            'remarks' => $validated['remarks'] ?? null,
-                            'action_at' => $validated['collected_at'],
-                        ]);
-
-                        \App\Models\EmiAgentAssignment::where('emi_id', $emi->id)
-                            ->where('status', 'assigned')
-                            ->update([
-                                'status' => 'visited',
-                                'remarks' => DB::raw("CONCAT(COALESCE(remarks, ''), ' [Collection pending verification]')"),
-                            ]);
-
-                        $created += $itemCreated;
-                        $total += $itemTotal;
-                        continue;
+                    if ($isPrincipalItem) {
+                        $interestAmount = $interestExtra;
+                        $principalAmount = $amount;
                     } else {
-                        [$installment, $periodIndex] = $this->resolveChitInstallmentAndPeriod($item);
-
-                        if (!$installment) {
-                            throw ValidationException::withMessages(['items' => "Chit Installment #{$item['id']} not found."]);
-                        }
-
-                        // Re-fetch with row lock
-                        $installment = Installment::with(['member.client', 'group'])
-                            ->lockForUpdate()
-                            ->find($installment->id);
-
-                        if (!$installment) {
-                            throw ValidationException::withMessages(['items' => "Chit Installment not found."]);
-                        }
-
-                        if (!$this->agentCanAccessChitInstallment($installment, $agentId, $userId)) {
-                            throw new AuthorizationException('You can only collect installments for your assigned clients.');
-                        }
-                        if (!in_array($installment->status, ['pending', 'overdue', 'partial'], true)) {
-                            // Already paid or cancelled — skip silently
-                            $skipped++;
-                            continue;
-                        }
-
-                        $outstanding = round((float) $installment->balance, 2);
-
-                        // Snapshot in-progress sum from DB ONLY ONCE per installment ID so that
-                        // newly created collections within this batch loop are NOT double counted!
-                        if (!isset($priorInProgressChit[$installment->id])) {
-                            $priorInProgressChit[$installment->id] = round(
-                                (float) ChitCollection::where('installment_id', $installment->id)
-                                    ->where('status', 'in_progress')
-                                    ->sum('amount'),
-                                2
-                            );
-                        }
-
-                        $priorInProgress = $priorInProgressChit[$installment->id];
-                        $batchAlreadyCollected = round((float) ($batchChitCollected[$installment->id] ?? 0), 2);
-                        $currentTotalForInstallment = round($batchAlreadyCollected + $amount, 2);
-
-                        // True remaining collectible balance for this installment before current item
-                        $remaining = max(0, round($outstanding - $priorInProgress - $batchAlreadyCollected, 2));
-
-                        // If this installment is already fully covered by prior in-progress collections
-                        // or by earlier items in this batch, or the balance is already 0, skip it gracefully.
-                        if (($priorInProgress + $batchAlreadyCollected) >= ($outstanding - 0.01) || $outstanding <= 0.01) {
-                            $skipped++;
-                            continue;
-                        }
-
-                        // If adding this amount would exceed what remains collectible, throw error
-                        if (($priorInProgress + $currentTotalForInstallment) > ($outstanding + 0.01)) {
-                            throw ValidationException::withMessages([
-                                'items' => "Collection amount for Installment #{$installment->month_number} exceeds remaining balance (₹" . number_format($remaining, 2) . " remaining)."
-                            ]);
-                        }
-                        $batchChitCollected[$installment->id] = $currentTotalForInstallment;
-
-                        $paymentType = $amount < ($remaining - 0.01) ? 'partial' : 'full';
-                        $itemClientId = isset($item['client_id']) ? (int) $item['client_id'] : $preferredRootClientId;
-                        $clientId = $this->resolveChitCollectionClientId($installment, $itemClientId);
-
-                        $chitRemarks = $bulkRemarks;
-                        if ($periodIndex && $installment->member && in_array($installment->member->collection_frequency, ['weekly', 'daily'], true)) {
-                            $periodUnit = $installment->member->collection_frequency === 'weekly' ? 'Week' : 'Day';
-                            $chitRemarks .= " [{$periodUnit} {$periodIndex}]";
-                        }
-
-                        ChitCollection::create([
-                            'installment_id' => $installment->id,
-                            'group_id' => $installment->group_id,
-                            'member_id' => $installment->member_id,
-                            'client_id' => $clientId,
-                            'agent_id' => $agentId,
-                            'amount' => $amount,
-                            'share_percentage' => $installment->member?->effective_share_percentage,
-                            'payment_method' => $validated['payment_method'] === 'in_hand' ? 'cash' : $validated['payment_method'],
-                            'bank_account_id' => $validated['internal_bank_account_id'] ?? null,
-                            'payment_type' => $paymentType,
-                            'payment_reference' => $paymentReference,
-                            'status' => 'in_progress',
-                            'collected_at' => $validated['collected_at'],
-                            'remarks' => $chitRemarks,
-                        ]);
+                        $interestAmount = $interestExtra > 0.01 ? $interestExtra : $amount;
+                        $principalAmount = $principalExtra;
                     }
 
-                    $created++;
-                    $total += $amount;
+                    $emi = Emi::with(['loanAccount.client', 'activeAssignment'])
+                        ->lockForUpdate()
+                        ->findOrFail($emiId);
+
+                    if (!$this->agentCanAccessLoanEmi($emi, $agentId, $userId)) {
+                        throw new AuthorizationException('You can only collect EMIs for your assigned clients.');
+                    }
+
+                    $loanAccount = $emi->loanAccount;
+                    $isOpenLoan = $this->isOpenLoanAccount($loanAccount);
+                    $partialService = app(PartialPaymentConfigService::class);
+                    $outstanding = round((float) $partialService->getOutstandingDueAmount($emi, $loanAccount), 2);
+                    $maxPrincipal = $isOpenLoan
+                        ? (float) RupeeRound::one(max(0, (float) $loanAccount->remaining_principal_balance))
+                        : round(max(0, (float) ($loanAccount->outstanding_amount ?? 0)), 2);
+
+                    if ($principalAmount > 0.01 && ! $isOpenLoan) {
+                        throw ValidationException::withMessages(['items' => 'Principal collection is only allowed for Open Loan accounts.']);
+                    }
+
+                    $paymentDetails = [
+                        'payment_method' => $validated['payment_method'],
+                        'bank_account_id' => $validated['internal_bank_account_id'] ?? null,
+                        'payment_reference' => $paymentReference,
+                        'collected_at' => $validated['collected_at'],
+                        'remarks' => $bulkRemarks,
+                    ];
+
+                    $itemCreated = 0;
+                    $itemTotal = 0.0;
+                    $recordedInterest = 0.0;
+                    $recordedPrincipal = 0.0;
+
+                    if ($interestAmount > 0.01) {
+                        if (!in_array($emi->status, ['pending', 'overdue', 'partial'], true)) {
+                            // Interest already settled — skip only the interest part
+                        } elseif (
+                            EmiCollection::where('emi_id', $emi->id)
+                                ->where('status', 'in_progress')
+                                ->where(function ($q) {
+                                    $q->whereNull('payment_type')->orWhere('payment_type', '!=', 'principal');
+                                })
+                                ->lockForUpdate()
+                                ->exists()
+                        ) {
+                            // Interest already pending verification
+                        } else {
+                            $unpaidPriorEmi = $this->loanHasUnpaidPriorEmi($emi);
+                            if ($unpaidPriorEmi) {
+                                $ordinal = $this->getOrdinal($unpaidPriorEmi->instalment_number);
+                                throw ValidationException::withMessages(['items' => "Your previous {$unpaidPriorEmi->instalment_number}{$ordinal} #EMI is pending."]);
+                            }
+
+                            $interestError = $this->validateLoanInterestAmount(
+                                $emi,
+                                $loanAccount,
+                                $interestAmount,
+                                $outstanding,
+                                $isOpenLoan,
+                                $partialService
+                            );
+                            if ($interestError) {
+                                throw ValidationException::withMessages(['items' => $interestError['message']]);
+                            }
+
+                            $interestType = in_array($requestedType, ['partial', 'full', 'interest', 'emi'], true)
+                                ? $requestedType
+                                : ($interestAmount < ($outstanding - 0.01)
+                                    ? 'partial'
+                                    : ($isOpenLoan ? 'interest' : 'full'));
+
+                            $this->upsertAgentLoanCollection($emi, $interestAmount, $interestType, $agentId, $paymentDetails, $outstanding);
+                            $itemCreated++;
+                            $itemTotal += $interestAmount;
+                            $recordedInterest = $interestAmount;
+                        }
+                    }
+
+                    if ($principalAmount > 0.01) {
+                        if ($principalAmount > ($maxPrincipal + 0.01)) {
+                            throw ValidationException::withMessages([
+                                'items' => "Open Loan principal cannot exceed ₹" . number_format($maxPrincipal, 2) . '.',
+                            ]);
+                        }
+
+                        $principalInProgress = EmiCollection::where('emi_id', $emi->id)
+                            ->where('status', 'in_progress')
+                            ->where('payment_type', 'principal')
+                            ->lockForUpdate()
+                            ->exists();
+
+                        if ($principalInProgress || $maxPrincipal <= 0.01) {
+                            // Already submitted or no principal left
+                        } else {
+                            $this->upsertAgentLoanCollection($emi, $principalAmount, 'principal', $agentId, $paymentDetails, $outstanding);
+                            $itemCreated++;
+                            $itemTotal += $principalAmount;
+                            $recordedPrincipal = $principalAmount;
+                        }
+                    }
+
+                    if ($itemCreated === 0) {
+                        $skipped++;
+                        continue;
+                    }
+
+                    $activityParts = [];
+                    if ($recordedInterest > 0.01) {
+                        $activityParts[] = '₹' . number_format($recordedInterest, 2) . ($isOpenLoan ? ' interest' : '');
+                    }
+                    if ($recordedPrincipal > 0.01) {
+                        $activityParts[] = '₹' . number_format($recordedPrincipal, 2) . ' principal';
+                    }
+
+                    \App\Models\AgentActivity::create([
+                        'emi_id' => $emi->id,
+                        'agent_id' => $agentId,
+                        'type' => 'payment',
+                        'description' => implode(' + ', $activityParts) ?: ('₹' . number_format($itemTotal, 2)),
+                        'method' => strtoupper(str_replace('_', ' ', $validated['payment_method'])),
+                        'reference' => $paymentReference,
+                        'remarks' => $validated['remarks'] ?? null,
+                        'action_at' => $validated['collected_at'],
+                    ]);
+
+                    \App\Models\EmiAgentAssignment::where('emi_id', $emi->id)
+                        ->where('status', 'assigned')
+                        ->update([
+                            'status' => 'visited',
+                            'remarks' => DB::raw("CONCAT(COALESCE(remarks, ''), ' [Collection pending verification]')"),
+                        ]);
+
+                    $created += $itemCreated;
+                    $total += $itemTotal;
                 }
 
                 return [
@@ -1779,186 +1086,8 @@ class AgentCollectionControllerApi extends Controller
         ]);
     }
 
-    /**
-     * Chit collections list for the authenticated agent
-     */
-    public function chitList(Request $request)
-    {
-        $query = Installment::with([
-            'member.client',
-            'group',
-            'collectedBy.agent',
-            'pendingCollections.agent',
-            'pendingCollections.client',
-            'collections',
-        ]);
 
-        $currentUser = Auth::user();
-        $agentId = optional($currentUser->agent)->id;
 
-        if ($agentId) {
-            $this->applyChitAgentScope($query, $agentId);
-            $query->where(function ($q) use ($agentId) {
-                $q->where('paid_amount', '>', 0)
-                  ->orWhereHas('pendingCollections', function ($pq) use ($agentId) {
-                      $pq->where('agent_id', $agentId);
-                  });
-            });
-        } else {
-            $query->whereRaw('1 = 0');
-        }
-
-        if ($request->has('start_date') || $request->has('end_date')) {
-            $startDate = $request->start_date;
-            $endDate = $request->end_date;
-
-            $query->where(function ($q) use ($startDate, $endDate) {
-                $q->where(function ($paid) use ($startDate, $endDate) {
-                    if ($startDate) {
-                        $paid->whereDate('paid_date', '>=', $startDate);
-                    }
-                    if ($endDate) {
-                        $paid->whereDate('paid_date', '<=', $endDate);
-                    }
-                })->orWhereHas('pendingCollections', function ($pq) use ($startDate, $endDate) {
-                    if ($startDate) {
-                        $pq->whereDate('collected_at', '>=', $startDate);
-                    }
-                    if ($endDate) {
-                        $pq->whereDate('collected_at', '<=', $endDate);
-                    }
-                });
-            });
-        }
-
-        if ($request->filled('status')) {
-            $statusVal = $request->status;
-            if ($statusVal === 'pending') {
-                $query->where(function ($q) {
-                    $q->whereHas('pendingCollections')
-                        ->orWhere('status', 'partial');
-                });
-            } elseif ($statusVal === 'verified') {
-                $query->where('status', 'paid')->whereDoesntHave('pendingCollections');
-            } elseif ($statusVal === 'rejected') {
-                $query->whereHas('collections', fn ($cq) => $cq->where('status', 'rejected'));
-            }
-        }
-
-        if (!empty($request->input('search'))) {
-            $search = $request->input('search');
-            $query->where(function ($q) use ($search) {
-                $q->where('id', 'LIKE', "%{$search}%")
-                    ->orWhere('paid_amount', 'LIKE', "%{$search}%")
-                    ->orWhereHas('member.client', function ($cq) use ($search) {
-                        $cq->where('client_name', 'LIKE', "%{$search}%")
-                            ->orWhere('client_phone', 'LIKE', "%{$search}%");
-                    })
-                    ->orWhereHas('group', function ($gq) use ($search) {
-                        $gq->where('group_code', 'LIKE', "%{$search}%");
-                    });
-            });
-        }
-
-        $query->orderBy('paid_date', 'desc');
-
-        $allInstallments = $query->get();
-        $grouped = BulkPaymentGroup::groupInstallments($allInstallments);
-
-        $perPage = max(1, (int) $request->input('per_page', 15));
-        $page = max(1, (int) $request->input('page', 1));
-        $pageItems = $grouped->forPage($page, $perPage)->values();
-
-        $mapped = $pageItems->map(function (array $group) {
-            $lead = $group['lead'];
-            $items = $group['items'];
-            $row = $this->formatAgentChitListRow($lead);
-
-            if ($group['is_bulk']) {
-                $itemRows = $items->map(fn (Installment $installment) => $this->formatAgentChitListRow($installment));
-                $row['amount'] = BulkPaymentGroup::chitInstallmentTotal($items);
-                $row['is_bulk'] = true;
-                $row['emi_count'] = $items->count();
-                $row['emi_id_label'] = BulkPaymentGroup::chitInstallmentSplitLabel($items);
-                $row['emi_split'] = $row['emi_id_label'];
-                $types = $itemRows->pluck('payment_type');
-                $statuses = $itemRows->pluck('status');
-                $row['payment_type'] = $types->contains('partial') ? 'partial' : ($types->first() ?? 'full');
-                if ($statuses->contains('in_progress') || $statuses->contains('pending')) {
-                    $row['status'] = 'in_progress';
-                }
-            }
-
-            return $row;
-        });
-
-        $paginator = new LengthAwarePaginator(
-            $mapped,
-            $grouped->count(),
-            $perPage,
-            $page,
-            [
-                'path' => $request->url(),
-                'query' => $request->query(),
-            ]
-        );
-
-        return response()->json([
-            'success' => true,
-            'data' => $paginator,
-        ]);
-    }
-
-    private function formatAgentChitListRow(Installment $installment): array
-    {
-        $groupCode = $installment->group?->group_code ?? 'N/A';
-        $paymentMode = $installment->payment_mode === 'cash' ? 'in_hand' : ($installment->payment_mode ?? 'cash');
-        $pending = $installment->pendingCollections->sortByDesc('collected_at')->first();
-
-        $row = [
-            'id' => $installment->id,
-            'client_name' => $installment->member?->client?->client_name ?? 'N/A',
-            'emi_id_label' => "{$groupCode} - Inst #{$installment->month_number}",
-            'amount' => BulkPaymentGroup::installmentBulkAmount($installment),
-            'payment_method' => $paymentMode,
-            'payment_type' => $installment->status === 'partial' ? 'partial' : 'full',
-            'status' => $installment->status === 'paid' ? 'verified' : $installment->status,
-            'collected_at' => $installment->paid_date ? $installment->paid_date->format('Y-m-d H:i:s') : null,
-            'is_bulk' => false,
-            'emi_split' => "{$groupCode} - Inst #{$installment->month_number}",
-            'emi_count' => 1,
-        ];
-
-        if ($pending) {
-            $mode = $pending->payment_method === 'cash' ? 'in_hand' : $pending->payment_method;
-            $row['amount'] = (float) $pending->amount;
-            $row['payment_method'] = $mode;
-            $row['payment_type'] = $pending->payment_type ?: 'full';
-            $row['status'] = 'in_progress';
-            $row['collected_at'] = $pending->collected_at ? $pending->collected_at->format('Y-m-d H:i:s') : null;
-
-            if ($pending->client_id && $pending->relationLoaded('client') === false) {
-                $pending->load('client');
-            }
-            if ($pending->client?->client_name) {
-                $row['client_name'] = $pending->client->client_name;
-            }
-        }
-
-        return $row;
-    }
-
-    /**
-     * Unified Payment Receipt API for Agent Mobile/Web.
-     * Supports all 6 scenarios:
-     * 1. Single Loan
-     * 2. Single Chit
-     * 3. Bulk Loan
-     * 4. Bulk Chit
-     * 5. Single Loan & Chit
-     * 6. Bulk Loan & Chit
-     * Also supports partial payments for all scenarios.
-     */
     public function unifiedReceipt(Request $request, $id = null): JsonResponse
     {
         $agentUser = Auth::user();
@@ -1968,11 +1097,9 @@ class AgentCollectionControllerApi extends Controller
 
         $rawId = $id ?? $request->input('id') ?? $request->input('receipt_id') ?? $request->input('group_id') ?? $request->input('bulk_key');
         $loanIdsInput = $request->input('loan_id') ?? $request->input('loan_ids') ?? $request->input('emi_id') ?? $request->input('emi_ids');
-        $chitIdsInput = $request->input('chit_id') ?? $request->input('chit_ids') ?? $request->input('installment_id') ?? $request->input('installment_ids');
         $typeInput = strtolower(trim((string) $request->input('type', '')));
 
         $loanIds = [];
-        $chitIds = [];
         $groupId = null;
 
         $parseIds = function ($input) {
@@ -1995,13 +1122,6 @@ class AgentCollectionControllerApi extends Controller
             }
         }
 
-        foreach ($parseIds($chitIdsInput) as $cItem) {
-            $clean = preg_replace('/^(?:chit_|inst_|installment_)/i', '', (string) $cItem);
-            if (is_numeric($clean)) {
-                $chitIds[] = (int) $clean;
-            }
-        }
-
         if (!empty($rawId)) {
             $rawItems = $parseIds($rawId);
             foreach ($rawItems as $rItem) {
@@ -2010,11 +1130,6 @@ class AgentCollectionControllerApi extends Controller
                     $clean = preg_replace('/^(?:loan_|emi_)/i', '', $rItemStr);
                     if (is_numeric($clean)) {
                         $loanIds[] = (int) $clean;
-                    }
-                } elseif (str_starts_with(strtolower($rItemStr), 'chit_') || str_starts_with(strtolower($rItemStr), 'inst_')) {
-                    $clean = preg_replace('/^(?:chit_|inst_|installment_)/i', '', $rItemStr);
-                    if (is_numeric($clean)) {
-                        $chitIds[] = (int) $clean;
                     }
                 } elseif (is_numeric($rItemStr)) {
                     $numVal = (int) $rItemStr;
@@ -2030,43 +1145,10 @@ class AgentCollectionControllerApi extends Controller
                                 $loanIds[] = (int) $sib->emi_id;
                             }
                         }
-                        $explicit = BulkPaymentGroup::extractExplicitKey($emiColl->remarks, $emiColl->payment_reference);
-                        if ($explicit) {
-                            $chitSibs = ChitCollection::where(function ($q) use ($explicit) {
-                                $q->where('remarks', 'like', '%Group: ' . $explicit . '%')
-                                    ->orWhere('payment_reference', $explicit);
-                            })->pluck('installment_id')->toArray();
-                            $chitIds = array_merge($chitIds, array_filter($chitSibs));
-                        }
                     }
 
-                    // 2. Check ChitCollection (Chit collection record ID)
-                    $chitColl = ChitCollection::find($numVal);
-                    if ($chitColl) {
-                        $foundInColl = true;
-                        $siblings = BulkPaymentGroup::findChitSiblings($chitColl);
-                        foreach ($siblings as $sib) {
-                            if ($sib->installment_id) {
-                                $chitIds[] = (int) $sib->installment_id;
-                            }
-                        }
-                        $explicit = BulkPaymentGroup::extractExplicitKey($chitColl->remarks, $chitColl->payment_reference);
-                        if ($explicit) {
-                            $loanSibs = EmiCollection::where(function ($q) use ($explicit) {
-                                $q->where('remarks', 'like', '%Group: ' . $explicit . '%')
-                                    ->orWhere('payment_reference', $explicit);
-                            })->pluck('emi_id')->toArray();
-                            $loanIds = array_merge($loanIds, array_filter($loanSibs));
-                        }
-                    }
-
-                    // 3. If not matched to a collection record ID, check EMI/Installment tables
                     if (!$foundInColl) {
-                        if ($typeInput === 'chit') {
-                            $chitIds[] = $numVal;
-                        } elseif ($typeInput === 'loan') {
-                            $loanIds[] = $numVal;
-                        } else {
+                        if (true) {
                             if (Emi::where('id', $numVal)->exists()) {
                                 $emi = Emi::find($numVal);
                                 $coll = $emi?->collections?->first();
@@ -2079,19 +1161,6 @@ class AgentCollectionControllerApi extends Controller
                                     }
                                 } else {
                                     $loanIds[] = $numVal;
-                                }
-                            } elseif (Installment::where('id', $numVal)->exists()) {
-                                $inst = Installment::find($numVal);
-                                $coll = $inst?->collections?->first();
-                                if ($coll && BulkPaymentGroup::isBulkChit($coll)) {
-                                    $siblings = BulkPaymentGroup::findChitSiblings($coll);
-                                    foreach ($siblings as $sib) {
-                                        if ($sib->installment_id) {
-                                            $chitIds[] = (int) $sib->installment_id;
-                                        }
-                                    }
-                                } else {
-                                    $chitIds[] = $numVal;
                                 }
                             }
                         }
@@ -2108,57 +1177,33 @@ class AgentCollectionControllerApi extends Controller
                 ->pluck('emi_id')
                 ->toArray();
             $loanIds = array_unique(array_merge($loanIds, $groupLoanColl));
-
-            $groupChitColl = ChitCollection::where('remarks', 'LIKE', "%{$groupId}%")
-                ->orWhere('payment_reference', $groupId)
-                ->pluck('installment_id')
-                ->toArray();
-            $chitIds = array_unique(array_merge($chitIds, $groupChitColl));
         }
 
         $loanIds = array_values(array_unique(array_filter($loanIds)));
-        $chitIds = array_values(array_unique(array_filter($chitIds)));
 
-        if (empty($loanIds) && empty($chitIds)) {
+        if (empty($loanIds)) {
             return response()->json([
                 'success' => false,
-                'message' => 'No valid loan or chit collection identifiers provided for receipt generation.'
+                'message' => 'No valid loan collection identifiers provided for receipt generation.'
             ], 404);
         }
 
-        $loanEmis = collect();
-        if (!empty($loanIds)) {
-            $loanEmis = Emi::with([
-                'loanAccount.client',
-                'loanAccount.loanApplication.product',
-                'collections' => function ($q) {
-                    $q->whereIn('status', ['paid', 'in_progress', 'verified', 'approved'])->orderBy('id', 'desc');
-                }
-            ])->whereIn('id', $loanIds)->get();
-        }
+        $loanEmis = Emi::with([
+            'loanAccount.client',
+            'loanAccount.loanApplication.product',
+            'collections' => function ($q) {
+                $q->whereIn('status', ['paid', 'in_progress', 'verified', 'approved'])->orderBy('id', 'desc');
+            }
+        ])->whereIn('id', $loanIds)->get();
 
-        $chitInstallments = collect();
-        if (!empty($chitIds)) {
-            $chitInstallments = Installment::with([
-                'member.client',
-                'group',
-                'pendingCollections',
-                'collections' => function ($q) {
-                    $q->whereIn('status', ['paid', 'in_progress', 'verified', 'approved'])->orderBy('id', 'desc');
-                }
-            ])->whereIn('id', $chitIds)->get();
-        }
-
-        if ($loanEmis->isEmpty() && $chitInstallments->isEmpty()) {
+        if ($loanEmis->isEmpty()) {
             return response()->json([
                 'success' => false,
                 'message' => 'Receipt data not found for the provided identifiers.'
             ], 404);
         }
 
-        $firstLoanClient = $loanEmis->first()?->loanAccount?->client;
-        $firstChitClient = $chitInstallments->first()?->member?->client;
-        $client = $firstLoanClient ?? $firstChitClient;
+        $client = $loanEmis->first()?->loanAccount?->client;
 
         $clientName = $client->client_name ?? 'N/A';
         $customerId = $client->customer_id ?? 'N/A';
@@ -2213,120 +1258,37 @@ class AgentCollectionControllerApi extends Controller
             ];
         }
 
-        $chitItems = [];
-        $totalChitPaid = 0;
-        $totalChitAmount = 0;
-        $totalChitPenalty = 0;
-
-        foreach ($chitInstallments as $installment) {
-            $group = $installment->group;
-            $pending = $installment->pendingCollections?->sortByDesc('collected_at')?->first();
-            $coll = $pending ?? $installment->collections?->first();
-
-            $paid = (float) ($coll ? $coll->amount : ($installment->paid_amount ?? 0));
-            $total = (float) ($installment->amount ?? $paid);
-            $penalty = (float) ($installment->penalty_amount ?? 0);
-            $status = $pending ? 'in_progress' : ($installment->status === 'paid' ? 'verified' : ($installment->status ?? 'verified'));
-            $isPartial = ($coll?->payment_type === 'partial') || ($installment->status === 'partial') || ($paid > 0 && $paid < $total);
-
-            $totalChitPaid += $paid;
-            $totalChitAmount += $total;
-            $totalChitPenalty += $penalty;
-
-            $dueDate = $installment->due_date;
-            $dueDateStr = $dueDate ? ($dueDate instanceof \DateTimeInterface ? $dueDate->format('Y-m-d H:i:s') : (string) $dueDate) : null;
-
-            $collDate = $coll?->collected_at ?? $installment->paid_date ?? null;
-            $collectedAtStr = $collDate ? ($collDate instanceof \DateTimeInterface ? $collDate->format('Y-m-d H:i:s') : (string) $collDate) : null;
-
-            $chitItems[] = [
-                'type' => 'chit',
-                'id' => $installment->id,
-                'collection_id' => $coll?->id,
-                'item_label' => ($group?->group_code ?? 'Chit') . ' - Inst #' . ($installment->month_number ?? 1),
-                'account_number' => $group?->group_code ?? 'N/A',
-                'client_name' => $installment->member?->client?->client_name ?? $clientName,
-                'group_code' => $group?->group_code ?? 'N/A',
-                'instalment_no' => 'Inst #' . ($installment->month_number ?? 1),
-                'month_number' => $installment->month_number,
-                'due_amount' => round($total, 2),
-                'amount' => round($total, 2),
-                'paid_amount' => round($paid, 2),
-                'penalty_amount' => round($penalty, 2),
-                'due_date' => $dueDateStr,
-                'status' => $status,
-                'is_partial' => $isPartial,
-                'payment_method' => $coll?->payment_method ?? $installment->payment_mode ?? 'Cash',
-                'payment_reference' => $coll?->payment_reference ?? $installment->reference_no ?? 'N/A',
-                'collected_at' => $collectedAtStr,
-            ];
-        }
-
-        $hasLoan = count($loanItems) > 0;
-        $hasChit = count($chitItems) > 0;
+        
         $isLoanBulk = count($loanItems) > 1;
-        $isChitBulk = count($chitItems) > 1;
-        $isTotalBulk = (count($loanItems) + count($chitItems)) > 1;
-
-        $scenario = 'single_loan';
+        $isTotalBulk = $isLoanBulk;
+        $scenario = $isLoanBulk ? 'bulk_loan' : 'single_loan';
         $receiptTitle = 'LOAN PAYMENT RECEIPT';
 
-        if ($hasLoan && !$hasChit) {
-            if ($isLoanBulk) {
-                $scenario = 'bulk_loan';
-                $receiptTitle = 'LOAN BULK PAYMENT RECEIPT';
-            } else {
-                $scenario = 'single_loan';
-                $receiptTitle = 'LOAN PAYMENT RECEIPT';
-            }
-        } elseif (!$hasLoan && $hasChit) {
-            if ($isChitBulk) {
-                $scenario = 'bulk_chit';
-                $receiptTitle = 'CHIT BULK PAYMENT RECEIPT';
-            } else {
-                $scenario = 'single_chit';
-                $receiptTitle = 'CHIT PAYMENT RECEIPT';
-            }
-        } else {
-            if ($isTotalBulk) {
-                $scenario = 'bulk_loan_and_chit';
-                $receiptTitle = 'LOAN & CHIT BULK RECEIPT';
-            } else {
-                $scenario = 'single_loan_and_chit';
-                $receiptTitle = 'LOAN & CHIT COMBINED RECEIPT';
-            }
-        }
-
-        $allCollectionDates = array_values(array_filter(array_merge(
-            array_column($loanItems, 'collected_at'),
-            array_column($chitItems, 'collected_at')
-        )));
+        $allCollectionDates = array_values(array_filter(array_column($loanItems, 'collected_at')));
         $paidDateDisplay = !empty($allCollectionDates) ? $allCollectionDates[0] : now()->format('Y-m-d H:i:s');
 
-        $allMethods = array_values(array_unique(array_filter(array_merge(
-            array_column($loanItems, 'payment_method'),
-            array_column($chitItems, 'payment_method')
-        ))));
+        $allMethods = array_values(array_unique(array_filter(array_column($loanItems, 'payment_method'))));
         $paymentMethodDisplay = !empty($allMethods) ? implode(', ', $allMethods) : 'Cash';
 
-        $allReferences = array_values(array_unique(array_filter(array_merge(
-            array_column($loanItems, 'payment_reference'),
-            array_column($chitItems, 'payment_reference')
-        ))));
+        $allReferences = array_values(array_unique(array_filter(array_column($loanItems, 'payment_reference'))));
         $paymentRefDisplay = !empty($allReferences) && $allReferences[0] !== 'N/A' ? implode(', ', $allReferences) : ($groupId ?? 'N/A');
 
-        $grandTotalPaid = round($totalLoanPaid + $totalChitPaid, 2);
-        $grandTotalAmount = round($totalLoanAmount + $totalChitAmount, 2);
-        $grandTotalPenalty = round($totalLoanPenalty + $totalChitPenalty, 2);
-        $isAnyPartial = collect(array_merge($loanItems, $chitItems))->contains('is_partial', true);
+        $grandTotalPaid = round($totalLoanPaid, 2);
+        $grandTotalAmount = round($totalLoanAmount, 2);
+        $grandTotalPenalty = round($totalLoanPenalty, 2);
+        $isAnyPartial = collect($loanItems)->contains('is_partial', true);
 
-        $primaryId = $loanItems[0]['id'] ?? $chitItems[0]['id'] ?? 1;
+        $primaryId = $loanItems[0]['id'] ?? 1;
         $receiptNumber = $isTotalBulk ? ("RCP-B-" . str_pad($primaryId, 6, '0', STR_PAD_LEFT)) : ("RCP-" . str_pad($primaryId, 6, '0', STR_PAD_LEFT));
 
         $receiptData = [
             'receipt_number' => $receiptNumber,
             'receipt_title' => $receiptTitle,
             'scenario' => $scenario,
+            'module' => 'loan',
+            'account_label' => 'Loan ID',
+            'start_date_label' => 'Disbursement Date',
+            'split_item_label' => 'EMI',
             'client_id' => $client->id ?? null,
             'client_name' => $clientName,
             'customer_id' => $customerId,
@@ -2337,23 +1299,30 @@ class AgentCollectionControllerApi extends Controller
             'status' => $isAnyPartial ? 'partial' : 'verified',
             'status_label' => $isAnyPartial ? 'Partial Payment' : 'Verified',
             'is_bulk' => $isTotalBulk,
-            'is_combined' => $hasLoan && $hasChit,
+            'is_combined' => false,
             'has_partial' => $isAnyPartial,
-            'principal_amount' => round($totalLoanPaid + $totalChitPaid, 2),
+            'principal_amount' => round($totalLoanPaid, 2),
             'interest_amount' => 0.0,
             'overdue_amount' => $grandTotalPenalty,
             'show_overdue' => $grandTotalPenalty > 0,
-            'emi_amount' => $grandTotalAmount,
-            'total_amount_display' => $grandTotalAmount,
+            'total_due_amount' => $grandTotalAmount,
+            'due_amount' => $grandTotalAmount,
+            'previously_paid' => 0.0,
+            'previous_paid_amount' => 0.0,
+            'current_payment' => $grandTotalPaid,
+            'today_payment' => $grandTotalPaid,
+            'emi_amount' => $grandTotalPaid,
+            'total_amount_display' => $grandTotalPaid,
             'paid_amount' => $grandTotalPaid,
+            'total_paid_amount' => $grandTotalPaid,
             'outstanding_amount' => round(max(0, $grandTotalAmount - $grandTotalPaid), 2),
             'loan_items' => $loanItems,
-            'chit_items' => $chitItems,
-            'items' => array_merge($loanItems, $chitItems),
-            'all_items' => array_merge($loanItems, $chitItems),
-            'application_number' => $loanItems[0]['account_number'] ?? $chitItems[0]['group_code'] ?? 'N/A',
+            'chit_items' => [],
+            'items' => $loanItems,
+            'all_items' => $loanItems,
+            'application_number' => $loanItems[0]['account_number'] ?? 'N/A',
             'disbursed_date' => 'N/A',
-            'instalment_label' => $isTotalBulk ? (count($loanItems) + count($chitItems)) . ' Items' : ($loanItems[0]['item_label'] ?? $chitItems[0]['item_label'] ?? 'N/A'),
+            'instalment_label' => $isTotalBulk ? count($loanItems) . ' Items' : ($loanItems[0]['item_label'] ?? 'N/A'),
         ];
 
         $directory = public_path('receipts/unified');
@@ -2361,7 +1330,7 @@ class AgentCollectionControllerApi extends Controller
             mkdir($directory, 0755, true);
         }
 
-        $fileSlug = 'receipt_' . strtolower($scenario) . '_' . md5(json_encode($loanIds) . '_' . json_encode($chitIds) . '_' . $grandTotalPaid);
+        $fileSlug = 'receipt_' . strtolower($scenario) . '_' . md5(json_encode($loanIds) . '_' . $grandTotalPaid);
         $fileName = $fileSlug . '.pdf';
         $filePath = $directory . '/' . $fileName;
         $relativePath = 'receipts/unified/' . $fileName;
@@ -2379,7 +1348,7 @@ class AgentCollectionControllerApi extends Controller
 
     /**
      * Unified Overdue Dues API grouped by Clients.
-     * Merges overdue loan EMIs and overdue chit installments with client data inside.
+     * Merges overdue loan EMIs with client data inside.
      */
     public function overdueClients(Request $request): JsonResponse
     {
@@ -2397,7 +1366,7 @@ class AgentCollectionControllerApi extends Controller
         $endDate = $request->input('end_date');
 
         $loanEmis = collect();
-        if ($typeFilter !== 'chit') {
+        if (true) {
             $loanQuery = Emi::with([
                 'loanAccount.client.kycDetail',
                 'loanAccount.loanApplication.product'
@@ -2438,49 +1407,7 @@ class AgentCollectionControllerApi extends Controller
             $loanEmis = $loanQuery->orderBy('due_date', 'asc')->get();
         }
 
-        $chitInstallments = collect();
-        if ($typeFilter !== 'loan') {
-            $today = \Carbon\Carbon::now()->startOfDay();
-
-            $chitQuery = Installment::with([
-                'member.client.kycDetail',
-                'group'
-            ])
-            ->where(function ($q) use ($today) {
-                $q->where('status', 'overdue')
-                    ->orWhere(function ($sq) use ($today) {
-                        $sq->whereIn('status', ['pending', 'partial'])
-                            ->whereNotNull('due_date')
-                            ->where('due_date', '<', $today);
-                    });
-            })
-            ->whereRaw('(amount + penalty_amount - paid_amount) - 0.01 > (SELECT COALESCE(SUM(amount), 0) FROM chit_collections WHERE chit_collections.installment_id = installments.id AND chit_collections.status = "in_progress")');
-
-            $this->applyChitAgentScope($chitQuery, $agentId, $userId);
-
-            if (!empty($search)) {
-                $chitQuery->where(function ($q) use ($search) {
-                    $q->whereHas('member.client', function ($cq) use ($search) {
-                        $cq->where('client_name', 'LIKE', "%{$search}%")
-                           ->orWhere('client_phone', 'LIKE', "%{$search}%")
-                           ->orWhere('customer_id', 'LIKE', "%{$search}%");
-                    })
-                    ->orWhereHas('group', function ($gq) use ($search) {
-                        $gq->where('group_code', 'LIKE', "%{$search}%");
-                    });
-                });
-            }
-
-            if (!empty($startDate)) {
-                $chitQuery->whereDate('due_date', '>=', $startDate);
-            }
-            if (!empty($endDate)) {
-                $chitQuery->whereDate('due_date', '<=', $endDate);
-            }
-
-            $chitInstallments = $chitQuery->orderBy('due_date', 'asc')->get();
-        }
-
+        
         // Group items by Client
         $clientsData = [];
 
@@ -2521,45 +1448,11 @@ class AgentCollectionControllerApi extends Controller
             ];
         }
 
-        foreach ($chitInstallments as $installment) {
-            $client = $installment->member?->client;
-            if (!$client) {
-                continue;
-            }
-
-            $clientId = $client->id;
-            if (!isset($clientsData[$clientId])) {
-                $clientsData[$clientId] = [
-                    'client' => $client,
-                    'loan_emis' => [],
-                    'chit_installments' => [],
-                ];
-            }
-
-            $amountDue = (float) $installment->amount + (float) $installment->penalty_amount - (float) $installment->paid_amount;
-
-            $clientsData[$clientId]['chit_installments'][] = [
-                'id' => $installment->id,
-                'type' => 'chit',
-                'installment_id' => $installment->id,
-                'group_code' => $installment->group->group_code ?? 'N/A',
-                'month_number' => $installment->month_number,
-                'installment_label' => ($installment->group->group_code ?? 'N/A') . " - Inst #" . $installment->month_number,
-                'amount_due' => round(max(0, $amountDue), 2),
-                'amount' => (float) $installment->amount,
-                'penalty_amount' => (float) $installment->penalty_amount,
-                'paid_amount' => (float) $installment->paid_amount,
-                'due_date' => $installment->due_date ? \Carbon\Carbon::parse($installment->due_date)->format('Y-m-d') : null,
-                'status' => $installment->status,
-                'days_overdue' => $installment->due_date ? max(0, \Carbon\Carbon::now()->startOfDay()->diffInDays(\Carbon\Carbon::parse($installment->due_date))) : 0,
-            ];
-        }
-
         // Format Client records with overdue details inside
         $formattedClients = collect($clientsData)->map(function ($data) {
             $client = $data['client'];
             $loanEmis = $data['loan_emis'];
-            $chitInstallments = $data['chit_installments'];
+            $chitInstallments = [];
 
             $clientImageUrl = null;
             if ($client) {
@@ -2573,7 +1466,7 @@ class AgentCollectionControllerApi extends Controller
             }
 
             $loanOverdueAmount = collect($loanEmis)->sum('amount_due');
-            $chitOverdueAmount = collect($chitInstallments)->sum('amount_due');
+            $chitOverdueAmount = 0.0;
             $totalOverdueAmount = $loanOverdueAmount + $chitOverdueAmount;
 
             $allOverdueItems = array_merge($loanEmis, $chitInstallments);
@@ -2640,6 +1533,751 @@ class AgentCollectionControllerApi extends Controller
     }
 
     /**
+     * Return active collection reminders for loan EMIs and chit installments.
+     * GET /api/agent/agent-collections/reminders?type=loan&page=1&per_page=50
+     * Supports: filter=today|overdue|upcoming|all, date=YYYY-MM-DD, search, type=loan|chit|all
+     */
+    public function getReminders(Request $request): JsonResponse
+    {
+        $currentUser = Auth::user();
+        if (!$currentUser) {
+            return response()->json(['success' => false, 'message' => 'Agent data not found'], 404);
+        }
+
+        $agentId = $currentUser instanceof \App\Models\Agent ? $currentUser->id : optional(optional($currentUser)->agent)->id;
+        $userId = $currentUser instanceof \App\Models\Agent ? $currentUser->user_id : optional($currentUser)->id;
+        $isAdminOrStaff = ($currentUser instanceof User && ($currentUser->hasRole('Admin') || $currentUser->hasRole('Staff') || $currentUser->hasRole('Super Admin')));
+
+        $typeFilter = $request->input('type', 'all');
+        $search = trim($request->input('search', ''));
+        $filter = $request->input('filter', 'all'); // 'today', 'overdue', 'upcoming', 'all'
+        $filterDate = $request->input('date'); // optional specific date YYYY-MM-DD
+        $statusFilter = $request->input('status'); // optional status
+        $today = Carbon::now()->startOfDay();
+
+        $items = collect();
+
+        // 1. LOAN EMIs WITH ACTIVE REMINDERS
+        if (true) {
+            $loanEmiQuery = Emi::with([
+                'loanAccount.client.kycDetail',
+                'loanAccount.loanApplication.product',
+                'collectionNotes' => fn ($q) => $q->orderBy('created_at', 'desc'),
+                'collectionNotes.user',
+                'collectionNotes.agent',
+                'followups' => fn ($q) => $q->orderBy('created_at', 'desc'),
+                'followups.agent',
+            ])
+            ->whereIn('status', ['pending', 'overdue', 'partial'])
+            ->whereRaw('pending_amount - 0.01 > (SELECT COALESCE(SUM(amount), 0) FROM emi_collections WHERE emi_collections.emi_id = emis.id AND emi_collections.status = "in_progress")');
+
+            // Apply Agent Access Scope
+            if (!$isAdminOrStaff && ($agentId || $userId)) {
+                $loanEmiQuery->where(function ($q) use ($agentId, $userId) {
+                    $q->whereHas('loanAccount.client', function ($clientQ) use ($agentId, $userId) {
+                        if ($agentId) {
+                            $clientQ->where('assigned_to', $agentId)->orWhere('added_by', $agentId);
+                        }
+                        if ($userId) {
+                            $clientQ->orWhere('assigned_to', $userId)->orWhere('added_by', $userId);
+                        }
+                    })->orWhereHas('activeAssignment', function ($assignmentQ) use ($agentId, $userId) {
+                        if ($agentId) {
+                            $assignmentQ->where('agent_id', $agentId);
+                        }
+                        if ($userId) {
+                            $assignmentQ->orWhere('agent_id', $userId);
+                        }
+                    });
+                });
+            }
+
+            // Must have a reminder!
+            $loanEmiQuery->where(function ($q) use ($filterDate, $filter, $today, $agentId, $userId, $isAdminOrStaff) {
+                $q->whereHas('collectionNotes', function ($noteQ) use ($filterDate, $filter, $today) {
+                    $noteQ->where('is_completed', false)->whereNotNull('reminder_date');
+                    if ($filterDate) {
+                        $noteQ->whereDate('reminder_date', $filterDate);
+                    } elseif ($filter === 'today') {
+                        $noteQ->whereDate('reminder_date', $today);
+                    } elseif ($filter === 'overdue') {
+                        $noteQ->whereDate('reminder_date', '<', $today);
+                    } elseif ($filter === 'upcoming') {
+                        $noteQ->whereDate('reminder_date', '>', $today);
+                    }
+                })->orWhereHas('followups', function ($fQ) use ($filterDate, $filter, $today, $agentId, $userId, $isAdminOrStaff) {
+                    if (!$isAdminOrStaff && ($agentId || $userId)) {
+                        $fQ->where(function ($sub) use ($agentId, $userId) {
+                            if ($agentId) $sub->where('agent_id', $agentId);
+                            if ($userId) $sub->orWhere('agent_id', $userId);
+                        });
+                    }
+                    if ($filterDate) {
+                        $fQ->whereDate('followup_at', $filterDate);
+                    } elseif ($filter === 'today') {
+                        $fQ->whereDate('followup_at', $today);
+                    } elseif ($filter === 'overdue') {
+                        $fQ->whereDate('followup_at', '<', $today);
+                    } elseif ($filter === 'upcoming') {
+                        $fQ->whereDate('followup_at', '>', $today);
+                    }
+                });
+            });
+
+            if (!empty($search)) {
+                $loanEmiQuery->where(function ($q) use ($search) {
+                    $q->whereHas('loanAccount.client', function ($cq) use ($search) {
+                        $cq->where('client_name', 'LIKE', "%{$search}%")
+                           ->orWhere('client_phone', 'LIKE', "%{$search}%")
+                           ->orWhere('customer_id', 'LIKE', "%{$search}%");
+                    })->orWhereHas('loanAccount', function ($lq) use ($search) {
+                        $lq->where('account_number', 'LIKE', "%{$search}%");
+                    });
+                });
+            }
+
+            foreach ($loanEmiQuery->get() as $emi) {
+                $client = $emi->loanAccount?->client;
+                $loan = $emi->loanAccount;
+                $product = $loan?->loanApplication?->product;
+
+                $latestNote = $emi->collectionNotes->first();
+                $latestFollowup = $emi->followups->first();
+
+                $reminderDate = null;
+                $reminderTime = null;
+                $latestRemarks = '';
+                $followupStatus = 'postponed';
+                $createdBy = '';
+                $createdAt = null;
+
+                if ($latestNote && $latestNote->reminder_date) {
+                    $reminderDate = Carbon::parse($latestNote->reminder_date);
+                    $reminderTime = $latestNote->reminder_time;
+                    $latestRemarks = $latestNote->note;
+                    $followupStatus = $latestNote->status ?: 'postponed';
+                    $createdBy = $latestNote->creator_name;
+                    $createdAt = $latestNote->created_at;
+                } elseif ($latestFollowup && $latestFollowup->followup_at) {
+                    $reminderDate = Carbon::parse($latestFollowup->followup_at);
+                    $latestRemarks = $latestFollowup->remarks;
+                    $followupStatus = $latestFollowup->status ?: 'postponed';
+                    $createdBy = $latestFollowup->agent?->agent_name ? $latestFollowup->agent->agent_name . ' (Agent)' : 'Agent';
+                    $createdAt = $latestFollowup->created_at;
+                }
+
+                if (!$reminderDate) {
+                    continue;
+                }
+
+                $isReminderToday = $reminderDate->isToday();
+                $isReminderOverdue = $reminderDate->startOfDay()->lt($today);
+                $isReminderUpcoming = $reminderDate->startOfDay()->gt($today);
+
+                if ($filterDate && $reminderDate->toDateString() !== $filterDate) {
+                    continue;
+                }
+                if ($filter === 'today' && !$isReminderToday) {
+                    continue;
+                }
+                if ($filter === 'overdue' && !$isReminderOverdue) {
+                    continue;
+                }
+                if ($filter === 'upcoming' && !$isReminderUpcoming) {
+                    continue;
+                }
+                if ($statusFilter && $followupStatus !== $statusFilter) {
+                    continue;
+                }
+
+                $history = [];
+                foreach ($emi->collectionNotes as $note) {
+                    $history[] = [
+                        'id' => $note->id,
+                        'source' => 'note',
+                        'note' => $note->note,
+                        'reminder_date' => $note->reminder_date ? Carbon::parse($note->reminder_date)->format('Y-m-d') : null,
+                        'reminder_date_formatted' => $note->reminder_date ? Carbon::parse($note->reminder_date)->format('d-m-Y') : null,
+                        'status' => $note->status ?: 'postponed',
+                        'created_by' => $note->creator_name,
+                        'created_at' => $note->created_at ? $note->created_at->format('d-m-Y h:i A') : '',
+                    ];
+                }
+
+                $clientImageUrl = null;
+                if ($client) {
+                    $clientImageUrl = $client->profile_image_url;
+                    if (!$clientImageUrl) {
+                        $rawImage = $client->profile_image ?? $client->photo ?? $client->aadhaar_photo_path;
+                        if ($rawImage) {
+                            $clientImageUrl = str_starts_with($rawImage, 'http') ? $rawImage : asset('storage/' . ltrim($rawImage, '/'));
+                        }
+                    }
+                }
+
+                $items->push([
+                    'id' => 'loan_' . $emi->id,
+                    'type' => 'loan',
+                    'emi_id' => $emi->id,
+                    'loan_account_id' => $loan?->id,
+                    'account_number' => $loan?->account_number ?? 'N/A',
+                    'loan_name' => $product?->loan_name ?? 'Loan',
+                    'client_id' => $client?->id,
+                    'customer_id' => $client?->customer_id ?? 'N/A',
+                    'client_name' => $client?->client_name ?? 'N/A',
+                    'client_phone' => $client?->client_phone ?? 'N/A',
+                    'client_photo' => $clientImageUrl,
+                    'address' => $client?->address ?? null,
+                    'city' => $client?->city ?? null,
+                    'label' => 'EMI #' . $emi->instalment_number,
+                    'instalment_number' => $emi->instalment_number,
+                    'amount_due' => (float) $emi->pending_amount,
+                    'due_date' => $emi->due_date ? Carbon::parse($emi->due_date)->format('Y-m-d') : null,
+                    'due_date_formatted' => $emi->due_date ? Carbon::parse($emi->due_date)->format('d-m-Y') : null,
+                    'status' => $emi->status,
+                    'reminder_date' => $reminderDate->format('Y-m-d'),
+                    'reminder_date_formatted' => $reminderDate->format('d-m-Y'),
+                    'reminder_time' => $reminderTime ? Carbon::parse($reminderTime)->format('h:i A') : null,
+                    'followup_status' => $followupStatus,
+                    'is_reminder_today' => $isReminderToday,
+                    'is_reminder_overdue' => $isReminderOverdue,
+                    'is_reminder_upcoming' => $isReminderUpcoming,
+                    'latest_note' => $latestRemarks,
+                    'created_by' => $createdBy,
+                    'created_at' => $createdAt ? Carbon::parse($createdAt)->format('d-m-Y h:i A') : '',
+                    'notes_history' => $history,
+                ]);
+            }
+        }
+
+        // Sorting: today's reminders first (0), overdue reminders next (1), upcoming reminders next (2), by reminder_date asc
+        $sortedItems = $items->sort(function ($a, $b) {
+            $priorityA = $a['is_reminder_today'] ? 0 : ($a['is_reminder_overdue'] ? 1 : 2);
+            $priorityB = $b['is_reminder_today'] ? 0 : ($b['is_reminder_overdue'] ? 1 : 2);
+            if ($priorityA !== $priorityB) {
+                return $priorityA <=> $priorityB;
+            }
+            return strcmp($a['reminder_date'] ?? '', $b['reminder_date'] ?? '');
+        })->values();
+
+        $page = max(1, (int) $request->input('page', 1));
+        $perPage = max(1, min(200, (int) $request->input('per_page', 50)));
+        $offset = ($page - 1) * $perPage;
+        $paginatedItems = $sortedItems->slice($offset, $perPage)->values();
+
+        $stats = [
+            'total_reminders' => $sortedItems->count(),
+            'today_reminders' => $sortedItems->where('is_reminder_today', true)->count(),
+            'overdue_reminders' => $sortedItems->where('is_reminder_overdue', true)->count(),
+            'upcoming_reminders' => $sortedItems->where('is_reminder_upcoming', true)->count(),
+            'total_amount_due' => round($sortedItems->sum('amount_due'), 2),
+        ];
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Reminders retrieved successfully',
+            'data' => $paginatedItems,
+            'pagination' => [
+                'current_page' => $page,
+                'per_page' => $perPage,
+                'total' => $sortedItems->count(),
+                'last_page' => (int) ceil($sortedItems->count() / max(1, $perPage)),
+                'from' => $sortedItems->isEmpty() ? 0 : $offset + 1,
+                'to' => min($offset + $perPage, $sortedItems->count()),
+            ],
+            'stats' => $stats,
+        ]);
+    }
+
+    /**
+     * Return pending follow-ups and collection reminders for loan EMIs.
+     * GET /api/agent/agent-collections/pending-follow-ups?type=loan&page=1&per_page=50
+     */
+    public function pendingFollowUps(Request $request): JsonResponse
+    {
+        $currentUser = Auth::user();
+        if (!$currentUser) {
+            return response()->json(['success' => false, 'message' => 'Agent data not found'], 404);
+        }
+
+        $agentId = $currentUser instanceof \App\Models\Agent ? $currentUser->id : optional(optional($currentUser)->agent)->id;
+        $userId = $currentUser instanceof \App\Models\Agent ? $currentUser->user_id : optional($currentUser)->id;
+        $isAdminOrStaff = ($currentUser instanceof User && ($currentUser->hasRole('Admin') || $currentUser->hasRole('Staff') || $currentUser->hasRole('Super Admin')));
+
+        $typeFilter = $request->input('type', 'all');
+        $search = trim($request->input('search', ''));
+        $filterDate = $request->input('date'); // optional specific date
+        $statusFilter = $request->input('status'); // optional status
+        $today = Carbon::now()->startOfDay();
+        $targetDate = $filterDate ? Carbon::parse($filterDate)->startOfDay() : $today;
+        $targetDateStr = $targetDate->toDateString();
+        $onlyReminders = filter_var($request->input('only_reminders', $request->input('has_reminder', false)), FILTER_VALIDATE_BOOLEAN);
+
+        $items = collect();
+
+        // 1. LOAN EMIs WITH FOLLOW-UPS
+        if (true) {
+            $loanEmiQuery = Emi::with([
+                'loanAccount.client.kycDetail',
+                'loanAccount.loanApplication.product',
+                'collectionNotes' => fn ($q) => $q->orderBy('created_at', 'desc'),
+                'collectionNotes.user',
+                'collectionNotes.agent',
+                'followups' => fn ($q) => $q->orderBy('created_at', 'desc'),
+                'followups.agent',
+            ])
+            ->whereIn('status', ['pending', 'overdue', 'partial'])
+            ->whereRaw('pending_amount - 0.01 > (SELECT COALESCE(SUM(amount), 0) FROM emi_collections WHERE emi_collections.emi_id = emis.id AND emi_collections.status = "in_progress")');
+
+            // Apply Agent Access Scope for regular agents
+            if (!$isAdminOrStaff && ($agentId || $userId)) {
+                $loanEmiQuery->where(function ($q) use ($agentId, $userId) {
+                    $q->whereHas('loanAccount.client', function ($clientQ) use ($agentId, $userId) {
+                        if ($agentId) {
+                            $clientQ->where('assigned_to', $agentId)->orWhere('added_by', $agentId);
+                        }
+                        if ($userId) {
+                            $clientQ->orWhere('assigned_to', $userId)->orWhere('added_by', $userId);
+                        }
+                    })->orWhereHas('activeAssignment', function ($assignmentQ) use ($agentId, $userId) {
+                        if ($agentId) {
+                            $assignmentQ->where('agent_id', $agentId);
+                        }
+                        if ($userId) {
+                            $assignmentQ->orWhere('agent_id', $userId);
+                        }
+                    });
+                });
+            }
+
+            // Only today collections, OR items whose reminder is set for that day
+            $loanEmiQuery->where(function ($q) use ($targetDateStr, $onlyReminders, $agentId, $userId, $isAdminOrStaff) {
+                // 1. Dues with an active reminder set for this specific day
+                $q->whereHas('collectionNotes', function ($noteQ) use ($targetDateStr) {
+                    $noteQ->where('is_completed', false)->whereDate('reminder_date', $targetDateStr);
+                })->orWhereHas('followups', function ($fQ) use ($targetDateStr, $agentId, $userId, $isAdminOrStaff) {
+                    if (!$isAdminOrStaff && ($agentId || $userId)) {
+                        $fQ->where(function ($sub) use ($agentId, $userId) {
+                            if ($agentId) $sub->where('agent_id', $agentId);
+                            if ($userId) $sub->orWhere('agent_id', $userId);
+                        });
+                    }
+                    $fQ->whereDate('followup_at', $targetDateStr);
+                });
+
+                // 2. Regular collection dues on that day (due date matches target date)
+                if (!$onlyReminders) {
+                    $q->orWhereDate('due_date', $targetDateStr);
+                }
+            });
+
+            if (!empty($search)) {
+                $loanEmiQuery->where(function ($q) use ($search) {
+                    $q->whereHas('loanAccount.client', function ($cq) use ($search) {
+                        $cq->where('client_name', 'LIKE', "%{$search}%")
+                           ->orWhere('client_phone', 'LIKE', "%{$search}%")
+                           ->orWhere('customer_id', 'LIKE', "%{$search}%");
+                    })->orWhereHas('loanAccount', function ($lq) use ($search) {
+                        $lq->where('account_number', 'LIKE', "%{$search}%");
+                    });
+                });
+            }
+
+            foreach ($loanEmiQuery->get() as $emi) {
+                $client = $emi->loanAccount?->client;
+                $loan = $emi->loanAccount;
+                $product = $loan?->loanApplication?->product;
+
+                $latestNote = $emi->collectionNotes->first();
+                $latestFollowup = $emi->followups->first();
+
+                $reminderDate = null;
+                $reminderTime = null;
+                $latestRemarks = '';
+                $followupStatus = $emi->status;
+                $createdBy = '';
+                $createdAt = null;
+
+                if ($latestNote) {
+                    $reminderDate = $latestNote->reminder_date ? Carbon::parse($latestNote->reminder_date) : null;
+                    $reminderTime = $latestNote->reminder_time;
+                    $latestRemarks = $latestNote->note;
+                    $followupStatus = $latestNote->status ?: 'postponed';
+                    $createdBy = $latestNote->creator_name;
+                    $createdAt = $latestNote->created_at;
+                } elseif ($latestFollowup) {
+                    $reminderDate = $latestFollowup->followup_at ? Carbon::parse($latestFollowup->followup_at) : null;
+                    $latestRemarks = $latestFollowup->remarks;
+                    $followupStatus = $latestFollowup->status ?: 'postponed';
+                    $createdBy = $latestFollowup->agent?->agent_name ? $latestFollowup->agent->agent_name . ' (Agent)' : 'Agent';
+                    $createdAt = $latestFollowup->created_at;
+                }
+
+                // If this due was postponed to a different reminder date, hide from today's list
+                // It will only be sent on that reminder day!
+                if ($reminderDate && $reminderDate->toDateString() !== $targetDateStr) {
+                    continue;
+                }
+
+                $isReminderToday = $reminderDate && $reminderDate->toDateString() === $targetDateStr;
+                $isReminderOverdue = $reminderDate && $reminderDate->startOfDay()->lt($today) && (!($latestNote?->is_completed));
+
+                if ($statusFilter && $followupStatus !== $statusFilter) {
+                    continue;
+                }
+
+                $history = [];
+                foreach ($emi->collectionNotes as $note) {
+                    $history[] = [
+                        'id' => $note->id,
+                        'source' => 'note',
+                        'note' => $note->note,
+                        'reminder_date' => $note->reminder_date ? Carbon::parse($note->reminder_date)->format('Y-m-d') : null,
+                        'reminder_date_formatted' => $note->reminder_date ? Carbon::parse($note->reminder_date)->format('d-m-Y') : null,
+                        'status' => $note->status ?: 'postponed',
+                        'created_by' => $note->creator_name,
+                        'created_at' => $note->created_at ? $note->created_at->format('d-m-Y h:i A') : '',
+                    ];
+                }
+                foreach ($emi->followups as $f) {
+                    $history[] = [
+                        'id' => $f->id,
+                        'source' => 'followup',
+                        'note' => $f->remarks,
+                        'reminder_date' => $f->followup_at ? Carbon::parse($f->followup_at)->format('Y-m-d') : null,
+                        'reminder_date_formatted' => $f->followup_at ? Carbon::parse($f->followup_at)->format('d-m-Y') : null,
+                        'status' => $f->status ?: 'postponed',
+                        'created_by' => $f->agent?->agent_name ? $f->agent->agent_name . ' (Agent)' : 'Agent',
+                        'created_at' => $f->created_at ? $f->created_at->format('d-m-Y h:i A') : '',
+                    ];
+                }
+
+                $clientImageUrl = null;
+                if ($client) {
+                    $clientImageUrl = $client->profile_image_url;
+                    if (!$clientImageUrl) {
+                        $rawImage = $client->profile_image ?? $client->photo ?? $client->aadhaar_photo_path;
+                        if ($rawImage) {
+                            $clientImageUrl = str_starts_with($rawImage, 'http') ? $rawImage : asset('storage/' . ltrim($rawImage, '/'));
+                        }
+                    }
+                }
+
+                $amountDue = (float) $emi->pending_amount;
+                $daysOverdue = $emi->due_date ? max(0, $today->diffInDays(Carbon::parse($emi->due_date), false) * -1) : 0;
+
+                $items->push([
+                    'id' => 'loan_' . $emi->id,
+                    'type' => 'loan',
+                    'emi_id' => $emi->id,
+                    'loan_account_id' => $emi->loan_account_id,
+                    'account_number' => $loan->account_number ?? 'N/A',
+                    'loan_name' => $product->loan_name ?? 'Loan',
+                    'client_id' => $client?->id,
+                    'customer_id' => $client?->customer_id ?? 'N/A',
+                    'client_name' => $client?->client_name ?? 'N/A',
+                    'client_phone' => $client?->client_phone ?? 'N/A',
+                    'client_photo' => $clientImageUrl,
+                    'address' => $client?->address ?? null,
+                    'city' => $client?->city ?? null,
+                    'label' => 'EMI #' . $emi->instalment_number,
+                    'instalment_number' => $emi->instalment_number,
+                    'amount_due' => round($amountDue, 2),
+                    'total_amount' => (float) $emi->total_amount,
+                    'penalty_amount' => (float) $emi->penalty_amount,
+                    'paid_amount' => (float) $emi->paid_amount,
+                    'due_date' => $emi->due_date ? Carbon::parse($emi->due_date)->format('Y-m-d') : null,
+                    'days_overdue' => (int) $daysOverdue,
+                    'status' => $emi->status,
+                    'reminder_date' => $reminderDate ? $reminderDate->format('Y-m-d') : null,
+                    'reminder_date_formatted' => $reminderDate ? $reminderDate->format('d-m-Y') : null,
+                    'reminder_time' => $reminderTime,
+                    'followup_status' => $followupStatus,
+                    'is_reminder_today' => $isReminderToday,
+                    'is_reminder_overdue' => $isReminderOverdue,
+                    'latest_note' => $latestRemarks,
+                    'created_by' => $createdBy,
+                    'created_at' => $createdAt ? $createdAt->format('d-m-Y h:i A') : '',
+                    'notes_history' => $history,
+                ]);
+            }
+        }
+
+        // Sort items: Today first, then overdue reminders, then future reminders, then by reminder date
+        $sortedItems = $items->sort(function ($a, $b) {
+            if ($a['is_reminder_today'] && !$b['is_reminder_today']) return -1;
+            if (!$a['is_reminder_today'] && $b['is_reminder_today']) return 1;
+
+            if ($a['is_reminder_overdue'] && !$b['is_reminder_overdue']) return -1;
+            if (!$a['is_reminder_overdue'] && $b['is_reminder_overdue']) return 1;
+
+            return strcmp($a['reminder_date'] ?? '9999-99-99', $b['reminder_date'] ?? '9999-99-99');
+        })->values();
+
+        $stats = [
+            'total_follow_ups' => $sortedItems->count(),
+            'today_reminders' => $sortedItems->where('is_reminder_today', true)->count(),
+            'overdue_reminders' => $sortedItems->where('is_reminder_overdue', true)->count(),
+            'loan_count' => $sortedItems->where('type', 'loan')->count(),
+            'chit_count' => 0,
+            'total_amount_due' => round($sortedItems->sum('amount_due'), 2),
+        ];
+
+        $perPage = (int) $request->input('per_page', 50);
+        $page = (int) $request->input('page', 1);
+        $offset = ($page - 1) * $perPage;
+
+        $paginatedItems = $sortedItems->slice($offset, $perPage)->values();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Pending follow-ups retrieved successfully',
+            'data' => $paginatedItems,
+            'pagination' => [
+                'current_page' => $page,
+                'per_page' => $perPage,
+                'total' => $sortedItems->count(),
+                'last_page' => (int) ceil($sortedItems->count() / max(1, $perPage)),
+                'from' => $sortedItems->isEmpty() ? 0 : $offset + 1,
+                'to' => min($offset + $perPage, $sortedItems->count()),
+            ],
+            'stats' => $stats,
+        ]);
+    }
+
+    /**
+     * Store a follow-up / collection note from mobile agent app.
+     * POST /api/agent/agent-collections/pending-follow-ups
+     * POST /api/agent/agent-collections/follow-up
+     * POST /api/agent/agent-collections/notes
+     */
+    public function storeFollowUp(Request $request): JsonResponse
+    {
+        $currentUser = Auth::user();
+        if (!$currentUser) {
+            return response()->json(['success' => false, 'message' => 'Agent data not found'], 404);
+        }
+
+        $agentId = $currentUser instanceof \App\Models\Agent ? $currentUser->id : optional(optional($currentUser)->agent)->id;
+        $userId = $currentUser instanceof \App\Models\Agent ? $currentUser->user_id : optional($currentUser)->id;
+
+        $validated = $request->validate([
+            'type' => 'nullable|in:loan',
+            'id' => 'nullable',
+            'emi_id' => 'nullable',
+            'installment_id' => 'nullable',
+            'loan_account_id' => 'nullable|integer',
+            'group_member_id' => 'nullable|integer',
+            'client_id' => 'nullable|integer',
+            'reminder_date' => 'nullable',
+            'remarks' => 'nullable|string|max:2000',
+            'note' => 'nullable|string|max:2000',
+            'notes' => 'nullable|string|max:2000',
+            'status' => 'nullable|string|max:50',
+            'latitude' => 'nullable|numeric|between:-90,90',
+            'longitude' => 'nullable|numeric|between:-180,180',
+        ]);
+
+        $remarksText = trim($validated['note'] ?? $validated['remarks'] ?? $validated['notes'] ?? '');
+        if ($remarksText === '') {
+            return response()->json([
+                'success' => false,
+                'message' => 'Note or remarks content is required.',
+            ], 422);
+        }
+
+        $type = $validated['type'] ?? null;
+        $rawId = $validated['id'] ?? $validated['emi_id'] ?? $validated['installment_id'];
+
+        if (is_string($rawId) && str_starts_with($rawId, 'loan_')) {
+            $type = 'loan';
+            $rawId = substr($rawId, 5);
+        }
+        if (!$type) {
+            $type = 'loan';
+        }
+
+        $emiId = $validated['emi_id'] ?? null;
+        $installmentId = $validated['installment_id'] ?? null;
+        $clientId = $validated['client_id'] ?? null;
+        $loanAccountId = $validated['loan_account_id'] ?? null;
+        $groupMemberId = $validated['group_member_id'] ?? null;
+
+        $isAdminOrStaff = ($currentUser instanceof User && ($currentUser->hasRole('Admin') || $currentUser->hasRole('Staff') || $currentUser->hasRole('Super Admin')));
+
+        $dueAmount = 0.0;
+
+
+        if ($type === 'loan') {
+            $emiId = (int) ($emiId ?: $rawId);
+            $emi = Emi::with('loanAccount.client')->find($emiId);
+            if ($emi) {
+                if (!$isAdminOrStaff && $agentId && !$this->agentCanAccessLoanEmi($emi, $agentId, $userId)) {
+                    return response()->json(['success' => false, 'message' => 'Unauthorized to access this loan EMI'], 403);
+                }
+                $loanAccountId = $loanAccountId ?: $emi->loan_account_id;
+                $clientId = $clientId ?: $emi->loanAccount?->client_id;
+                $dueAmount = ($emi->status !== 'paid') ? (float) ($emi->pending_amount ?? 0) : 0.0;
+            } elseif ($loanAccountId && !$clientId) {
+                $loan = LoanAccount::find($loanAccountId);
+                $clientId = $loan?->client_id;
+                $dueAmount = $loan ? (float) ($loan->outstanding_principal ?: $loan->outstanding_amount ?: 0) : 0.0;
+            }
+        }
+
+        // If due amount is 0, do not allow adding a reminder
+        if (!empty($validated['reminder_date']) && $dueAmount <= 0.009) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Cannot add a reminder because the due amount is 0.',
+            ], 422);
+        }
+
+        $dateOnly = null;
+        $timeOnly = null;
+        $parsedDate = null;
+        if (!empty($validated['reminder_date'])) {
+            try {
+                $parsedDate = Carbon::parse($validated['reminder_date']);
+                $dateOnly = $parsedDate->toDateString();
+                $timeOnly = $parsedDate->format('H:i:s');
+                if ($timeOnly === '00:00:00') {
+                    $timeOnly = null;
+                }
+            } catch (\Throwable $e) {
+                return response()->json(['success' => false, 'message' => 'Invalid reminder date format'], 422);
+            }
+        }
+
+        $status = !empty($validated['status']) ? $validated['status'] : 'postponed';
+
+        $note = CollectionNote::create([
+            'type' => $type,
+            'client_id' => $clientId,
+            'loan_account_id' => $loanAccountId,
+            'emi_id' => $emiId,
+            'group_member_id' => $groupMemberId,
+            'installment_id' => $installmentId,
+            'user_id' => $userId,
+            'agent_id' => $agentId,
+            'note' => $remarksText,
+            'reminder_date' => $dateOnly,
+            'reminder_time' => $timeOnly,
+            'status' => $status,
+        ]);
+
+        if ($type === 'loan' && $emiId && $agentId) {
+            try {
+                \App\Models\EmiFollowup::create([
+                    'emi_id' => $emiId,
+                    'agent_id' => $agentId,
+                    'status' => $status,
+                    'followup_at' => $dateOnly ? ($timeOnly ? "{$dateOnly} {$timeOnly}" : "{$dateOnly} 09:00:00") : null,
+                    'remarks' => $remarksText,
+                ]);
+            } catch (\Throwable $e) {
+                Log::warning('Could not sync to emi_followups: ' . $e->getMessage());
+            }
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Note and reminder saved successfully.',
+            'data' => [
+                'id' => $note->id,
+                'note_id' => $note->id,
+                'type' => $type,
+                'client_id' => $clientId,
+                'loan_account_id' => $loanAccountId,
+                'group_member_id' => $groupMemberId,
+                'emi_id' => $emiId,
+                'installment_id' => $installmentId,
+                'note' => $remarksText,
+                'remarks' => $remarksText,
+                'reminder_date' => $dateOnly,
+                'reminder_date_formatted' => $dateOnly ? Carbon::parse($dateOnly)->format('d-m-Y') : null,
+                'reminder_time' => $timeOnly ? Carbon::parse($timeOnly)->format('h:i A') : null,
+                'status' => $status,
+                'created_by' => $note->creator_name,
+                'created_at' => $note->created_at->format('d-m-Y h:i A'),
+            ]
+        ]);
+    }
+
+    /**
+     * Get notes history for a specific EMI.
+     * GET /api/agent/agent-collections/notes/{type}/{id}
+     * GET /api/agent/agent-collections/notes?type=loan&id=7178&emi_id=7178
+     */
+    public function getNotesHistory(Request $request, ?string $type = null, $id = null): JsonResponse
+    {
+        $currentUser = Auth::user();
+        if (!$currentUser) {
+            return response()->json(['success' => false, 'message' => 'Agent data not found'], 404);
+        }
+
+        $type = $type ?: $request->input('type');
+        $rawId = $id ?: $request->input('id') ?: $request->input('emi_id') ?: $request->input('installment_id');
+
+        if (is_string($rawId) && str_starts_with($rawId, 'loan_')) {
+            $type = 'loan';
+            $rawId = substr($rawId, 5);
+        }
+        if (!$type) {
+            $type = 'loan';
+        }
+
+        $query = CollectionNote::with(['user', 'agent'])->where('type', $type);
+
+        $entityInfo = null;
+        if ($type === 'loan') {
+            $query->where('emi_id', (int) $rawId);
+            $emi = Emi::with(['loanAccount.client'])->find((int) $rawId);
+            if ($emi) {
+                $entityInfo = [
+                    'type' => 'loan',
+                    'emi_id' => $emi->id,
+                    'client_id' => $emi->loanAccount?->client_id,
+                    'loan_account_id' => $emi->loan_account_id,
+                    'label' => 'EMI #' . $emi->instalment_number,
+                    'account_number' => $emi->loanAccount?->account_number ?? 'N/A',
+                    'client_name' => $emi->loanAccount?->client?->client_name ?? 'N/A',
+                    'client_phone' => $emi->loanAccount?->client?->client_phone ?? 'N/A',
+                    'amount_due' => (float) $emi->pending_amount,
+                    'due_date' => $emi->due_date ? Carbon::parse($emi->due_date)->format('d-m-Y') : '—',
+                ];
+            }
+        } else {
+                    }
+
+        $notes = $query->orderBy('created_at', 'desc')->get()->map(function ($note) {
+            $isToday = $note->reminder_date && Carbon::parse($note->reminder_date)->isToday();
+            $isPast = $note->reminder_date && Carbon::parse($note->reminder_date)->startOfDay()->lt(now()->startOfDay());
+            return [
+                'id' => $note->id,
+                'note_id' => $note->id,
+                'note' => $note->note,
+                'remarks' => $note->note,
+                'reminder_date' => $note->reminder_date ? Carbon::parse($note->reminder_date)->format('Y-m-d') : null,
+                'reminder_date_formatted' => $note->reminder_date ? Carbon::parse($note->reminder_date)->format('d-m-Y') : null,
+                'reminder_time' => $note->reminder_time,
+                'status' => $note->status ?: 'postponed',
+                'is_today' => $isToday,
+                'is_overdue' => $isPast && !$note->is_completed,
+                'created_by' => $note->creator_name,
+                'created_at' => $note->created_at ? $note->created_at->format('d-m-Y h:i A') : '',
+            ];
+        });
+
+        return response()->json([
+            'success' => true,
+            'entity' => $entityInfo,
+            'notes' => $notes,
+            'data' => $notes,
+        ]);
+    }
+
+    /**
      * Scope to agent's assigned/added clients or active assignments for loan EMI collections.
      */
     private function applyLoanAgentScope(\Illuminate\Database\Eloquent\Builder $query, int $agentId, ?int $userId = null): void
@@ -2660,36 +2298,10 @@ class AgentCollectionControllerApi extends Controller
         });
     }
 
-    /**
-     * Exclude other agents' chit collections.
-     */
-    private function excludeOtherAgentChitCollections(\Illuminate\Database\Eloquent\Builder $query, int $agentId, ?int $agentUserId = null): void
-    {
-        $ownCollectorIds = array_values(array_filter([$agentId, $agentUserId]));
 
-        $otherCollectorIds = Agent::where('id', '!=', $agentId)
-            ->get(['id', 'user_id'])
-            ->flatMap(fn (Agent $agent) => [(int) $agent->id, $agent->user_id ? (int) $agent->user_id : null])
-            ->filter()
-            ->reject(fn (int $id) => in_array($id, $ownCollectorIds, true))
-            ->unique()
-            ->values()
-            ->all();
-
-        $query->where(function ($q) use ($otherCollectorIds) {
-            $q->whereNull('collected_by');
-
-            if (empty($otherCollectorIds)) {
-                $q->orWhereNotNull('collected_by');
-            } else {
-                $q->orWhereNotIn('collected_by', $otherCollectorIds);
-            }
-        });
-    }
 
     /**
      * Unified Collections History API grouped by Clients.
-     * Merges loan EMI collections and chit installment collections with client data inside.
      */
     public function allCollections(Request $request): JsonResponse
     {
@@ -2708,7 +2320,7 @@ class AgentCollectionControllerApi extends Controller
         $statusVal = $request->input('status');
 
         $loanCollectionItems = collect();
-        if ($typeFilter !== 'chit') {
+        if (true) {
             $loanQuery = EmiCollection::with(['agent', 'emi.loanAccount.client.kycDetail']);
 
             if ($agentId) {
@@ -2833,207 +2445,7 @@ class AgentCollectionControllerApi extends Controller
             });
         }
 
-        $chitCollectionItems = collect();
-        if ($typeFilter !== 'loan' && $agentId) {
-            $chitQuery = Installment::with([
-                'member.client.kycDetail',
-                'group',
-                'collectedBy.agent',
-                'pendingCollections.agent',
-                'pendingCollections.client.kycDetail'
-            ]);
-
-            $this->applyChitAgentScope($chitQuery, $agentId, $agentUserId);
-            $this->excludeOtherAgentChitCollections($chitQuery, $agentId, $agentUserId);
-
-            $chitQuery->where(function ($q) use ($agentId) {
-                $q->where('paid_amount', '>', 0)
-                    ->orWhereHas('pendingCollections', function ($pq) use ($agentId) {
-                        $pq->where('agent_id', $agentId);
-                    });
-            });
-
-            if (!empty($startDate)) {
-                $chitQuery->where(function ($q) use ($startDate) {
-                    $q->whereDate('paid_date', '>=', $startDate)
-                      ->orWhereHas('pendingCollections', function ($pq) use ($startDate) {
-                          $pq->whereDate('collected_at', '>=', $startDate);
-                      });
-                });
-            }
-
-            if (!empty($endDate)) {
-                $chitQuery->where(function ($q) use ($endDate) {
-                    $q->whereDate('paid_date', '<=', $endDate)
-                      ->orWhereHas('pendingCollections', function ($pq) use ($endDate) {
-                          $pq->whereDate('collected_at', '<=', $endDate);
-                      });
-                });
-            }
-
-            if (!empty($statusVal) && $statusVal !== 'all') {
-                if (in_array($statusVal, ['pending', 'in_progress'], true)) {
-                    $chitQuery->where(function ($q) {
-                        $q->whereHas('pendingCollections', fn ($pq) => $pq->whereIn('status', ['in_progress', 'pending']))
-                            ->orWhere('status', 'partial')
-                            ->orWhere('status', 'in_progress');
-                    });
-                } elseif (in_array($statusVal, ['verified', 'paid', 'completed'], true)) {
-                    $chitQuery->where(function ($q) {
-                        $q->whereIn('status', ['paid', 'completed', 'verified'])
-                            ->whereDoesntHave('pendingCollections', fn ($pq) => $pq->whereIn('status', ['in_progress', 'pending']));
-                    });
-                } elseif ($statusVal === 'rejected') {
-                    $chitQuery->where(function ($q) {
-                        $q->where('status', 'rejected')
-                            ->orWhereHas('collections', fn ($cq) => $cq->where('status', 'rejected'));
-                    });
-                } else {
-                    $chitQuery->where('status', $statusVal);
-                }
-            }
-
-            if (!empty($search)) {
-                $chitQuery->where(function ($q) use ($search) {
-                    $q->where('id', 'LIKE', "%{$search}%")
-                        ->orWhere('paid_amount', 'LIKE', "%{$search}%")
-                        ->orWhere('reference_no', 'LIKE', "%{$search}%")
-                        ->orWhereHas('member.client', function ($cq) use ($search) {
-                            $cq->where('client_name', 'LIKE', "%{$search}%")
-                                ->orWhere('client_phone', 'LIKE', "%{$search}%")
-                                ->orWhere('customer_id', 'LIKE', "%{$search}%");
-                        })
-                        ->orWhereHas('group', function ($gq) use ($search) {
-                            $gq->where('group_code', 'LIKE', "%{$search}%");
-                        });
-                });
-            }
-
-            $chitQuery->orderBy('id', 'desc');
-            $rawInstallments = $chitQuery->get();
-
-            $groupedChit = BulkPaymentGroup::groupInstallments($rawInstallments);
-
-            $chitCollectionItems = $groupedChit->map(function ($group) use ($currentUser) {
-                /** @var Installment $installment */
-                $installment = $group['lead'];
-                $items = $group['items'];
-                $isBulk = $group['is_bulk'];
-
-                $groupCode = $installment->group?->group_code ?? 'N/A';
-                $pending = $installment->pendingCollections->sortByDesc('collected_at')->first();
-
-                $amount = 0;
-                $hasPending = false;
-                foreach ($items as $item) {
-                    $itemPending = $item->pendingCollections->sortByDesc('collected_at')->first();
-                    $amount += (float) ($itemPending ? $itemPending->amount : $item->paid_amount);
-                    if ($itemPending || $item->status === 'in_progress') {
-                        $hasPending = true;
-                    }
-                }
-
-                $paymentMode = $pending ? $pending->payment_method : $installment->payment_mode;
-                $paymentMode = $paymentMode === 'cash' ? 'in_hand' : ($paymentMode ?? 'cash');
-
-                $paymentType = $pending ? $pending->payment_type : ($installment->status === 'partial' ? 'partial' : 'full');
-                $status = $hasPending ? 'in_progress' : ($installment->status === 'paid' ? 'verified' : $installment->status);
-                $collectedAt = $pending ? $pending->collected_at : $installment->paid_date;
-
-                $label = $isBulk
-                    ? 'Bulk Payment ' . BulkPaymentGroup::chitInstallmentSplitLabel($items)
-                    : "{$groupCode} - Inst #{$installment->month_number}";
-
-                $client = $pending && $pending->client_id
-                    ? ($pending->relationLoaded('client') ? $pending->client : Client::find($pending->client_id))
-                    : ($installment->member?->client);
-
-                $clientName = $client?->client_name ?? 'N/A';
-
-                $collectorName = 'Admin';
-                $collectorType = 'admin';
-
-                if ($pending) {
-                    $collectorAgent = $pending->relationLoaded('agent') ? $pending->agent : Agent::find($pending->agent_id);
-                    if (!$collectorAgent && $pending->agent_id) {
-                        $collectorAgent = Agent::where('user_id', $pending->agent_id)->first();
-                    }
-
-                    if ($collectorAgent) {
-                        $collectorName = $collectorAgent->agent_name;
-                        $collectorType = 'agent';
-                    } elseif ($pending->agent_id || $currentUser instanceof Agent || $currentUser->hasRole('Agent')) {
-                        $agentName = $currentUser instanceof Agent ? $currentUser->agent_name : (optional($currentUser->agent)->agent_name ?? 'Agent');
-                        $collectorName = $agentName;
-                        $collectorType = 'agent';
-                    }
-                } else {
-                    $collectedBy = $installment->collected_by;
-                    if ($collectedBy) {
-                        $agent = Agent::where('id', $collectedBy)->orWhere('user_id', $collectedBy)->first();
-                        if ($agent) {
-                            $user = User::find($agent->user_id);
-                            if (!$user || $user->hasRole('Agent') || $user->agent) {
-                                $collectorName = $agent->agent_name;
-                                $collectorType = 'agent';
-                            }
-                        } else {
-                            $user = $installment->relationLoaded('collectedBy')
-                                ? $installment->collectedBy
-                                : User::find($collectedBy);
-
-                            if ($user?->agent && $user->hasRole('Agent')) {
-                                $collectorName = $user->agent->agent_name;
-                                $collectorType = 'agent';
-                            }
-                        }
-                    }
-                }
-
-                $chitSplits = $items->map(function ($item) {
-                    $itemPending = $item->pendingCollections->sortByDesc('collected_at')->first();
-                    $itemAmount = (float) ($itemPending ? $itemPending->amount : $item->paid_amount);
-                    return [
-                        'id' => $item->id,
-                        'installment_id' => $item->id,
-                        'instalment_number' => $item->month_number,
-                        'month_number' => $item->month_number,
-                        'label' => "EMI #{$item->month_number}",
-                        'installment_label' => "Inst #{$item->month_number}",
-                        'amount' => round($itemAmount, 2),
-                    ];
-                })->values()->all();
-
-                return [
-                    'id' => $installment->id,
-                    'type' => 'chit',
-                    'collection_type' => 'chit',
-                    'client' => $client,
-                    'client_id' => $client?->id,
-                    'client_name' => $clientName,
-                    'label' => $label,
-                    'installment_label' => $label,
-                    'emi_id_label' => $label,
-                    'group_id' => $installment->group_id,
-                    'amount' => round($amount, 2),
-                    'is_bulk' => $isBulk,
-                    'bulk_count' => $items->count(),
-                    'items' => $chitSplits,
-                    'emi_details' => $chitSplits,
-                    'splits' => $chitSplits,
-                    'payment_method' => $paymentMode,
-                    'payment_type' => $paymentType ?: 'full',
-                    'status' => $status,
-                    'collected_at' => $collectedAt ? \Carbon\Carbon::parse($collectedAt)->format('Y-m-d H:i:s') : null,
-                    'created_at' => $installment->updated_at ? $installment->updated_at->format('Y-m-d H:i:s') : null,
-                    'chit_collection_id' => $pending ? $pending->id : null,
-                    'collector_name' => $collectorName,
-                    'collector_type' => $collectorType,
-                    'remarks' => $pending ? $pending->remarks : $installment->remarks,
-                ];
-            });
-        }
-
+        
         if (!empty($statusVal) && $statusVal !== 'all') {
             $filterStatus = function ($item) use ($statusVal) {
                 $st = $item['status'] ?? '';
@@ -3047,8 +2459,7 @@ class AgentCollectionControllerApi extends Controller
             };
 
             $loanCollectionItems = $loanCollectionItems->filter($filterStatus)->values();
-            $chitCollectionItems = $chitCollectionItems->filter($filterStatus)->values();
-        }
+                    }
 
         // Group collection items by Client
         $clientsData = [];
@@ -3072,30 +2483,10 @@ class AgentCollectionControllerApi extends Controller
             $clientsData[$clientId]['loan_collections'][] = $item;
         }
 
-        foreach ($chitCollectionItems as $item) {
-            $client = $item['client'] ?? null;
-            $clientId = $item['client_id'] ?? ($client?->id);
-            if (!$clientId) {
-                continue;
-            }
-
-            if (!isset($clientsData[$clientId])) {
-                $clientsData[$clientId] = [
-                    'client' => $client,
-                    'loan_collections' => [],
-                    'chit_collections' => [],
-                ];
-            }
-
-            unset($item['client']);
-            $clientsData[$clientId]['chit_collections'][] = $item;
-        }
-
-        // Format Client records with loan and chit collections inside
+        // Format Client records with loan collections inside
         $formattedClients = collect($clientsData)->map(function ($data) {
             $client = $data['client'];
             $loanCollections = $data['loan_collections'];
-            $chitCollections = $data['chit_collections'];
 
             $clientImageUrl = null;
             if ($client) {
@@ -3109,10 +2500,7 @@ class AgentCollectionControllerApi extends Controller
             }
 
             $loanCollectedAmount = collect($loanCollections)->sum('amount');
-            $chitCollectedAmount = collect($chitCollections)->sum('amount');
-            $totalCollectedAmount = $loanCollectedAmount + $chitCollectedAmount;
-
-            $allCollections = array_merge($loanCollections, $chitCollections);
+            $allCollections = $loanCollections;
             usort($allCollections, function ($a, $b) {
                 return strcmp($b['collected_at'] ?? $b['created_at'] ?? '', $a['collected_at'] ?? $a['created_at'] ?? '');
             });
@@ -3127,31 +2515,29 @@ class AgentCollectionControllerApi extends Controller
                 'photo' => $clientImageUrl,
                 'address' => $client?->address ?? null,
                 'city' => $client?->city ?? null,
-                'total_collected_amount' => round($totalCollectedAmount, 2),
+                'total_collected_amount' => round($loanCollectedAmount, 2),
                 'loan_collected_amount' => round($loanCollectedAmount, 2),
-                'chit_collected_amount' => round($chitCollectedAmount, 2),
+                'chit_collected_amount' => 0.0,
                 'total_collections_count' => count($allCollections),
                 'loan_collections_count' => count($loanCollections),
-                'chit_collections_count' => count($chitCollections),
+                'chit_collections_count' => 0,
                 'loan_collections' => $loanCollections,
-                'chit_collections' => $chitCollections
+                'chit_collections' => []
             ];
         })->values();
 
         // Overall stats
         $totalLoanAmount = $formattedClients->sum('loan_collected_amount');
-        $totalChitAmount = $formattedClients->sum('chit_collected_amount');
         $totalLoanCount = $formattedClients->sum('loan_collections_count');
-        $totalChitCount = $formattedClients->sum('chit_collections_count');
 
         $stats = [
             'total_clients_count' => $formattedClients->count(),
-            'total_collections_count' => $totalLoanCount + $totalChitCount,
-            'total_amount_collected' => round($totalLoanAmount + $totalChitAmount, 2),
+            'total_collections_count' => $totalLoanCount,
+            'total_amount_collected' => round($totalLoanAmount, 2),
             'total_loan_collected_amount' => round($totalLoanAmount, 2),
-            'total_chit_collected_amount' => round($totalChitAmount, 2),
+            'total_chit_collected_amount' => 0.0,
             'total_loan_collections_count' => $totalLoanCount,
-            'total_chit_collections_count' => $totalChitCount,
+            'total_chit_collections_count' => 0,
         ];
 
         // Paginate clients

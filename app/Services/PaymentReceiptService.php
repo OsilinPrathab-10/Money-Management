@@ -3,11 +3,9 @@
 namespace App\Services;
 
 use App\Http\Controllers\EmiController;
-use App\Models\ChitCollection;
 use App\Models\Emi;
 use App\Models\EmiCollection;
 use App\Models\FixedDepositTransaction;
-use App\Models\Installment;
 use App\Models\LoanAccount;
 use App\Support\BulkPaymentGroup;
 use App\Support\DateRangePreset;
@@ -18,9 +16,9 @@ use Illuminate\Support\Carbon;
 
 class PaymentReceiptService
 {
-    public const MODULES = ['all', 'loan', 'chit', 'fd'];
+    public const MODULES = ['all', 'loan', 'fd'];
 
-    public const PRINT_MODULES = ['loan', 'chit', 'fd'];
+    public const PRINT_MODULES = ['loan', 'fd'];
 
     public const FD_TYPES = [
         'creation',
@@ -29,7 +27,6 @@ class PaymentReceiptService
         'premature',
         'renewal',
         'closure',
-        'chit_adjustment',
     ];
 
     public function normalizeModule(?string $module): string
@@ -45,7 +42,6 @@ class PaymentReceiptService
 
         return match ($module) {
             'all' => $this->allStats($request),
-            'chit' => $this->chitStats($request),
             'fd' => $this->fdStats($request),
             default => $this->loanStats($request),
         };
@@ -60,7 +56,6 @@ class PaymentReceiptService
 
         $rows = match ($module) {
             'all' => $this->allRows($request),
-            'chit' => $this->chitRows($request),
             'fd' => $this->fdRows($request),
             default => $this->loanRows($request),
         };
@@ -98,18 +93,18 @@ class PaymentReceiptService
     /**
      * @return array<string, mixed>
      */
-    public function payload(string $module, mixed $id, ?string $bulkKey = null): array
+    public function payload(string $module, mixed $id, ?string $bulkKey = null, ?int $collectionId = null): array
     {
         $module = in_array(strtolower(trim((string) $module)), self::PRINT_MODULES, true)
             ? strtolower(trim((string) $module))
             : 'loan';
         $decodedId = $this->decodeId($id);
         $bulkKey = $bulkKey ? strtoupper(trim($bulkKey)) : null;
+        $collectionId = $collectionId ?: (request()->filled('collection_id') ? (int) request('collection_id') : null);
 
         return match ($module) {
-            'chit' => $this->chitPayload($decodedId, $bulkKey),
             'fd' => $this->fdPayload($decodedId),
-            default => $this->loanPayload($decodedId, $bulkKey),
+            default => $this->loanPayload($decodedId, $bulkKey, $collectionId),
         };
     }
 
@@ -117,7 +112,6 @@ class PaymentReceiptService
     {
         return match ($this->normalizeModule($module)) {
             'all' => 'Account / Ref',
-            'chit' => 'Group Code',
             'fd' => 'FD Number',
             default => 'Application No.',
         };
@@ -127,7 +121,6 @@ class PaymentReceiptService
     {
         return match ($this->normalizeModule($module)) {
             'all' => 'All Payment Receipts',
-            'chit' => 'Chit Payment Receipts',
             'fd' => 'FD Payment Receipts',
             default => 'Loan Payment Receipts',
         };
@@ -136,7 +129,6 @@ class PaymentReceiptService
     public function moduleLabel(string $module): string
     {
         return match ($this->normalizeModule($module)) {
-            'chit' => 'Chit',
             'fd' => 'FD',
             'loan' => 'Loan',
             default => 'All',
@@ -148,7 +140,7 @@ class PaymentReceiptService
      */
     protected function allStats(Request $request): array
     {
-        $parts = [$this->loanStats($request), $this->chitStats($request), $this->fdStats($request)];
+        $parts = [$this->loanStats($request), $this->fdStats($request)];
 
         return [
             'total_receipts' => array_sum(array_column($parts, 'total_receipts')),
@@ -165,7 +157,6 @@ class PaymentReceiptService
     {
         $rows = array_merge(
             $this->loanRows($request),
-            $this->chitRows($request),
             $this->fdRows($request)
         );
 
@@ -180,15 +171,68 @@ class PaymentReceiptService
     {
         $base = fn () => $this->loanBaseQuery($request);
         $today = Carbon::now()->toDateString();
+        $thisMonth = now()->month;
+        $thisYear = now()->year;
+
+        $baseEmiQuery = (clone $base());
+        $baseEmiIds = (clone $baseEmiQuery)->select('emis.id');
+
+        $collectionsQuery = EmiCollection::whereIn('status', BulkPaymentGroup::postedStatuses())
+            ->whereIn('emi_id', $baseEmiIds);
+
+        // Sum of collections for today
+        $todayCollSum = (clone $collectionsQuery)
+            ->where(function ($q) use ($today) {
+                $q->whereDate('collected_at', $today)
+                    ->orWhere(function ($sq) use ($today) {
+                        $sq->whereNull('collected_at')->whereDate('created_at', $today);
+                    });
+            })
+            ->sum('amount');
+
+        // Sum of legacy EMIs without collections paid today
+        $todayLegacySum = (clone $base())
+            ->whereDoesntHave('collections')
+            ->whereDate('paid_date', $today)
+            ->sum('paid_amount');
+
+        $todayCollected = round((float) $todayCollSum + (float) $todayLegacySum, 2);
+
+        // Month collections
+        $monthCollSum = (clone $collectionsQuery)
+            ->where(function ($q) use ($thisMonth, $thisYear) {
+                $q->where(function ($sq) use ($thisMonth, $thisYear) {
+                    $sq->whereNotNull('collected_at')
+                        ->whereMonth('collected_at', $thisMonth)
+                        ->whereYear('collected_at', $thisYear);
+                })->orWhere(function ($sq) use ($thisMonth, $thisYear) {
+                    $sq->whereNull('collected_at')
+                        ->whereMonth('created_at', $thisMonth)
+                        ->whereYear('created_at', $thisYear);
+                });
+            })
+            ->sum('amount');
+
+        $monthLegacySum = (clone $base())
+            ->whereDoesntHave('collections')
+            ->whereMonth('paid_date', $thisMonth)
+            ->whereYear('paid_date', $thisYear)
+            ->sum('paid_amount');
+
+        $monthCollected = round((float) $monthCollSum + (float) $monthLegacySum, 2);
+
+        // Total collected
+        $totalCollSum = (clone $collectionsQuery)->sum('amount');
+        $totalLegacySum = (clone $base())->whereDoesntHave('collections')->sum('paid_amount');
+        $totalCollected = round((float) $totalCollSum + (float) $totalLegacySum, 2);
+
+        $totalReceipts = (clone $collectionsQuery)->count() + (clone $base())->whereDoesntHave('collections')->count();
 
         return [
-            'total_receipts' => (clone $base())->count(),
-            'total_collected' => (clone $base())->sum('paid_amount'),
-            'month_collected' => (clone $base())
-                ->whereMonth('paid_date', now()->month)
-                ->whereYear('paid_date', now()->year)
-                ->sum('paid_amount'),
-            'today_collected' => (clone $base())->whereDate('paid_date', $today)->sum('paid_amount'),
+            'total_receipts' => $totalReceipts,
+            'total_collected' => $totalCollected,
+            'month_collected' => $monthCollected,
+            'today_collected' => $todayCollected,
         ];
     }
 
@@ -295,29 +339,60 @@ class PaymentReceiptService
                 ?? optional($loanAccount)->application_number
                 ?? optional($loanApplication)->application_number;
 
-            $singleCollection = $collections->where('emi_id', $emi->id)->sortByDesc('id')->first();
-            $paidAt = $this->resolveAccurateTimestamp(
-                $emi->paid_date,
-                $singleCollection?->collected_at ?: $singleCollection?->created_at,
-                $emi->updated_at,
-                $emi->created_at
-            );
+            $emiCollections = $collections->where('emi_id', $emi->id);
 
-            $rows[] = $this->listRow([
-                'id' => $emi->getRouteKey(),
-                'receipt_number' => 'RCP-' . str_pad((string) $emi->id, 6, '0', STR_PAD_LEFT),
-                'client_name' => $client->client_name ?? 'N/A',
-                'zone' => optional($client)->location ? $client->location->name : 'N/A',
-                'location_id' => optional($client)->location_id,
-                'application_number' => $applicationNumber,
-                'paid_amount' => $emi->paid_amount,
-                'payment_method' => $singleCollection?->payment_method ?: $emi->payment_method,
-                'paid_date' => $paidAt,
-                'payment_reference' => $singleCollection?->payment_reference ?: $emi->payment_reference,
-                'is_bulk' => false,
-                'emi_split' => $emi->instalment_number ? ('EMI #' . $emi->instalment_number) : null,
-                'module' => 'loan',
-            ]);
+            if ($emiCollections->count() > 1) {
+                foreach ($emiCollections->sortByDesc('id') as $col) {
+                    $paidAt = $this->resolveAccurateTimestamp(
+                        $col->collected_at ?: $col->created_at,
+                        $emi->paid_date,
+                        $col->updated_at,
+                        $col->created_at
+                    );
+
+                    $rows[] = $this->listRow([
+                        'id' => $emi->getRouteKey(),
+                        'collection_id' => $col->id,
+                        'receipt_number' => 'RCP-' . str_pad((string) $emi->id, 6, '0', STR_PAD_LEFT) . '-C' . $col->id,
+                        'client_name' => $client->client_name ?? 'N/A',
+                        'zone' => optional($client)->location ? $client->location->name : 'N/A',
+                        'location_id' => optional($client)->location_id,
+                        'application_number' => $applicationNumber,
+                        'paid_amount' => (float) $col->amount,
+                        'payment_method' => $col->payment_method ?: $emi->payment_method,
+                        'paid_date' => $paidAt,
+                        'payment_reference' => $col->payment_reference ?: $emi->payment_reference,
+                        'is_bulk' => false,
+                        'emi_split' => $emi->instalment_number ? ('EMI #' . $emi->instalment_number . ' (Part)') : null,
+                        'module' => 'loan',
+                    ]);
+                }
+            } else {
+                $singleCollection = $emiCollections->first();
+                $paidAt = $this->resolveAccurateTimestamp(
+                    $singleCollection?->collected_at ?: $singleCollection?->created_at,
+                    $emi->paid_date,
+                    $emi->updated_at,
+                    $emi->created_at
+                );
+
+                $rows[] = $this->listRow([
+                    'id' => $emi->getRouteKey(),
+                    'collection_id' => $singleCollection?->id,
+                    'receipt_number' => 'RCP-' . str_pad((string) $emi->id, 6, '0', STR_PAD_LEFT),
+                    'client_name' => $client->client_name ?? 'N/A',
+                    'zone' => optional($client)->location ? $client->location->name : 'N/A',
+                    'location_id' => optional($client)->location_id,
+                    'application_number' => $applicationNumber,
+                    'paid_amount' => $singleCollection ? (float) $singleCollection->amount : (float) $emi->paid_amount,
+                    'payment_method' => $singleCollection?->payment_method ?: $emi->payment_method,
+                    'paid_date' => $paidAt,
+                    'payment_reference' => $singleCollection?->payment_reference ?: $emi->payment_reference,
+                    'is_bulk' => false,
+                    'emi_split' => $emi->instalment_number ? ('EMI #' . $emi->instalment_number) : null,
+                    'module' => 'loan',
+                ]);
+            }
         }
 
         usort($rows, function (array $left, array $right) {
@@ -327,7 +402,7 @@ class PaymentReceiptService
         return $this->numberRows($rows);
     }
 
-    protected function loanPayload(int $id, ?string $bulkKey = null): array
+    protected function loanPayload(int $id, ?string $bulkKey = null, ?int $collectionId = null): array
     {
         $emi = Emi::with([
             'loanAccount.loanApplication.client',
@@ -336,7 +411,7 @@ class PaymentReceiptService
             'collections.emi',
         ])->findOrFail($id);
 
-        $payload = app(EmiController::class)->buildReceiptPayload($emi, $bulkKey);
+        $payload = app(EmiController::class)->buildReceiptPayload($emi, $bulkKey, $collectionId);
         $payload['module'] = 'loan';
         $payload['account_label'] = $payload['account_label'] ?? 'Loan ID';
         $payload['start_date_label'] = $payload['start_date_label'] ?? 'Disbursement Date';
@@ -345,364 +420,10 @@ class PaymentReceiptService
         return $payload;
     }
 
-    protected function chitStats(Request $request): array
-    {
-        $base = fn () => $this->chitBaseQuery($request);
-        $today = Carbon::now()->toDateString();
-
-        return [
-            'total_receipts' => (clone $base())->count(),
-            'total_collected' => (clone $base())->sum('paid_amount'),
-            'month_collected' => (clone $base())
-                ->whereMonth('paid_date', now()->month)
-                ->whereYear('paid_date', now()->year)
-                ->sum('paid_amount'),
-            'today_collected' => (clone $base())->whereDate('paid_date', $today)->sum('paid_amount'),
-        ];
-    }
 
     /**
      * @return array<int, array<string, mixed>>
      */
-    protected function chitRows(Request $request): array
-    {
-        $query = $this->chitBaseQuery($request)
-            ->with(['member.client.location', 'group', 'pendingCollections', 'collections']);
-
-        if ($request->filled('payment_method')) {
-            $query->where('payment_mode', $request->payment_method);
-        }
-
-        $this->applyDateFilter($query, $request, 'paid_date');
-
-        $installments = $query->orderByDesc('paid_date')->orderByDesc('id')->get();
-        $installmentIds = $installments->pluck('id')->filter()->all();
-        $collections = collect();
-        if ($installmentIds) {
-            $collections = ChitCollection::with(['installment.member.client.location', 'installment.group', 'client'])
-                ->whereIn('installment_id', $installmentIds)
-                ->whereIn('status', BulkPaymentGroup::postedStatuses())
-                ->get();
-        }
-
-        $bulkInstallmentIds = [];
-        $rows = [];
-        foreach (BulkPaymentGroup::groupChitCollections($collections) as $group) {
-            if (empty($group['is_bulk'])) {
-                continue;
-            }
-
-            $items = $group['items'];
-            /** @var ChitCollection $leadCollection */
-            $leadCollection = $group['lead'];
-            $siblings = BulkPaymentGroup::findChitSiblings($leadCollection)
-                ->filter(fn (ChitCollection $row) => in_array($row->status, BulkPaymentGroup::postedStatuses(), true));
-            if ($siblings->count() < 2) {
-                $siblings = $items;
-            }
-            if ($siblings->count() < 2) {
-                continue;
-            }
-
-            $lead = $installments->firstWhere('id', $leadCollection->installment_id)
-                ?? $siblings->first()?->installment
-                ?? $leadCollection->installment;
-            if (!$lead) {
-                continue;
-            }
-
-            foreach ($siblings as $collection) {
-                if ($collection->installment_id) {
-                    $bulkInstallmentIds[$collection->installment_id] = true;
-                }
-            }
-
-            $client = $lead->member?->client ?? $leadCollection->client;
-            $chitGroup = $lead->group ?? $leadCollection->installment?->group;
-            $bulkKey = BulkPaymentGroup::extractExplicitKey($leadCollection->remarks, $leadCollection->payment_reference);
-            $paidAt = $this->resolveAccurateTimestamp(
-                $lead->paid_date,
-                $leadCollection->collected_at ?: $leadCollection->created_at,
-                $lead->updated_at,
-                $lead->created_at
-            );
-
-            $rows[] = $this->listRow([
-                'id' => HashId::encode($lead->id),
-                'receipt_number' => 'RCP-B-' . str_pad((string) $lead->id, 6, '0', STR_PAD_LEFT),
-                'client_name' => $client->client_name ?? 'N/A',
-                'zone' => optional($client)->location ? $client->location->name : 'N/A',
-                'location_id' => optional($client)->location_id,
-                'application_number' => $chitGroup?->group_code ?? 'N/A',
-                'paid_amount' => BulkPaymentGroup::chitCollectionTotal($siblings),
-                'payment_method' => $leadCollection->payment_method ?: $lead->payment_mode,
-                'paid_date' => $paidAt,
-                'payment_reference' => $leadCollection->payment_reference ?: $lead->reference_no,
-                'is_bulk' => true,
-                'bulk_key' => $bulkKey,
-                'emi_split' => BulkPaymentGroup::chitCollectionSplitLabel($siblings),
-                'emi_splits' => BulkPaymentGroup::chitCollectionSplits($siblings),
-                'emi_count' => $siblings->count(),
-                'module' => 'chit',
-            ]);
-        }
-
-        $remainingInstallments = $installments->filter(fn ($inst) => !isset($bulkInstallmentIds[$inst->id]))->values();
-        foreach (BulkPaymentGroup::groupInstallments($remainingInstallments) as $group) {
-            if (empty($group['is_bulk'])) {
-                continue;
-            }
-
-            $items = $group['items'];
-            $lead = $group['lead'];
-            $siblings = BulkPaymentGroup::findInstallmentSiblings($lead);
-            if ($siblings->count() < 2) {
-                $siblings = $items;
-            }
-            if ($siblings->count() < 2) {
-                continue;
-            }
-
-            foreach ($siblings as $sib) {
-                $bulkInstallmentIds[$sib->id] = true;
-            }
-
-            $client = $lead->member?->client;
-            $chitGroup = $lead->group;
-            $bulkKey = BulkPaymentGroup::extractExplicitKey($lead->remarks, $lead->reference_no);
-            $leadColl = $collections->where('installment_id', $lead->id)->sortByDesc('id')->first();
-            $paidAt = $this->resolveAccurateTimestamp(
-                $lead->paid_date,
-                $leadColl?->collected_at ?: $leadColl?->created_at,
-                $lead->updated_at,
-                $lead->created_at
-            );
-
-            $rows[] = $this->listRow([
-                'id' => HashId::encode($lead->id),
-                'receipt_number' => 'RCP-B-' . str_pad((string) $lead->id, 6, '0', STR_PAD_LEFT),
-                'client_name' => $client->client_name ?? 'N/A',
-                'zone' => optional($client)->location ? $client->location->name : 'N/A',
-                'location_id' => optional($client)->location_id,
-                'application_number' => $chitGroup?->group_code ?? 'N/A',
-                'paid_amount' => BulkPaymentGroup::chitInstallmentTotal($siblings),
-                'payment_method' => $leadColl?->payment_method ?: $lead->payment_mode,
-                'paid_date' => $paidAt,
-                'payment_reference' => $leadColl?->payment_reference ?: $lead->reference_no,
-                'is_bulk' => true,
-                'bulk_key' => $bulkKey,
-                'emi_split' => BulkPaymentGroup::chitInstallmentSplitLabel($siblings),
-                'emi_splits' => BulkPaymentGroup::chitInstallmentSplits($siblings),
-                'emi_count' => $siblings->count(),
-                'module' => 'chit',
-            ]);
-        }
-
-        foreach ($installments as $lead) {
-            if (isset($bulkInstallmentIds[$lead->id])) {
-                continue;
-            }
-
-            $client = $lead->member?->client;
-            $chitGroup = $lead->group;
-            $leadColl = $collections->where('installment_id', $lead->id)->sortByDesc('id')->first();
-            $paidAt = $this->resolveAccurateTimestamp(
-                $lead->paid_date,
-                $leadColl?->collected_at ?: $leadColl?->created_at,
-                $lead->updated_at,
-                $lead->created_at
-            );
-
-            $rows[] = $this->listRow([
-                'id' => HashId::encode($lead->id),
-                'receipt_number' => $leadColl?->payment_reference ?: ($lead->reference_no ?: ('RCP-' . str_pad((string) $lead->id, 6, '0', STR_PAD_LEFT))),
-                'client_name' => $client->client_name ?? 'N/A',
-                'zone' => optional($client)->location ? $client->location->name : 'N/A',
-                'location_id' => optional($client)->location_id,
-                'application_number' => $chitGroup?->group_code ?? 'N/A',
-                'paid_amount' => $lead->paid_amount,
-                'payment_method' => $leadColl?->payment_method ?: $lead->payment_mode,
-                'paid_date' => $paidAt,
-                'payment_reference' => $leadColl?->payment_reference ?: $lead->reference_no,
-                'is_bulk' => false,
-                'emi_split' => $lead->month_number ? ('Inst #' . $lead->month_number) : null,
-                'module' => 'chit',
-            ]);
-        }
-
-        usort($rows, function (array $left, array $right) {
-            return strcmp((string) ($right['paid_date_sort'] ?? ''), (string) ($left['paid_date_sort'] ?? ''));
-        });
-
-        return $this->numberRows($rows);
-    }
-
-    protected function chitPayload(int $id, ?string $bulkKey = null): array
-    {
-        $installment = Installment::withTrashed()->with([
-            'member.client',
-            'group',
-            'pendingCollections',
-            'collections.installment',
-        ])->findOrFail($id);
-
-        $leadCollection = BulkPaymentGroup::latestPostedBulkChitCollection($installment, $bulkKey);
-        $siblingCollections = $leadCollection
-            ? BulkPaymentGroup::findChitSiblings($leadCollection)->filter(
-                fn (ChitCollection $row) => in_array($row->status, BulkPaymentGroup::postedStatuses(), true)
-            )
-            : collect();
-
-        $siblingInstallments = collect();
-        if ($siblingCollections->count() <= 1) {
-            $siblingInstallments = BulkPaymentGroup::findInstallmentSiblings($installment);
-            if ($bulkKey && $bulkKey !== '1' && strcasecmp($bulkKey, 'true') !== 0) {
-                $siblingInstallments = $siblingInstallments->filter(function (Installment $row) use ($bulkKey) {
-                    $key = BulkPaymentGroup::extractExplicitKey($row->remarks, $row->reference_no);
-
-                    return $key && strcasecmp($key, $bulkKey) === 0;
-                });
-            }
-        }
-
-        $forceSingle = request()->query('single') || request()->query('bulk') === '0';
-        $isBulk = $forceSingle ? false : ($siblingCollections->count() > 1 || $siblingInstallments->count() > 1);
-
-        $client = $installment->member?->client;
-        $group = $installment->group;
-
-        $items = [];
-        if ($isBulk) {
-            if ($siblingCollections->count() > 1) {
-                $leadId = $siblingCollections->first()?->installment_id ?? $installment->id;
-                $splits = BulkPaymentGroup::chitCollectionSplits($siblingCollections);
-                $paidAmount = BulkPaymentGroup::chitCollectionTotal($siblingCollections);
-                $totalAmount = $paidAmount;
-                $instalmentLabel = BulkPaymentGroup::chitCollectionSplitLabel($siblingCollections);
-                $resolvedPaidAt = $this->resolveAccurateTimestamp(
-                    $installment->paid_date,
-                    $leadCollection?->collected_at ?: $leadCollection?->created_at,
-                    $installment->updated_at,
-                    $installment->created_at
-                );
-                $paymentMethod = $leadCollection?->payment_method ?: $installment->payment_mode;
-                $paymentReference = $leadCollection?->payment_reference ?: $installment->reference_no;
-
-                $sortedColls = $siblingCollections->sortBy(fn (ChitCollection $row) => (int) ($row->installment?->month_number ?? $row->installment_id ?? 0))->values();
-                foreach ($sortedColls as $c) {
-                    $inst = $c->installment;
-                    $cGroup = $inst?->group ?? $group;
-                    $cClient = $c->client ?? $inst?->member?->client ?? $client;
-                    $items[] = [
-                        'type' => 'chit',
-                        'account_number' => $cGroup?->group_code ?? 'Chit',
-                        'client_name' => $cClient?->client_name ?? ($client->client_name ?? 'N/A'),
-                        'instalment_no' => 'Inst #' . ($inst?->month_number ?? 1),
-                        'due_amount' => round((float) ($inst?->amount ?? $c->amount), 2),
-                        'paid_amount' => round((float) $c->amount, 2),
-                    ];
-                }
-            } else {
-                $leadId = $siblingInstallments->first()?->id ?? $installment->id;
-                $splits = BulkPaymentGroup::chitInstallmentSplits($siblingInstallments);
-                $paidAmount = BulkPaymentGroup::chitInstallmentTotal($siblingInstallments);
-                $totalAmount = $paidAmount;
-                $instalmentLabel = BulkPaymentGroup::chitInstallmentSplitLabel($siblingInstallments);
-                $latestColl = $installment->collections ? $installment->collections->filter(fn ($c) => in_array($c->status, BulkPaymentGroup::postedStatuses(), true))->sortByDesc('id')->first() : null;
-                $resolvedPaidAt = $this->resolveAccurateTimestamp(
-                    $installment->paid_date,
-                    $latestColl?->collected_at ?: $latestColl?->created_at,
-                    $installment->updated_at,
-                    $installment->created_at
-                );
-                $paymentMethod = $installment->payment_mode;
-                $paymentReference = $installment->reference_no;
-
-                $sortedInsts = $siblingInstallments->sortBy('month_number')->values();
-                foreach ($sortedInsts as $inst) {
-                    $instGroup = $inst->group ?? $group;
-                    $instClient = $inst->member?->client ?? $client;
-                    $items[] = [
-                        'type' => 'chit',
-                        'account_number' => $instGroup?->group_code ?? 'Chit',
-                        'client_name' => $instClient?->client_name ?? ($client->client_name ?? 'N/A'),
-                        'instalment_no' => 'Inst #' . ($inst->month_number ?? 1),
-                        'due_amount' => round((float) ($inst->amount ?? $inst->paid_amount), 2),
-                        'paid_amount' => round(BulkPaymentGroup::installmentBulkAmount($inst), 2),
-                    ];
-                }
-            }
-
-            $overdueAmount = 0.0;
-            $status = 'paid';
-            $statusMeta = $this->statusMeta('paid');
-            $receiptNumber = 'RCP-B-' . str_pad((string) $leadId, 6, '0', STR_PAD_LEFT);
-            $receiptTitle = 'CHIT BULK PAYMENT RECEIPT';
-        } else {
-            $splits = [];
-            $paidAmount = (float) ($installment->paid_amount ?? 0);
-            $totalAmount = (float) ($installment->amount ?? $paidAmount);
-            $overdueAmount = (float) ($installment->penalty_amount ?? 0);
-            $status = (string) $installment->status;
-            $statusMeta = $this->statusMeta($status);
-            $latestColl = $installment->collections ? $installment->collections->filter(fn ($c) => in_array($c->status, BulkPaymentGroup::postedStatuses(), true))->sortByDesc('id')->first() : null;
-            $resolvedPaidAt = $this->resolveAccurateTimestamp(
-                $installment->paid_date,
-                $latestColl?->collected_at ?: $latestColl?->created_at,
-                $installment->updated_at,
-                $installment->created_at
-            );
-            $paymentMethod = $latestColl?->payment_method ?: $installment->payment_mode;
-            $paymentReference = $latestColl?->payment_reference ?: $installment->reference_no;
-            $instalmentLabel = $installment->month_number ? ('Inst #' . $installment->month_number) : 'N/A';
-            $receiptNumber = $installment->reference_no ?: ('RCP-' . str_pad((string) $installment->id, 6, '0', STR_PAD_LEFT));
-            $receiptTitle = 'CHIT PAYMENT RECEIPT';
-        }
-
-        $paymentDate = $resolvedPaidAt ? $resolvedPaidAt->format('d-m-Y h:i A') : 'N/A';
-        $paymentDateOnly = $resolvedPaidAt ? $resolvedPaidAt->format('d-m-Y') : 'N/A';
-        $paymentTimeOnly = $resolvedPaidAt ? $resolvedPaidAt->format('h:i:s A') : '';
-        $outstandingAmount = $isBulk ? 0 : max(0, ($totalAmount + $overdueAmount) - $paidAmount);
-
-        return [
-            'id' => HashId::encode($installment->id),
-            'receipt_number' => $receiptNumber,
-            'client_name' => $client->client_name ?? 'N/A',
-            'application_number' => $group?->group_code ?? 'N/A',
-            'account_number' => $group?->group_code,
-            'loan_product' => 'Chit Group: ' . ($group?->group_name ?? 'N/A'),
-            'instalment_number' => $installment->month_number,
-            'instalment_label' => $instalmentLabel,
-            'principal_amount' => $totalAmount,
-            'interest_amount' => 0,
-            'emi_amount' => $totalAmount,
-            'overdue_amount' => $overdueAmount,
-            'show_overdue' => $overdueAmount > 0,
-            'total_amount_display' => $paidAmount,
-            'paid_amount' => $paidAmount,
-            'outstanding_amount' => $outstandingAmount,
-            'payment_method' => $this->formatMethod($paymentMethod),
-            'payment_reference' => $paymentReference ?: 'N/A',
-            'paid_date' => $paymentDate,
-            'paid_date_only' => $paymentDateOnly,
-            'paid_time' => $paymentTimeOnly,
-            'paid_time_only' => $paymentTimeOnly,
-            'disbursed_date' => $group && $group->start_date ? $group->start_date->format('d-m-Y h:i A') : 'N/A',
-            'status' => $status,
-            'status_label' => $isBulk ? 'Bulk Paid' : $statusMeta['label'],
-            'status_color' => $statusMeta['color'],
-            'remarks' => $installment->remarks ?? '-',
-            'is_bulk' => $isBulk,
-            'items' => $items,
-            'emi_splits' => $splits,
-            'split_item_label' => 'Inst',
-            'module' => 'chit',
-            'account_label' => 'Group Code',
-            'start_date_label' => 'Group Start Date',
-            'receipt_title' => $receiptTitle,
-        ];
-    }
-
     protected function fdStats(Request $request): array
     {
         $base = fn () => $this->fdBaseQuery($request);
@@ -792,10 +513,17 @@ class PaymentReceiptService
             'principal_amount' => $principal,
             'interest_amount' => $interest,
             'emi_amount' => $amount,
+            'due_amount' => $amount,
+            'total_due_amount' => $amount,
+            'previously_paid' => 0.0,
+            'previous_paid_amount' => 0.0,
+            'current_payment' => $amount,
+            'today_payment' => $amount,
             'overdue_amount' => $penalty,
             'show_overdue' => $penalty > 0,
             'total_amount_display' => $amount,
             'paid_amount' => $amount,
+            'total_paid_amount' => $amount,
             'outstanding_amount' => 0,
             'payment_method' => $this->formatMethod($txn->payment_mode),
             'payment_reference' => $txn->reference ?: 'N/A',
@@ -831,19 +559,6 @@ class PaymentReceiptService
         return $query;
     }
 
-    protected function chitBaseQuery(Request $request)
-    {
-        $query = Installment::withTrashed()
-            ->whereHas('group')
-            ->whereHas('member')
-            ->whereIn('status', ['paid', 'partial'])
-            ->where('paid_amount', '>', 0);
-
-        $this->applyAgentScope($query, $request, 'chit');
-        $this->applyClientZoneFilters($query, $request, 'chit');
-
-        return $query;
-    }
 
     protected function fdBaseQuery(Request $request)
     {
@@ -863,7 +578,6 @@ class PaymentReceiptService
         $clientName = trim((string) $request->input('client_name', ''));
         $locationId = $request->input('location_id');
         $relation = match ($module) {
-            'chit' => 'member.client',
             'fd' => 'fixedDeposit.client',
             default => 'loanAccount.loanApplication.client',
         };
@@ -931,15 +645,6 @@ class PaymentReceiptService
             return;
         }
 
-        if ($module === 'chit') {
-            $query->whereHas('member', function ($mq) use ($agentId) {
-                $mq->where('referred_by_agent_id', $agentId)
-                    ->orWhereHas('client', function ($cq) use ($agentId) {
-                        $cq->where('assigned_to', $agentId)->orWhere('added_by', $agentId);
-                    });
-            });
-            return;
-        }
 
         $query->whereHas('fixedDeposit.client', function ($q) use ($agentId) {
             $q->where('assigned_to', $agentId)->orWhere('added_by', $agentId);
@@ -1013,12 +718,17 @@ class PaymentReceiptService
         $printUrl = route('payment-receipts.print', $printParams, false);
         $publicUrl = route('public-payment-receipts.print', $printParams, false);
         $bulkKey = trim((string) ($row['bulk_key'] ?? ''));
+        $collectionId = $row['collection_id'] ?? null;
         if ($bulkKey !== '') {
             $query = '?bulk=' . urlencode($bulkKey);
             $printUrl .= $query;
             $publicUrl .= $query;
         } elseif (!empty($row['is_bulk'])) {
             $query = '?bulk=1';
+            $printUrl .= $query;
+            $publicUrl .= $query;
+        } elseif ($collectionId) {
+            $query = '?collection_id=' . urlencode((string) $collectionId);
             $printUrl .= $query;
             $publicUrl .= $query;
         }
@@ -1060,7 +770,6 @@ class PaymentReceiptService
             'premature' => 'Premature Closure',
             'renewal' => 'Renewal',
             'closure' => 'Closure',
-            'chit_adjustment' => 'Chit Adjustment',
             default => $type ? ucfirst(str_replace('_', ' ', $type)) : 'FD Payment',
         };
     }

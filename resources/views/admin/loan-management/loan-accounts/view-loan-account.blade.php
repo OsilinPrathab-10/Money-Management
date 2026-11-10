@@ -71,6 +71,12 @@
         Prepayment
       </button>
       @endif -->
+      @if(strtolower((string)$loanAccount->status) === 'active' && !(bool)$loanAccount->is_foreclosed)
+      <a href="{{ route('client-loan-emi-details', $loanAccount->id) }}?action=topup" class="btn btn-success btn-sm">
+        <i class="icon-base ri ri-add-circle-line me-1"></i>
+        Top-Up Loan
+      </a>
+      @endif
       @if($loanAccount->status === 'active' && $foreclosureConfig)
       <button type="button" class="btn btn-warning btn-sm" id="forecloseBtn" 
               data-account-id="{{ $loanAccount->id }}"

@@ -8,7 +8,7 @@
     <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
       <div>
         <h4 class="mb-1 text-primary"><i class="ri-money-rupee-circle-line me-2"></i>Revenue Report</h4>
-        <p class="text-muted mb-0">Tab-wise breakdown of fees, charges, and profit across Loan, Chit, and Fixed Deposit portfolios.</p>
+        <p class="text-muted mb-0">Tab-wise breakdown of fees, charges, and profit across Loan and Fixed Deposit portfolios.</p>
       </div>
     </div>
   </div>
@@ -22,11 +22,6 @@
     </a>
   </li>
   <li class="nav-item">
-    <a class="nav-link {{ $tab === 'chit' ? 'active' : '' }}" href="{{ route('reports-revenue', array_merge(request()->except('page'), ['tab' => 'chit'])) }}">
-      <i class="ri-group-line me-1"></i> Chit Fund
-    </a>
-  </li>
-  <li class="nav-item">
     <a class="nav-link {{ $tab === 'fd' ? 'active' : '' }}" href="{{ route('reports-revenue', array_merge(request()->except('page'), ['tab' => 'fd'])) }}">
       <i class="ri-safe-2-line me-1"></i> Fixed Deposit
     </a>
@@ -36,8 +31,6 @@
 {{-- KPI Cards --}}
 @if($tab === 'loan')
   @include('admin.revenue.partials.loan-kpis')
-@elseif($tab === 'chit')
-  @include('admin.revenue.partials.chit-kpis')
 @else
   @include('admin.revenue.partials.fd-kpis')
 @endif
@@ -50,9 +43,7 @@
         <div class="d-flex flex-column flex-lg-row align-items-lg-center justify-content-between gap-3">
           <div>
             <h5 class="card-title m-0 fw-semibold text-dark">
-              @if($tab === 'chit')
-                Chit Group Revenue Statement
-              @elseif($tab === 'fd')
+              @if($tab === 'fd')
                 Fixed Deposit Revenue Statement
               @else
                 Loan Revenue Statement
@@ -81,7 +72,7 @@
             <div class="input-group input-group-merge">
               <span class="input-group-text"><i class="ri-search-line"></i></span>
               <input type="text" name="search" value="{{ $search }}" class="form-control"
-                placeholder="@if($tab === 'chit')Group or scheme...@elseif($tab === 'fd')Name or FD no...@else Name, code, account...@endif"
+                placeholder="@if($tab === 'fd')Name or FD no...@else Name, code, account...@endif"
                 data-auto-submit="true">
             </div>
           </div>
@@ -120,9 +111,7 @@
         </form>
 
         <div id="revenueTableContainer" class="position-relative">
-          @if($tab === 'chit')
-            @include('admin.revenue.chit-table')
-          @elseif($tab === 'fd')
+          @if($tab === 'fd')
             @include('admin.revenue.fd-table')
           @else
             @include('admin.revenue.table')

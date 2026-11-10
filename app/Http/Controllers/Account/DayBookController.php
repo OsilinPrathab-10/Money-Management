@@ -8,7 +8,6 @@ use App\Models\Account\Expense;
 use App\Models\Account\ExpenseCategories;
 use App\Models\Account\Revenue;
 use App\Models\Account\RevenueCategories;
-use App\Models\ChitDividendPoolEntry;
 use App\Services\Account\AccountExportService;
 use App\Services\Account\AccountingTags;
 use Carbon\Carbon;
@@ -36,7 +35,7 @@ class DayBookController extends Controller
             'bank_account_id' => 'nullable|integer',
             'revenue_category_id' => 'nullable|integer',
             'expense_category_id' => 'nullable|integer',
-            'module_tag' => 'nullable|string|in:all,CHIT,LOAN,FD,TRANSFER,OTHER',
+            'module_tag' => 'nullable|string|in:all,LOAN,FD,TRANSFER,OTHER',
             'entry_tag' => 'nullable|string|max:40',
             'search' => 'nullable|string|max:255',
             'per_page' => 'nullable|integer|min:10|max:200',
@@ -151,11 +150,6 @@ class DayBookController extends Controller
         $bankDebits = (float) $bankTransactions->where('transaction_type', 'debit')->sum('amount');
 
         $dividends = collect();
-        if ($moduleTag === 'all' || $moduleTag === AccountingTags::MODULE_CHIT) {
-            if (! $entryTag || $entryTag === AccountingTags::ENTRY_DIVIDEND) {
-                $dividends = $this->dividendEntriesForDay($creatorId, $day, $search);
-            }
-        }
 
         $totalRevenue = (float) ($revenues->sum('amount') ?? 0);
         $totalExpense = (float) ($expenses->sum('amount') ?? 0);
@@ -186,8 +180,8 @@ class DayBookController extends Controller
                 'bank_credits' => $bankCredits,
                 'bank_debits' => $bankDebits,
                 'bank_net' => $bankCredits - $bankDebits,
-                'dividend_credits' => (float) $dividends->where('entry_type', ChitDividendPoolEntry::TYPE_CREDIT)->sum('amount'),
-                'dividend_debits' => (float) $dividends->where('entry_type', ChitDividendPoolEntry::TYPE_DEBIT)->sum('amount'),
+                'dividend_credits' => 0.0,
+                'dividend_debits' => 0.0,
             ],
         ]);
     }
@@ -203,7 +197,7 @@ class DayBookController extends Controller
             'bank_account_id' => 'nullable|integer',
             'revenue_category_id' => 'nullable|integer',
             'expense_category_id' => 'nullable|integer',
-            'module_tag' => 'nullable|string|in:all,CHIT,LOAN,FD,TRANSFER,OTHER',
+            'module_tag' => 'nullable|string|in:all,LOAN,FD,TRANSFER,OTHER',
             'entry_tag' => 'nullable|string|max:40',
             'search' => 'nullable|string|max:255',
         ]);
@@ -278,13 +272,6 @@ class DayBookController extends Controller
             ->orderByDesc('id')
             ->get();
 
-        $dividends = collect();
-        if ($moduleTag === 'all' || $moduleTag === AccountingTags::MODULE_CHIT) {
-            if (! $entryTag || $entryTag === AccountingTags::ENTRY_DIVIDEND) {
-                $dividends = $this->dividendEntriesForDay($creatorId, $day, $search);
-            }
-        }
-
         $totalRevenue = (float) ($revenues->sum('amount') ?? 0);
         $totalExpense = (float) ($expenses->sum('amount') ?? 0);
         $bankCredits = (float) $bankTransactions->where('transaction_type', 'credit')->sum('amount');
@@ -333,22 +320,6 @@ class DayBookController extends Controller
                     'amount' => (float) $t->amount,
                 ];
             }))
-            ->concat($dividends->map(function ($d) {
-                $groupCode = $d->group?->group_code ?? ('GRP-' . $d->group_id);
-
-                return [
-                    'type' => 'Dividend ' . ucfirst($d->entry_type),
-                    'number' => 'DIV-' . $d->id,
-                    'date' => optional($d->created_at)->format('Y-m-d'),
-                    'module' => AccountingTags::MODULE_CHIT,
-                    'entry' => AccountingTags::ENTRY_DIVIDEND,
-                    'category' => '—',
-                    'bank' => '—',
-                    'status' => 'memo',
-                    'description' => ($d->remarks ?: $d->entry_type_label) . ' — ' . $groupCode,
-                    'amount' => (float) $d->amount,
-                ];
-            }))
             ->all();
 
         return $this->exportService->exportByFormat(
@@ -386,22 +357,5 @@ class DayBookController extends Controller
         if ($entryTag) {
             $query->where('entry_tag', $entryTag);
         }
-    }
-
-    protected function dividendEntriesForDay(int $creatorId, string $day, ?string $search)
-    {
-        return ChitDividendPoolEntry::with(['group:id,group_code'])
-            ->where('created_by', $creatorId)
-            ->whereDate('created_at', $day)
-            ->when($search, function ($q) use ($search) {
-                $q->where(function ($qq) use ($search) {
-                    $qq->where('remarks', 'like', '%' . $search . '%')
-                        ->orWhereHas('group', function ($gq) use ($search) {
-                            $gq->where('group_code', 'like', '%' . $search . '%');
-                        });
-                });
-            })
-            ->orderByDesc('id')
-            ->get();
     }
 }

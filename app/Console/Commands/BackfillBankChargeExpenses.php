@@ -5,18 +5,17 @@ namespace App\Console\Commands;
 use App\Models\Account\BankTransaction;
 use App\Models\Account\BankTransfer;
 use App\Models\FixedDeposit;
-use App\Models\Payout;
 use App\Services\Account\AccountingTags;
-use App\Services\Account\ChitAccountingService;
+use App\Services\Account\SocietyBankAccountingService;
 use Illuminate\Console\Command;
 
 class BackfillBankChargeExpenses extends Command
 {
     protected $signature = 'account:backfill-bank-charge-expenses {--dry-run : Show counts without creating expenses}';
 
-    protected $description = 'Post missing Expense rows for Chit, Loan, FD, and internal bank transfer charges';
+    protected $description = 'Post missing Expense rows for Loan, FD, and internal bank transfer charges';
 
-    public function handle(ChitAccountingService $accounting): int
+    public function handle(SocietyBankAccountingService $accounting): int
     {
         $dry = (bool) $this->option('dry-run');
         $this->info($dry ? 'Dry run — no expenses will be created.' : 'Backfilling bank charge expenses...');
@@ -86,45 +85,6 @@ class BackfillBankChargeExpenses extends Command
                     }
 
                     $accounting->recordInternalTransferCharges($transfer);
-                }
-            });
-
-        Payout::query()
-            ->where('banking_charges', '>', 0)
-            ->whereNotNull('internal_bank_account_id')
-            ->orderBy('id')
-            ->chunkById(100, function ($rows) use ($accounting, $dry, &$created) {
-                foreach ($rows as $payout) {
-                    $code = $payout->payout_code ?: ('PAY-' . $payout->id);
-                    $reference = $code . '-BANKCHG';
-                    $exists = \App\Models\Account\Expense::query()
-                        ->where('reference_number', $reference)
-                        ->where('entry_tag', AccountingTags::ENTRY_BANK_FEE)
-                        ->exists();
-                    if ($exists) {
-                        continue;
-                    }
-
-                    $created++;
-                    if ($dry) {
-                        continue;
-                    }
-
-                    $payout->loadMissing(['group', 'winner.client']);
-                    $accounting->ensureBankChargeExpense(
-                        (float) $payout->banking_charges,
-                        $reference,
-                        optional($payout->paid_date)->toDateString() ?? now()->toDateString(),
-                        (int) $payout->internal_bank_account_id,
-                        AccountingTags::MODULE_CHIT,
-                        AccountingTags::bankTransferChargesDescription(
-                            'Chit settlement',
-                            $payout->group?->group_code ?? ('GRP-' . $payout->group_id),
-                            $payout->winner?->client?->client_name ?? 'Member',
-                            (float) ($payout->net_payout_amount ?? $payout->payout_amount ?? 0),
-                            (float) $payout->banking_charges
-                        )
-                    );
                 }
             });
 

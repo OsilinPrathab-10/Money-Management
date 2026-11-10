@@ -59,6 +59,10 @@ return [
         'aadhaar_verify' => env('APIHUB_AADHAAR_VERIFY_PATH', 'v5/okyc/verify'),
         'pan_path' => env('APIHUB_PAN_PATH', 'v1/pan'),
         'bank_path' => env('APIHUB_BANK_PATH', 'v4/bank-hybrid'),
+        'cibil_path' => env('APIHUB_CIBIL_PATH', 'v3/cibil'),
+        'cibil_mock' => filter_var(env('APIHUB_CIBIL_MOCK', false), FILTER_VALIDATE_BOOLEAN),
+        'cibil_mock_file' => env('APIHUB_CIBIL_MOCK_FILE', 'resources/cibil/sample-response.json'),
+        'cibil_link_ttl' => (int) env('APIHUB_CIBIL_LINK_TTL', 600),
     ],
 
     /*

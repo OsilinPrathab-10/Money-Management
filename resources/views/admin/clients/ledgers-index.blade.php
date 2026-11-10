@@ -78,7 +78,6 @@
           { data: 'mobile' },
           { data: 'zone' },
           { data: 'active_loans' },
-          { data: 'active_chits' },
           { data: 'total_outstanding' },
           { data: 'action' }
         ],
@@ -134,15 +133,7 @@
             }
           },
           {
-            targets: 8, // Active Chits
-            className: 'text-center',
-            render: function (data) {
-              const badgeClass = data > 0 ? 'bg-label-info' : 'bg-label-secondary';
-              return `<span class="badge ${badgeClass} rounded-pill fw-bold">${data}</span>`;
-            }
-          },
-          {
-            targets: 9, // Outstanding
+            targets: 8, // Outstanding
             className: 'text-end',
             render: function (data) {
               const numericVal = parseFloat(data.replace(/,/g, ''));
@@ -220,7 +211,7 @@
 
   <!-- Summary Statistics Cards -->
   <div class="row g-4 mb-5">
-    <div class="col-sm-6 col-lg-3">
+    <div class="col-sm-6 col-lg-4">
       <div class="card card-border-shadow-primary h-100 shadow-sm border-0">
         <div class="card-body">
           <div class="d-flex align-items-center mb-3">
@@ -241,7 +232,7 @@
       </div>
     </div>
     
-    <div class="col-sm-6 col-lg-3">
+    <div class="col-sm-6 col-lg-4">
       <div class="card card-border-shadow-success h-100 shadow-sm border-0">
         <div class="card-body">
           <div class="d-flex align-items-center mb-3">
@@ -262,7 +253,7 @@
       </div>
     </div>
 
-    <div class="col-sm-6 col-lg-3">
+    <div class="col-sm-6 col-lg-4">
       <div class="card card-border-shadow-warning h-100 shadow-sm border-0">
         <div class="card-body">
           <div class="d-flex align-items-center mb-3">
@@ -282,27 +273,6 @@
         </div>
       </div>
     </div>
-
-    <div class="col-sm-6 col-lg-3">
-      <div class="card card-border-shadow-info h-100 shadow-sm border-0">
-        <div class="card-body">
-          <div class="d-flex align-items-center mb-3">
-            <div class="avatar me-3">
-              <span class="avatar-initial rounded bg-label-info p-2">
-                <i class="ri-hand-coin-line ri-24px"></i>
-              </span>
-            </div>
-            <div>
-              <h4 class="mb-0 fw-bold text-heading">{{ $activeChitMembersCount }}</h4>
-              <p class="mb-0 small text-muted">Chit Subscribers</p>
-            </div>
-          </div>
-          <div class="pt-2 border-top">
-            <span class="small text-muted">Active chit group enrollments</span>
-          </div>
-        </div>
-      </div>
-    </div>
   </div>
 
   <!-- Clients Ledgers Table -->
@@ -310,7 +280,7 @@
     <div class="card-header d-flex flex-column flex-sm-row justify-content-between align-items-start align-items-sm-center gap-3 border-bottom py-3">
       <div>
         <h5 class="card-title mb-0 fw-bold">Client Ledgers Directory</h5>
-        <p class="text-muted mb-0 small">Consolidated ledger reports of client loans, EMIs, and chit accounts</p>
+        <p class="text-muted mb-0 small">Consolidated ledger reports of client loans and EMIs</p>
       </div>
     </div>
     
@@ -340,7 +310,6 @@
             <th>Mobile</th>
             <th>Area / Zone</th>
             <th>Active Loans</th>
-            <th>Active Chits</th>
             <th>Outstanding Loans</th>
             <th>Actions</th>
           </tr>

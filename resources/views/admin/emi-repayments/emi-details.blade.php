@@ -173,11 +173,25 @@ document.addEventListener('DOMContentLoaded', function() {
 <!-- Loan Summary Card -->
 <div class="card mb-6">
   <div class="card-header border-bottom">
-    <div class="d-flex align-items-center justify-content-between">
+    <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
       <h5 class="card-title mb-0">Loan Summary - <span class="text-primary">{{ $summary['account_number'] }}</span></h5>
-      <span class="badge bg-label-{{ $summary['status'] == 'active' ? 'success' : ($summary['status'] == 'closed' ? 'secondary' : 'warning') }} text-uppercase">
-        {{ $summary['status'] }}
-      </span>
+      <div class="d-flex align-items-center gap-2">
+        @if(($summary['status'] ?? '') === 'active' && !(bool)($loanAccount->is_foreclosed ?? false))
+        <button type="button" class="btn btn-sm btn-success d-inline-flex align-items-center gap-1 shadow-sm"
+                data-bs-toggle="modal" data-bs-target="#topupLoanModal">
+          <i class="ri-add-circle-line fs-5"></i>
+          <span class="fw-semibold">Top-Up Loan</span>
+        </button>
+        @endif
+        @if(($loanAccount->topup_amount ?? 0) > 0)
+        <span class="badge bg-label-success" title="Total Top-Up Amount Added">
+          <i class="ri-arrow-up-circle-line me-1"></i>Top-Up: ₹{{ number_format($loanAccount->topup_amount, 2) }}
+        </span>
+        @endif
+        <span class="badge bg-label-{{ $summary['status'] == 'active' ? 'success' : ($summary['status'] == 'closed' ? 'secondary' : 'warning') }} text-uppercase">
+          {{ $summary['status'] }}
+        </span>
+      </div>
     </div>
   </div>
   <div class="card-body pt-6">
@@ -1410,5 +1424,8 @@ document.addEventListener('DOMContentLoaded', function() {
   </div>
 </div>
 @endif
+
+<!-- Top-Up Loan Modal -->
+@include('admin.clients.modals.modal-topup-loan')
 
 @endsection

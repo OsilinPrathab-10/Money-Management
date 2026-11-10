@@ -556,6 +556,23 @@ class LoanControllerApi extends Controller
             'paid_amount' => $paidAmount,
             'outstanding_amount' => $account->isOpenLoan() ? $remainingPrincipal : (float) $account->outstanding_amount,
             'remaining_principal_balance' => $remainingPrincipal,
+            'topup_amount' => (float) ($account->topup_amount ?? 0),
+            'has_topup' => (float) ($account->topup_amount ?? 0) > 0,
+            'topups' => $account->relationLoaded('topups') ? $account->topups->map(fn ($t) => [
+                'id' => $t->id,
+                'topup_amount' => (float) $t->topup_amount,
+                'disbursed_amount' => (float) $t->disbursed_amount,
+                'processing_fee' => (float) $t->processing_fee,
+                'new_emi_amount' => (float) $t->new_emi_amount,
+                'previous_emi_amount' => (float) $t->previous_emi_amount,
+                'additional_tenure' => (int) $t->additional_tenure,
+                'new_tenure' => (int) $t->new_tenure,
+                'disbursed_at' => optional($t->disbursed_at)->format('Y-m-d'),
+                'next_due_date' => optional($t->next_due_date)->format('Y-m-d'),
+                'payment_method' => $t->payment_method,
+                'utr_number' => $t->utr_number,
+                'remarks' => $t->remarks,
+            ])->values()->all() : [],
             'penalty' => (float) $account->penalty,
             'status' => $accountStatus,
             'status_label' => $accountStatusLabel,
@@ -706,6 +723,7 @@ class LoanControllerApi extends Controller
             'loanApplication.disbursementDetail',
             'emis.collections',
             'clientLoanDocuments.loanAccount',
+            'topups',
         ];
     }
 

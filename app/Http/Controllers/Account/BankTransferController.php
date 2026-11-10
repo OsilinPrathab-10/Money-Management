@@ -12,7 +12,7 @@ use App\Models\Account\BankAccount;
 use App\Models\Account\BankTransfer;
 use App\Services\Account\AccountExportService;
 use App\Services\Account\BankTransactionsService;
-use App\Services\Account\ChitAccountingService;
+use App\Services\Account\SocietyBankAccountingService;
 use App\Services\Account\JournalService;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
@@ -185,7 +185,7 @@ class BankTransferController extends Controller
                 $bankTransactionsService->updateBankBalance($banktransfer->to_account_id, $banktransfer->transfer_amount);
 
                 // Transfer charges are a company cost — post them to the Expense module.
-                app(ChitAccountingService::class)->recordInternalTransferCharges($banktransfer);
+                app(SocietyBankAccountingService::class)->recordInternalTransferCharges($banktransfer);
 
                 // Update status to completed
                 $banktransfer->status = 'completed';

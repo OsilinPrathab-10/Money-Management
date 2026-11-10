@@ -25,10 +25,6 @@ Route::prefix('customer')->group(function () {
     Route::get('/loan-types', [App\Http\Controllers\Customer\CatalogControllerApi::class, 'loanTypes']);
     Route::get('/loan-types/{id}', [App\Http\Controllers\Customer\CatalogControllerApi::class, 'loanTypeShow']);
     Route::get('/loans/dropdowns', [App\Http\Controllers\Customer\LoanControllerApi::class, 'loanDropdowns']);
-    Route::get('/chit-schemes', [App\Http\Controllers\Customer\CatalogControllerApi::class, 'chitSchemes']);
-    Route::get('/chit-schemes/{id}', [App\Http\Controllers\Customer\CatalogControllerApi::class, 'chitSchemeShow']);
-    Route::get('/chit-schemes/{schemeId}/groups', [App\Http\Controllers\Customer\CatalogControllerApi::class, 'schemeGroups']);
-    Route::get('/chit-groups', [App\Http\Controllers\Customer\CatalogControllerApi::class, 'chitGroups']);
     Route::get('/fd-schemes', [App\Http\Controllers\Customer\CatalogControllerApi::class, 'fdSchemes']);
     Route::get('/fd-schemes/{id}', [App\Http\Controllers\Customer\CatalogControllerApi::class, 'fdSchemeShow']);
 });
@@ -193,28 +189,6 @@ Route::middleware(['auth:sanctum', 'user.valid'])->group(function () {
 });
 
 Route::middleware(['auth:sanctum', 'user.valid'])->group(function () {
-    Route::prefix('chits')->group(function () {
-        Route::controller(App\Http\Controllers\Api\ChitControllerApi::class)->group(function () {
-            Route::get('/my-chits', 'getMyChits');
-            Route::post('/request-settlement', 'requestSettlement')->middleware('check.kyc');
-        });
-
-        Route::controller(App\Http\Controllers\Customer\ChitControllerApi::class)->group(function () {
-            Route::get('/settlements/metadata', 'settlementMetadata');
-            Route::get('/settlements/dropdowns', 'settlementMetadata');
-            Route::match(['get', 'post'], '/settlements/preview', 'settlementPreview');
-            Route::get('/settlements/history', 'settlementApplications');
-            Route::get('/settlement-history', 'settlementApplications');
-            Route::post('/settlements', 'applySettlement')->middleware('check.kyc');
-            Route::post('/settlements/apply', 'applySettlement')->middleware('check.kyc');
-            Route::post('/settlement-applications', 'applySettlement')->middleware('check.kyc');
-            Route::post('/settlements/{id}', 'applySettlement')->middleware('check.kyc');
-            Route::post('/settlement-applications/{id}', 'applySettlement')->middleware('check.kyc');
-            Route::get('/settlements/{id?}', 'settlementApplications');
-            Route::get('/settlement-applications/{id?}', 'settlementApplications');
-        });
-    });
-
     Route::prefix('customer')->group(function () {
         Route::get('/dashboard', [App\Http\Controllers\Api\DashboardControllerApi::class, 'dashboard']);
         Route::get('/loans/dropdowns', [App\Http\Controllers\Customer\LoanControllerApi::class, 'loanDropdowns']);
@@ -222,28 +196,6 @@ Route::middleware(['auth:sanctum', 'user.valid'])->group(function () {
         Route::get('/loans/applications-with-accounts', [App\Http\Controllers\Customer\LoanControllerApi::class, 'applicationsWithAccounts']);
         Route::get('/loans/applications/{id?}', [App\Http\Controllers\Customer\LoanControllerApi::class, 'loanApplications']);
         Route::get('/loans/accounts/{id?}', [App\Http\Controllers\Customer\LoanControllerApi::class, 'loanAccounts']);
-
-        Route::get('/chits/dropdowns', [App\Http\Controllers\Customer\ChitControllerApi::class, 'chitDropdowns']);
-        Route::post('/chits/apply', [App\Http\Controllers\Customer\ChitControllerApi::class, 'applyChit'])->middleware('check.kyc');
-        Route::get('/chits/applications-with-accounts', [App\Http\Controllers\Customer\ChitControllerApi::class, 'applicationsWithAccounts']);
-        Route::get('/chits/applications/{id?}', [App\Http\Controllers\Customer\ChitControllerApi::class, 'chitApplications']);
-        Route::get('/chits/accounts/{id?}', [App\Http\Controllers\Customer\ChitControllerApi::class, 'chitAccounts']);
-        Route::get('/chits/settlements/metadata', [App\Http\Controllers\Customer\ChitControllerApi::class, 'settlementMetadata']);
-        Route::get('/chits/settlements/dropdowns', [App\Http\Controllers\Customer\ChitControllerApi::class, 'settlementMetadata']);
-        Route::match(['get', 'post'], '/chits/settlements/preview', [App\Http\Controllers\Customer\ChitControllerApi::class, 'settlementPreview']);
-        Route::get('/chits/settlements/history', [App\Http\Controllers\Customer\ChitControllerApi::class, 'settlementApplications']);
-        Route::get('/chits/settlement-history', [App\Http\Controllers\Customer\ChitControllerApi::class, 'settlementApplications']);
-        Route::post('/chits/settlements', [App\Http\Controllers\Customer\ChitControllerApi::class, 'applySettlement'])->middleware('check.kyc');
-        Route::post('/chits/settlements/apply', [App\Http\Controllers\Customer\ChitControllerApi::class, 'applySettlement'])->middleware('check.kyc');
-        Route::post('/chits/settlement-applications', [App\Http\Controllers\Customer\ChitControllerApi::class, 'applySettlement'])->middleware('check.kyc');
-        Route::post('/chits/request-settlement', [App\Http\Controllers\Customer\ChitControllerApi::class, 'applySettlement'])->middleware('check.kyc');
-        Route::post('/chits/settlements/{id}', [App\Http\Controllers\Customer\ChitControllerApi::class, 'applySettlement'])->middleware('check.kyc');
-        Route::post('/chits/settlement-applications/{id}', [App\Http\Controllers\Customer\ChitControllerApi::class, 'applySettlement'])->middleware('check.kyc');
-        Route::get('/chits/settlements/{id?}', [App\Http\Controllers\Customer\ChitControllerApi::class, 'settlementApplications']);
-        Route::get('/chits/settlement-applications/{id?}', [App\Http\Controllers\Customer\ChitControllerApi::class, 'settlementApplications']);
-        Route::get('/chits/family-members', [App\Http\Controllers\Customer\ChitControllerApi::class, 'familyMembers']);
-        Route::get('/chits/payment-history', [App\Http\Controllers\Customer\ChitControllerApi::class, 'paymentHistory']);
-        Route::get('/chits/accounts/{id}/payment-history', [App\Http\Controllers\Customer\ChitControllerApi::class, 'paymentHistory']);
 
         Route::get('/fd/dropdowns', [App\Http\Controllers\Customer\FdControllerApi::class, 'fdDropdowns']);
         Route::post('/fd/apply', [App\Http\Controllers\Customer\FdControllerApi::class, 'applyFd'])->middleware('check.kyc');
@@ -284,6 +236,7 @@ Route::middleware(['auth:sanctum', 'user.valid'])->group(function () {
             Route::post('/{id}/prepayment-loan', 'prepaymentInfo');
             Route::get('/emi/{emi_id}/partial-min', 'emiPartialMinAmount');
             Route::get('/loan-statements/{loan_account_id}', 'loanStatements');
+            Route::get('/{id}/topup-info', 'topupInfo');
         });
 
         Route::get('/emi/{id}/receipt', [App\Http\Controllers\Api\EmiControllerApi::class, 'generateEmiReceipt']);

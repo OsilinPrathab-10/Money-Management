@@ -12,7 +12,6 @@ use App\Models\Nominee;
 use App\Models\Guarantor;
 use App\Models\EmployeeInformation;
 use App\Models\Location;
-use App\Models\GroupMember;
 use App\Services\OpenLoanCycleService;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\DB;
@@ -47,12 +46,6 @@ class ClientManagementControllerApi extends Controller
             ->withCount([
                 'loanAccounts as loan_accounts_count' => function ($q) {
                     $q->where('status', '!=', 'closed');
-                },
-                'groupMembers as group_members_count' => function ($q) {
-                    $q->whereNotIn('status', \App\Models\GroupMember::INACTIVE_STATUSES)
-                        ->whereHas('group', function ($gq) {
-                            $gq->where('status', '!=', 'completed');
-                        });
                 },
             ]);
 
@@ -107,7 +100,7 @@ class ClientManagementControllerApi extends Controller
                 'zone' => $client->location ? $client->location->name : 'N/A',
                 'location_id' => $client->location_id,
                 'loans_count' => (int) ($client->loan_accounts_count ?? 0),
-                'chits_count' => (int) ($client->group_members_count ?? 0),
+                'chits_count' => 0,
                 'status' => $client->status ?? 'inactive',
                 'status_label' => ucfirst($client->status ?? 'inactive'),
                 'kyc_status' => optional($client->kycDetail)->status ?? 'pending',
@@ -436,10 +429,7 @@ class ClientManagementControllerApi extends Controller
 
         $clientId = (int) $client->id;
 
-        $memberships = GroupMember::with(['group.scheme', 'shares.client', 'payouts', 'installments.collections'])
-            ->involvingClient($clientId)
-            ->orderByDesc('created_at')
-            ->get();
+        $memberships = collect();
 
         $formatLoanApplication = function (\App\Models\LoanApplication $app) {
             $product = $app->product;
@@ -519,99 +509,6 @@ class ClientManagementControllerApi extends Controller
                 'disbursed_at' => optional($acc->disbursed_at)?->format('Y-m-d'),
             ];
         };
-
-        $formatChitMember = function (GroupMember $member, bool $withSchedule = false) use ($clientId) {
-            $group = $member->group;
-            $scheme = $group ? $group->scheme : null;
-
-            $isShared = (bool) $member->is_shared;
-            $ownershipPct = (float) $member->ownershipPercentageFor($clientId);
-            if ($ownershipPct <= 0) {
-                $ownershipPct = (float) ($member->effective_share_percentage ?? $member->share_percentage ?? 100);
-            }
-
-            $fullChitValue = (float) ($group->chit_value ?? 0);
-            $chitValueShare = $isShared
-                ? (float) $member->amountForClient($fullChitValue, $clientId)
-                : round($fullChitValue * ($ownershipPct / 100.0), 2);
-
-            $clientInstallment = (float) $member->apiInstallmentAmountForClient($clientId, $group);
-
-            $fullSettlement = (float) $member->settlement_amount;
-            $clientSettlement = $isShared
-                ? (float) $member->amountForClient($fullSettlement, $clientId)
-                : round($fullSettlement * ($ownershipPct / 100.0), 2);
-
-            $isCompleted = in_array(strtolower((string) $member->status), ['completed', 'closed'], true)
-                || ($group && strtolower((string) $group->status) === 'completed')
-                || ($group && (int) $group->current_month >= (int) $group->total_months && (int) $group->total_months > 0);
-
-            $effectiveStatus = $isCompleted ? 'completed' : ($member->status ?? 'pending');
-            $freq = $member->collection_frequency ?? 'monthly';
-
-            [$dueDate, $nextDueDate] = $this->chitCurrentDueWindow($member);
-            $installmentAmount = $member->collectionSplitAmount($clientInstallment, $dueDate, $nextDueDate);
-
-            $item = [
-                'id' => $member->id,
-                'member_number' => $member->member_number,
-                'group_id' => $member->group_id,
-                'group_code' => $group->group_code ?? '—',
-                'group_status' => $group->status ?? '—',
-                'scheme_name' => $scheme->name ?? '—',
-                'is_shared' => $isShared,
-                'share_percentage' => $ownershipPct,
-                'chit_value' => $chitValueShare,
-                'installment_amount' => $installmentAmount,
-                'collection_frequency' => $freq,
-                'collection_frequency_label' => $member->collection_frequency_label ?? ucfirst($freq),
-                'total_months' => (int) ($group->total_months ?? 0),
-                'settlement_amount' => $clientSettlement,
-                'status' => $effectiveStatus,
-                'status_label' => ucfirst($effectiveStatus),
-                'applied_at' => $member->created_at ? $member->created_at->format('Y-m-d') : '—',
-                'joined_date' => optional($member->joined_date)->format('Y-m-d') ?? '—',
-                'chit_need_month_label' => $member->chit_need_month_label,
-            ];
-
-            if (! $withSchedule) {
-                return $item;
-            }
-
-            $window = $member->collectionWindow($dueDate, $nextDueDate);
-            $paidAmt = 0.0;
-            $pendingAmt = 0.0;
-            $currentInst = $this->chitCurrentInstallment($member);
-            if ($currentInst) {
-                $paidAmt = (float) $currentInst->clientPaidShare($clientId);
-                $pendingAmt = (float) $currentInst->pendingCollectedAmount($clientId);
-            }
-
-            $collectionPeriods = [];
-            if (in_array($freq, ['daily', 'weekly'], true)) {
-                $collectionPeriods = $this->serializeChitCollectionPeriods(
-                    $member->collectionPeriodSchedule(
-                        $dueDate,
-                        $clientInstallment,
-                        $paidAmt,
-                        $pendingAmt,
-                        $nextDueDate
-                    )
-                );
-            }
-
-            $item['collection_split_count'] = $member->collectionSplitCount($dueDate, $nextDueDate);
-            $item['collection_window_start'] = $window['start']?->format('Y-m-d');
-            $item['collection_window_end'] = $window['end']?->format('Y-m-d');
-            $item['collection_periods'] = $collectionPeriods;
-            $item['month_wise_installments'] = $this->chitMonthSummaries($member, $clientId);
-
-            return $item;
-        };
-
-        $kyc = $client->kycDetail;
-        $nominee = $client->nominee;
-        $emp = $client->employeeInformation;
 
         $clientData = [
             'id' => $client->id,
@@ -701,12 +598,9 @@ class ClientManagementControllerApi extends Controller
             'loan_accounts' => $client->loanAccounts->map($formatLoanAccount)->values(),
             'applications' => [
                 'loan' => $client->loanApplications->map($formatLoanApplication)->values(),
-                'chits' => $memberships->map(fn (GroupMember $member) => $formatChitMember($member, false))->values(),
+                'chits' => [],
             ],
-            'chit_accounts' => $memberships
-                ->whereIn('status', ['active', 'approved', 'completed', 'defaulted'])
-                ->values()
-                ->map(fn (GroupMember $member) => $formatChitMember($member, true)),
+            'chit_accounts' => [],
         ];
 
         return response()->json([
@@ -1033,97 +927,4 @@ class ClientManagementControllerApi extends Controller
         return 'https://ui-avatars.com/api/?name=' . urlencode($name) . '&size=64&background=696cff&color=fff';
     }
 
-    protected function chitCurrentInstallment(GroupMember $member): ?\App\Models\Installment
-    {
-        $installments = $member->relationLoaded('installments')
-            ? $member->installments->sortBy('month_number')->values()
-            : collect();
-
-        if ($installments->isEmpty()) {
-            return null;
-        }
-
-        return $installments->first(function ($inst) {
-            return ! in_array((string) $inst->status, ['paid', 'waived'], true);
-        }) ?? $installments->first();
     }
-
-    /**
-     * @return array{0: \Carbon\Carbon|null, 1: \Carbon\Carbon|null}
-     */
-    protected function chitCurrentDueWindow(GroupMember $member): array
-    {
-        $installments = $member->relationLoaded('installments')
-            ? $member->installments->sortBy('month_number')->values()
-            : collect();
-
-        $current = $this->chitCurrentInstallment($member);
-        $due = $current?->due_date
-            ?? optional($member->group)->start_date
-            ?? $member->joined_date;
-
-        $next = null;
-        if ($current) {
-            $idx = $installments->search(fn ($inst) => (int) $inst->id === (int) $current->id);
-            if ($idx !== false) {
-                $next = optional($installments->get($idx + 1))->due_date;
-            }
-        }
-
-        if (! $next && $due) {
-            $next = \Carbon\Carbon::parse($due)->addMonthsNoOverflow(1);
-        }
-
-        return [
-            $due ? \Carbon\Carbon::parse($due) : null,
-            $next ? \Carbon\Carbon::parse($next) : null,
-        ];
-    }
-
-    protected function serializeChitCollectionPeriods(array $periods): array
-    {
-        return array_map(static function (array $p) {
-            $due = $p['due_date'] ?? null;
-            $end = $p['period_end'] ?? null;
-
-            return [
-                'period_number' => (int) ($p['index'] ?? $p['period_number'] ?? 0),
-                'label' => (string) ($p['label'] ?? $p['period_label'] ?? ''),
-                'due_date' => $due ? \Carbon\Carbon::parse($due)->format('Y-m-d') : null,
-                'period_end' => $end ? \Carbon\Carbon::parse($end)->format('Y-m-d') : null,
-                'amount' => (float) ($p['amount'] ?? 0),
-                'paid_amount' => (float) ($p['paid'] ?? $p['paid_amount'] ?? 0),
-                'balance' => (float) ($p['balance'] ?? $p['due_amount'] ?? 0),
-                'status' => (string) ($p['status'] ?? 'pending'),
-                'is_current' => (bool) ($p['is_current'] ?? false),
-                'is_next' => (bool) ($p['is_next'] ?? false),
-            ];
-        }, $periods);
-    }
-
-    /**
-     * One row per chit month — no nested daily/weekly periods.
-     */
-    protected function chitMonthSummaries(GroupMember $member, int $clientId): array
-    {
-        $installments = $member->relationLoaded('installments')
-            ? $member->installments->sortBy('month_number')->values()
-            : collect();
-
-        return $installments->map(function ($inst) use ($member, $clientId) {
-            $pending = (float) $inst->pendingCollectedAmount($clientId);
-            $balance = (float) $inst->clientBalanceShare($clientId);
-
-            return [
-                'id' => $inst->id,
-                'month_number' => (int) $inst->month_number,
-                'due_date' => optional($inst->due_date)?->format('Y-m-d'),
-                'amount' => (float) $member->displayAmountForInstallment($inst, $clientId),
-                'paid_amount' => (float) $inst->clientPaidShare($clientId),
-                'balance' => round(max(0, $balance - $pending), 2),
-                'status' => $inst->effectiveStatus($clientId),
-                'pending_verification_amount' => $pending,
-            ];
-        })->values()->all();
-    }
-}

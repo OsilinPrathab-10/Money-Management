@@ -9,7 +9,7 @@
 <div class="account-module">
   @include('admin.account.shared.page-header', [
     'title' => __('Day Book Management'),
-    'subtitle' => __('Daily tagged movements for Chit, Loan & FD (auto-updates from collections, fees, payouts).'),
+    'subtitle' => __('Daily tagged movements for Loan & FD (auto-updates from collections, fees, payouts).'),
   ])
 
   <div class="d-flex align-items-center gap-2 flex-wrap mb-4">
@@ -233,7 +233,7 @@
   <div class="card mt-4">
     <div class="card-header d-flex justify-content-between align-items-center">
       <strong>{{ __('Bank & Cash Movements') }}</strong>
-      <small class="text-muted">{{ __('Chit / Loan / FD cashbook (tagged)') }}</small>
+      <small class="text-muted">{{ __('Loan / FD cashbook (tagged)') }}</small>
     </div>
     <div class="card-body">
       <div class="table-responsive">
@@ -284,46 +284,6 @@
     </div>
   </div>
 
-  <div class="card mt-4">
-    <div class="card-header d-flex justify-content-between align-items-center">
-      <strong>{{ __('Dividend pool (memo)') }}</strong>
-      <small class="text-muted">{{ __('Group dividend movements — does not change bank balance') }}</small>
-    </div>
-    <div class="card-body">
-      <div class="table-responsive">
-        <table class="table table-hover mb-0">
-          <thead>
-            <tr>
-              <th>{{ __('Tags') }}</th>
-              <th>{{ __('Group') }}</th>
-              <th>{{ __('Type') }}</th>
-              <th>{{ __('Remarks') }}</th>
-              <th class="text-end">{{ __('Amount') }}</th>
-              <th class="text-end">{{ __('Balance after') }}</th>
-            </tr>
-          </thead>
-          <tbody>
-            @forelse ($dividends ?? [] as $d)
-              <tr>
-                <td>
-                  <span class="badge {{ AccountingTags::moduleBadgeClass('CHIT') }}">CHIT</span>
-                  <span class="badge bg-label-secondary">{{ AccountingTags::entryLabel('DIVIDEND') }}</span>
-                </td>
-                <td>{{ $d->group?->group_code ?? ('GRP-' . $d->group_id) }}</td>
-                <td><span class="badge bg-label-{{ $d->entry_type_badge }}">{{ $d->entry_type_label }}</span></td>
-                <td>{{ $d->remarks ?: '—' }}</td>
-                <td class="text-end">₹{{ number_format((float) $d->amount, 2) }}</td>
-                <td class="text-end">₹{{ number_format((float) $d->balance_after, 2) }}</td>
-              </tr>
-            @empty
-              <tr>
-                <td colspan="6" class="text-center text-muted py-4">{{ __('No dividend pool entries for this day.') }}</td>
-              </tr>
-            @endforelse
-          </tbody>
-        </table>
-      </div>
-    </div>
-  </div>
+
 </div>
 @endsection

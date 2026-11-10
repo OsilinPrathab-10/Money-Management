@@ -1145,7 +1145,7 @@ class EmiController extends Controller
     /**
      * Build receipt payload for a single EMI or its bulk payment group.
      */
-    public function buildReceiptPayload(Emi $emi, ?string $bulkKey = null): array
+    public function buildReceiptPayload(Emi $emi, ?string $bulkKey = null, ?int $collectionId = null): array
     {
         $emi->loadMissing([
             'loanAccount.loanApplication.client',
@@ -1158,6 +1158,17 @@ class EmiController extends Controller
         $loanApplication = optional($loanAccount)->loanApplication;
         $client = optional($loanApplication)->client ?? optional($loanAccount)->client;
         $product = optional($loanApplication)->product;
+
+        $targetCollectionId = $collectionId
+            ?: (request()->query('collection_id') ?: request()->query('collection'));
+
+        $targetCollection = null;
+        if ($targetCollectionId) {
+            $targetCollection = $emi->collections ? $emi->collections->firstWhere('id', (int) $targetCollectionId) : null;
+            if (!$targetCollection) {
+                $targetCollection = \App\Models\EmiCollection::find((int) $targetCollectionId);
+            }
+        }
 
         $bulkCollection = BulkPaymentGroup::latestPostedBulkLoanCollection($emi, $bulkKey);
         $siblings = $bulkCollection ? BulkPaymentGroup::findSiblings($bulkCollection) : collect();
@@ -1175,7 +1186,7 @@ class EmiController extends Controller
         }
 
         $collTime = null;
-        $activeCollection = $isBulk ? ($bulkCollection ?: $latestCollection) : $latestCollection;
+        $activeCollection = $isBulk ? ($bulkCollection ?: $latestCollection) : ($targetCollection ?: $latestCollection);
         if ($activeCollection) {
             $collAt = $activeCollection->collected_at ? Carbon::parse($activeCollection->collected_at)->timezone('Asia/Kolkata') : null;
             if ($collAt && ($collAt->hour !== 0 || $collAt->minute !== 0 || $collAt->second !== 0)) {
@@ -1207,6 +1218,8 @@ class EmiController extends Controller
                 : 'N/A');
 
         $items = [];
+        $totalScheduledEmi = round((float) ($emi->total_amount ?? (($emi->principal_amount ?? 0) + ($emi->interest_amount ?? 0))), 2);
+
         if ($isBulk) {
             $paidAmount = round((float) $siblings->sum('amount'), 2);
             $principalAmount = round((float) $siblings->sum(fn (EmiCollection $row) => (float) ($row->emi?->principal_amount ?? 0)), 2);
@@ -1243,23 +1256,118 @@ class EmiController extends Controller
                     'paid_amount' => round((float) $row->amount, 2),
                 ];
             }
+            $isPartial = ($status === 'partial');
         } else {
-            $principalAmount = $emi->principal_amount ?? 0;
-            $interestAmount = $emi->interest_amount ?? 0;
-            $emiAmount = $emi->total_amount ?? ($principalAmount + $interestAmount);
-            $paidAmount = $emi->paid_amount ?? 0;
-            $penaltyAmount = $emi->penalty_amount ?? 0;
+            $penaltyAmount = (float) ($emi->penalty_amount ?? 0);
             $overdueAmount = ($emi->status === 'overdue' || ($penaltyAmount > 0 && $emi->paid_date && $emi->paid_date->gt($emi->due_date)))
                 ? $penaltyAmount
                 : 0;
             $instalmentLabel = $emi->instalment_number ? ('EMI #' . $emi->instalment_number) : 'N/A';
-            $receiptNumber = 'RCP-' . str_pad($emi->id, 6, '0', STR_PAD_LEFT);
-            $paymentReference = $emi->payment_reference ?: 'N/A';
-            $paymentMethod = $emi->payment_method;
-            $status = $emi->status;
+
+            // Resolve exact collected amount for this receipt:
+            if ($targetCollection) {
+                $paidAmount = round((float) $targetCollection->amount, 2);
+                $receiptNumber = 'RCP-' . str_pad($emi->id, 6, '0', STR_PAD_LEFT) . '-C' . $targetCollection->id;
+                $paymentReference = $targetCollection->payment_reference ?: ($emi->payment_reference ?: 'N/A');
+                $paymentMethod = $targetCollection->payment_method ?: $emi->payment_method;
+                $status = ($targetCollection->payment_type === 'partial') ? 'partial' : ($emi->status ?? 'verified');
+            } elseif ($emi->status === 'partial') {
+                $paidAmount = $latestCollection ? round((float) $latestCollection->amount, 2) : round((float) ($emi->paid_amount ?? 0), 2);
+                $receiptNumber = 'RCP-' . str_pad($emi->id, 6, '0', STR_PAD_LEFT);
+                $paymentReference = $latestCollection?->payment_reference ?: ($emi->payment_reference ?: 'N/A');
+                $paymentMethod = $latestCollection?->payment_method ?: $emi->payment_method;
+                $status = 'partial';
+            } else {
+                $paidAmount = round((float) ($emi->paid_amount ?? 0), 2);
+                $receiptNumber = 'RCP-' . str_pad($emi->id, 6, '0', STR_PAD_LEFT);
+                $paymentReference = $emi->payment_reference ?: 'N/A';
+                $paymentMethod = $emi->payment_method;
+                $status = $emi->status;
+            }
+
+            if ($totalScheduledEmi <= 0.01) {
+                $totalScheduledEmi = $paidAmount;
+            }
+
+            $isPartial = ($status === 'partial')
+                || ($paidAmount < ($totalScheduledEmi - 0.01))
+                || ($targetCollection && $targetCollection->payment_type === 'partial');
+
+            $isKandhuvatti = ($loanAccount && $loanAccount->loan_mode === 'interest_only');
+
+            if ($isKandhuvatti) {
+                $isExplicitPrincipal = ($activeCollection && $activeCollection->payment_type === 'principal')
+                    || (request()->query('type') === 'principal');
+                if ($isExplicitPrincipal) {
+                    $principalAmount = $paidAmount;
+                    $interestAmount = 0.0;
+                } else {
+                    $interestAmount = $paidAmount;
+                    $principalAmount = 0.0;
+                }
+            } else {
+                if ($paidAmount >= ($totalScheduledEmi - 0.01)) {
+                    // Fully paid scheduled installment
+                    $principalAmount = (float) ($emi->principal_amount ?? 0);
+                    $interestAmount = (float) ($emi->interest_amount ?? 0);
+                } else {
+                    // Partial payment: Interest first, then principal (matching LoanPaymentService)
+                    $priorCollectionsSum = 0.0;
+                    if ($activeCollection && $emi->relationLoaded('collections')) {
+                        $priorCollectionsSum = (float) $emi->collections
+                            ->where('id', '<', $activeCollection->id)
+                            ->whereIn('status', BulkPaymentGroup::postedStatuses())
+                            ->sum('amount');
+                    }
+                    $scheduledInterest = (float) ($emi->interest_amount ?? 0);
+                    $interestRemainingBeforeThis = max(0.0, $scheduledInterest - $priorCollectionsSum);
+
+                    $interestAmount = round(min($paidAmount, $interestRemainingBeforeThis), 2);
+                    $principalAmount = round(max(0.0, $paidAmount - $interestAmount), 2);
+                }
+            }
+
+            $emiAmount = $paidAmount;
         }
 
-        $outstandingAmount = $isBulk ? 0 : max($emiAmount - $paidAmount, 0);
+        $currentPayment = $paidAmount;
+        $cumulativePaid = (float) ($emi->paid_amount ?? 0);
+
+        // Previously paid before this active collection
+        $previouslyPaid = 0.0;
+        if ($activeCollection && $emi->relationLoaded('collections')) {
+            $previouslyPaid = (float) $emi->collections
+                ->where('id', '<', $activeCollection->id)
+                ->whereIn('status', BulkPaymentGroup::postedStatuses())
+                ->sum('amount');
+        } elseif (!$isBulk && $cumulativePaid > $currentPayment) {
+            $previouslyPaid = max(0.0, round($cumulativePaid - $currentPayment, 2));
+        }
+
+        $totalPaidSoFar = round($previouslyPaid + $currentPayment, 2);
+        if ($totalPaidSoFar < $cumulativePaid && !$activeCollection) {
+            $totalPaidSoFar = $cumulativePaid;
+        }
+
+        $outstandingAmount = $isBulk ? 0 : max(0.0, round($totalScheduledEmi - $totalPaidSoFar, 2));
+
+        // Today's total collections for reference
+        $todayPayment = $currentPayment;
+        if ($emi->relationLoaded('collections') && $resolvedPaidAt) {
+            $sameDaySum = (float) $emi->collections
+                ->filter(function ($c) use ($resolvedPaidAt) {
+                    if (!in_array($c->status, BulkPaymentGroup::postedStatuses(), true)) {
+                        return false;
+                    }
+                    $date = $c->collected_at ? \Illuminate\Support\Carbon::parse($c->collected_at) : ($c->created_at ? \Illuminate\Support\Carbon::parse($c->created_at) : null);
+                    return $date && $date->isSameDay($resolvedPaidAt);
+                })
+                ->sum('amount');
+            if ($sameDaySum > 0) {
+                $todayPayment = round($sameDaySum, 2);
+            }
+        }
+
         $isOverduePayment = $overdueAmount > 0;
         $refUpper = strtoupper(trim((string) $paymentReference));
         if ($refUpper === '' || $refUpper === 'BULK PAYMENT' || str_starts_with($refUpper, 'BULK-') || str_starts_with($refUpper, 'FAM-')) {
@@ -1268,6 +1376,7 @@ class EmiController extends Controller
 
         return [
             'id' => $emi->getRouteKey(),
+            'module' => 'loan',
             'receipt_number' => $receiptNumber,
             'client_name' => $client->client_name ?? 'N/A',
             'application_number' => $emi->application_number
@@ -1280,12 +1389,21 @@ class EmiController extends Controller
             'instalment_label' => $instalmentLabel,
             'principal_amount' => $principalAmount,
             'interest_amount' => $interestAmount,
-            'emi_amount' => $isBulk ? $paidAmount : $emiAmount,
+            'emi_amount' => $currentPayment,
+            'due_amount' => $totalScheduledEmi,
+            'total_due_amount' => $totalScheduledEmi,
+            'previously_paid' => $previouslyPaid,
+            'previous_paid_amount' => $previouslyPaid,
+            'current_payment' => $currentPayment,
+            'today_payment' => $todayPayment,
             'overdue_amount' => $overdueAmount,
             'show_overdue' => $isOverduePayment,
-            'total_amount_display' => $isBulk ? $paidAmount : ($emiAmount + $overdueAmount),
-            'paid_amount' => $paidAmount,
+            'total_amount_display' => $currentPayment,
+            'paid_amount' => $currentPayment,
+            'total_paid_amount' => $totalPaidSoFar,
+            'cumulative_paid_amount' => $cumulativePaid,
             'outstanding_amount' => $outstandingAmount,
+            'is_partial' => $isPartial,
             'payment_method' => ucfirst(str_replace('_', ' ', $paymentMethod ?? 'N/A')),
             'payment_reference' => $paymentReference,
             'paid_date' => $paymentDate,
@@ -1303,7 +1421,7 @@ class EmiController extends Controller
             'split_item_label' => 'EMI',
             'account_label' => 'Loan ID',
             'start_date_label' => 'Disbursement Date',
-            'receipt_title' => $isBulk ? 'LOAN BULK PAYMENT RECEIPT' : 'LOAN PAYMENT RECEIPT',
+            'receipt_title' => $isPartial ? 'LOAN PARTIAL PAYMENT RECEIPT' : 'LOAN PAYMENT RECEIPT',
         ];
     }
 
@@ -1313,6 +1431,16 @@ class EmiController extends Controller
     public function getReceiptDetails($id): JsonResponse
     {
         $decodedId = \App\Support\HashId::decode($id) ?? $id;
+        $collectionId = request()->query('collection_id') ?: request()->query('collection');
+
+        if (!\App\Models\Emi::where('id', $decodedId)->exists()) {
+            $possibleColl = \App\Models\EmiCollection::find($decodedId);
+            if ($possibleColl && $possibleColl->emi_id) {
+                $collectionId = $possibleColl->id;
+                $decodedId = $possibleColl->emi_id;
+            }
+        }
+
         $emi = Emi::with([
             'loanAccount.loanApplication.client',
             'loanAccount.loanApplication.product',
@@ -1321,7 +1449,7 @@ class EmiController extends Controller
         ])
             ->findOrFail($decodedId);
 
-        return response()->json($this->buildReceiptPayload($emi));
+        return response()->json($this->buildReceiptPayload($emi, null, $collectionId ? (int)$collectionId : null));
     }
 
     /**
@@ -1340,6 +1468,17 @@ class EmiController extends Controller
             }
         }
 
+        $collectionId = request()->query('collection_id') ?: request()->query('collection');
+
+        // Check if decodedId directly points to an EmiCollection
+        if (!\App\Models\Emi::where('id', $decodedId)->exists()) {
+            $possibleColl = \App\Models\EmiCollection::find($decodedId);
+            if ($possibleColl && $possibleColl->emi_id) {
+                $collectionId = $possibleColl->id;
+                $decodedId = $possibleColl->emi_id;
+            }
+        }
+
         $emi = Emi::with([
             'loanAccount.loanApplication.client',
             'loanAccount.loanApplication.product',
@@ -1348,7 +1487,7 @@ class EmiController extends Controller
         ])
             ->findOrFail($decodedId);
 
-        $receiptData = $this->buildReceiptPayload($emi);
+        $receiptData = $this->buildReceiptPayload($emi, null, $collectionId ? (int)$collectionId : null);
 
         return view('pdf.payment_receipt', compact('receiptData'));
     }

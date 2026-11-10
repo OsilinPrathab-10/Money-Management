@@ -123,7 +123,6 @@ class FixedDepositScheme extends Model
     {
         return [
             'wallet' => 'Wallet',
-            'chit' => 'Chit',
             'cash' => 'Cash',
             'bank_transfer' => 'Bank Transfer',
         ];

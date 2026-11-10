@@ -1,6 +1,6 @@
 @extends('layouts/layoutMaster')
 
-@section('title', 'EMI & Chit Collections')
+@section('title', 'EMI Collections')
 
 @section('vendor-style')
 @vite([
@@ -72,6 +72,8 @@ window.clientCollectionsDataUrl = @json(route('client-collections.data'));
 window.clientCollectionsCsrf = @json(csrf_token());
 window.clientCollectionsPayUrl = @json(route('client-collections.pay'));
 window.clientCollectionsBulkPayUrl = @json(route('client-collections.bulk-pay'));
+window.clientCollectionsNotesUrl = @json(route('client-collections.notes'));
+window.clientCollectionsSaveNoteUrl = @json(route('client-collections.notes.store'));
 window.isAdminOrStaff = @json(auth()->user()->hasRole('Admin') || auth()->user()->hasRole('Staff') || auth()->user()->hasRole('Super Admin'));
 
 window._bankPaymentGroupsQueue = window._bankPaymentGroupsQueue || [];
@@ -218,54 +220,6 @@ document.addEventListener('DOMContentLoaded', function () {
     };
   };
 
-  const buildChitCommLinks = function (row, inst) {
-    const phone = getCleanPhone(row.client_phone);
-    if (!phone) return { whatsapp: null, sms: null };
-
-    const clientName = row.client_name || 'Client';
-    const groupCode = inst.group_code || row.account_number || 'Chit';
-    const label = inst.period_label || inst.label || ('Month #' + (inst.month_number || ''));
-    const memberNo = inst.member_number || row.member_number;
-    const seatInfo = (memberNo && memberNo !== '—') ? ' (Member #' + memberNo + ')' : '';
-    const dueDate = inst.due_date || '—';
-    const amount = inst.balance_formatted || money(inst.balance || inst.amount || 0);
-    const slogan = row.company_slogan || 'Finance';
-    const compPhone = row.company_phone || '';
-    const link = (row.public_url && row.public_url !== '#') ? row.public_url : (inst.url && inst.url !== '#' ? inst.url : '');
-
-    const waLines = [
-      'Dear *' + clientName + '*,',
-      '',
-      'Reminder for your chit *' + groupCode + '*' + seatInfo + ' (' + label + '):',
-      '- Due Date: ' + dueDate,
-      '- Balance Due: ' + amount
-    ];
-    if (link) {
-      waLines.push('');
-      waLines.push('View Details: ' + link);
-    }
-    waLines.push('');
-    waLines.push('Thank you, ' + slogan + '.' + (compPhone ? ' Queries: ' + compPhone : ''));
-
-    const smsLines = [
-      'Dear ' + clientName + ',',
-      '',
-      'Reminder for your chit ' + groupCode + seatInfo + ' (' + label + '):',
-      '- Due Date: ' + dueDate,
-      '- Balance Due: ' + amount
-    ];
-    if (link) {
-      smsLines.push('');
-      smsLines.push('View Details: ' + link);
-    }
-    smsLines.push('');
-    smsLines.push('Thank you, ' + slogan + '.' + (compPhone ? ' Queries: ' + compPhone : ''));
-
-    return {
-      whatsapp: 'https://wa.me/' + phone + '?text=' + encodeURIComponent(waLines.join('\n')),
-      sms: 'sms:+' + phone + '?body=' + encodeURIComponent(smsLines.join('\n'))
-    };
-  };
 
   const renderLoanTable = function (items, row) {
     if (!items || !items.length) return '';
@@ -312,6 +266,12 @@ document.addEventListener('DOMContentLoaded', function () {
         menuItems += '<li><a class="dropdown-item py-1" href="' + escapeHtml(scheduleUrl) + '" target="_blank"><i class="ri-file-list-3-line me-2"></i>View Schedule</a></li>';
       }
 
+      const emiPending = parseFloat(emi.pending_amount || 0);
+      const isEmiZeroDue = (emi.status === 'paid') || (emiPending <= 0.009);
+
+      if (menuItems) menuItems += '<li><hr class="dropdown-divider my-1"></li>';
+      menuItems += '<li><a class="dropdown-item btn-open-notes text-secondary py-1" href="javascript:void(0)" data-type="loan" data-id="' + escapeHtml(emiId) + '" data-emi-id="' + escapeHtml(emiId) + '" data-loan-account-id="' + escapeHtml(row.id ? String(row.id).replace('loan_', '') : '') + '" data-client-id="' + escapeHtml(row.client_id || '') + '" data-label="' + escapeHtml(emi.label || ('EMI #' + (emi.instalment_number || ''))) + '" data-account="' + escapeHtml(row.account_number) + '" data-client="' + escapeHtml(row.client_name) + '" data-due-zero="' + (isEmiZeroDue ? '1' : '0') + '"><i class="ri-calendar-event-line me-2 text-warning"></i>' + (isEmiZeroDue ? 'Notes History' : 'Notes & Reminder') + '</a></li>';
+
       let actions = '';
       if (!menuItems) {
         actions = '<span class="text-muted">—</span>';
@@ -322,8 +282,17 @@ document.addEventListener('DOMContentLoaded', function () {
           '<ul class="dropdown-menu dropdown-menu-end shadow-sm" aria-labelledby="' + uid + '">' + menuItems + '</ul></div>';
       }
 
+      let reminderBadge = '';
+      if (emi.reminder_date) {
+        const isToday = !!emi.is_reminder_today;
+        const isOverdue = !!emi.is_reminder_overdue;
+        const badgeColor = isToday ? 'bg-warning text-dark' : (isOverdue ? 'bg-danger text-white' : 'bg-label-warning');
+        const badgeIcon = isToday ? 'ri-alarm-warning-line' : 'ri-calendar-event-line';
+        reminderBadge = '<div class="mt-1"><span class="badge ' + badgeColor + ' cursor-pointer btn-open-notes text-wrap text-start" data-type="loan" data-id="' + escapeHtml(emiId) + '" data-emi-id="' + escapeHtml(emiId) + '" data-loan-account-id="' + escapeHtml(row.id ? String(row.id).replace('loan_', '') : '') + '" data-client-id="' + escapeHtml(row.client_id || '') + '" data-label="' + escapeHtml(emi.label || ('EMI #' + (emi.instalment_number || ''))) + '" data-account="' + escapeHtml(row.account_number) + '" data-client="' + escapeHtml(row.client_name) + '" title="' + escapeHtml(emi.latest_note || 'Reminder set') + '"><i class="' + badgeIcon + ' me-1"></i>Reminder: ' + escapeHtml(emi.reminder_date) + '</span></div>';
+      }
+
       html += '<tr>';
-      html += '<td class="fw-semibold">' + escapeHtml(emi.label || ('#' + emi.instalment_number)) + '</td>';
+      html += '<td class="fw-semibold">' + escapeHtml(emi.label || ('#' + emi.instalment_number)) + reminderBadge + '</td>';
       html += '<td>' + escapeHtml(emi.due_date || '—') + '</td>';
       html += '<td>' + escapeHtml(emi.total_amount_formatted || money(emi.amount)) + '</td>';
       if (!isOpen) {
@@ -342,119 +311,33 @@ document.addEventListener('DOMContentLoaded', function () {
     return html;
   };
 
-  const renderChitTable = function (items, row) {
-    if (!items || !items.length) return '';
-    let html = '<div class="table-responsive mb-0"><table class="table table-sm table-bordered align-middle mb-0">';
-    html += '<thead class="table-light"><tr>';
-    html += '<th>Period</th><th>Due Date</th><th>Amount</th><th>Penalty</th><th>Paid</th><th>Balance</th><th>Status</th><th>Actions</th>';
-    html += '</tr></thead><tbody>';
-
-    items.forEach(function (inst) {
-      const canPayInst = (inst.can_collect !== undefined) ? inst.can_collect : (inst.status !== 'paid' && parseFloat(inst.balance || 0) > 0.009);
-      const scheduleUrl = inst.url || row.account_url || '#';
-      const instComm = buildChitCommLinks(row, inst);
-      const uid = 'sub-chit-' + String(inst.installment_id).replace(/[^a-zA-Z0-9_-]/g, '') + '-' + Math.random().toString(36).slice(2, 6);
-      let menuItems = '';
-
-      if (canPayInst && window.isAdminOrStaff) {
-        menuItems += '<li><a class="dropdown-item btn-sub-chit-pay text-primary py-1" href="javascript:void(0)" data-pay-type="full" data-inst-id="' + escapeHtml(inst.installment_id) + '" data-account-id="' + escapeHtml(row.id) + '"><i class="ri-check-line me-2"></i>Full Pay (' + escapeHtml(inst.balance_formatted || money(inst.balance)) + ')</a></li>';
-        menuItems += '<li><a class="dropdown-item btn-sub-chit-pay text-info py-1" href="javascript:void(0)" data-pay-type="partial" data-inst-id="' + escapeHtml(inst.installment_id) + '" data-account-id="' + escapeHtml(row.id) + '"><i class="ri-pie-chart-line me-2"></i>Partial Pay</a></li>';
-      }
-
-      if (instComm.whatsapp) {
-        if (menuItems) menuItems += '<li><hr class="dropdown-divider my-1"></li>';
-        menuItems += '<li><a class="dropdown-item text-success py-1" href="' + escapeHtml(instComm.whatsapp) + '" target="_blank"><i class="ri-whatsapp-line me-2"></i>WhatsApp</a></li>';
-      }
-      if (instComm.sms) {
-        if (!instComm.whatsapp && menuItems) menuItems += '<li><hr class="dropdown-divider my-1"></li>';
-        menuItems += '<li><a class="dropdown-item text-info py-1" href="' + escapeHtml(instComm.sms) + '"><i class="ri-message-3-line me-2"></i>SMS</a></li>';
-      }
-
-      let hasViewDivider = false;
-      if (scheduleUrl && scheduleUrl !== '#') {
-        if (menuItems) {
-          menuItems += '<li><hr class="dropdown-divider my-1"></li>';
-          hasViewDivider = true;
-        }
-        menuItems += '<li><a class="dropdown-item py-1" href="' + escapeHtml(scheduleUrl) + '" target="_blank"><i class="ri-file-list-3-line me-2"></i>View Schedule</a></li>';
-      }
-      if (inst.group_url && inst.group_url !== '#') {
-        if (!hasViewDivider && menuItems) menuItems += '<li><hr class="dropdown-divider my-1"></li>';
-        menuItems += '<li><a class="dropdown-item py-1" href="' + escapeHtml(inst.group_url) + '" target="_blank"><i class="ri-calendar-event-line me-2"></i>View Group Month</a></li>';
-      }
-
-      let actions = '';
-      if (!menuItems) {
-        actions = '<span class="text-muted">—</span>';
-      } else {
-        actions = '<div class="dropdown">' +
-          '<button type="button" class="btn btn-sm btn-icon btn-text-secondary rounded-pill" data-bs-toggle="dropdown" data-bs-boundary="viewport" aria-expanded="false" id="' + uid + '">' +
-          '<i class="icon-base ri ri-more-2-line icon-20px"></i></button>' +
-          '<ul class="dropdown-menu dropdown-menu-end shadow-sm" aria-labelledby="' + uid + '">' + menuItems + '</ul></div>';
-      }
-
-      html += '<tr>';
-      html += '<td class="fw-semibold">' + escapeHtml(inst.period_label || inst.label || '—') + '</td>';
-      html += '<td>' + escapeHtml(inst.due_date || '—') + '</td>';
-      html += '<td class="text-end">' + escapeHtml(inst.amount_formatted || money(inst.amount)) + '</td>';
-      html += '<td class="text-end ' + ((inst.penalty_formatted && inst.penalty_formatted !== '—') ? 'text-danger' : 'text-muted') + '">' + escapeHtml(inst.penalty_formatted || '—') + '</td>';
-      html += '<td class="text-end">' + escapeHtml(inst.paid_formatted || '—') + '</td>';
-      html += '<td class="text-end fw-semibold">' + escapeHtml(inst.balance_formatted || '—') + '</td>';
-      html += '<td class="text-center">' + (inst.status_badge || '') + '</td>';
-      html += '<td class="text-center">' + actions + '</td>';
-      html += '</tr>';
-    });
-    html += '</tbody></table></div>';
-    return html;
-  };
 
   const formatDetails = function (row) {
     let html = '<div class="client-collection-details">';
-    if (row.record_type === 'loan') {
-      const items = row.items || row.loan_items || [];
-      const isOpen = !!row.is_open_loan;
-      html += '<div class="d-flex justify-content-between align-items-center mb-2">';
-      html += '<h6 class="fw-semibold ' + (isOpen ? 'text-warning' : 'text-primary') + ' mb-0">';
-      html += '<i class="' + (isOpen ? 'ri-fire-line' : 'ri-bank-line') + ' me-1"></i>';
-      html += (isOpen ? 'Open Loan Cycle Repayments' : 'Loan EMI Repayments') + ' — ' + escapeHtml(row.account_number);
-      html += '</h6>';
-      if (isOpen) {
-        html += '<span class="badge bg-label-warning">Remaining Principal: ' + escapeHtml(row.principal_outstanding_formatted) + '</span>';
-      }
-      html += '</div>';
+    const items = row.items || row.loan_items || [];
+    const isOpen = !!row.is_open_loan;
+    html += '<div class="d-flex justify-content-between align-items-center mb-2">';
+    html += '<h6 class="fw-semibold ' + (isOpen ? 'text-warning' : 'text-primary') + ' mb-0">';
+    html += '<i class="' + (isOpen ? 'ri-fire-line' : 'ri-bank-line') + ' me-1"></i>';
+    html += (isOpen ? 'Open Loan Cycle Repayments' : 'Loan EMI Repayments') + ' — ' + escapeHtml(row.account_number);
+    html += '</h6>';
+    if (isOpen) {
+      html += '<span class="badge bg-label-warning">Remaining Principal: ' + escapeHtml(row.principal_outstanding_formatted) + '</span>';
+    }
+    html += '</div>';
 
-      const grouped = row.loan_items_grouped || {};
-      let hasGrouped = false;
-      statusSections.forEach(function (section) {
-        const secItems = grouped[section.key] || [];
-        if (secItems.length) {
-          hasGrouped = true;
-          html += '<div class="section-title text-' + section.color + '">' + section.label + ' (' + secItems.length + ')</div>';
-          html += renderLoanTable(secItems, row);
-        }
-      });
-      if (!hasGrouped) {
-        html += renderLoanTable(items, row);
+    const grouped = row.loan_items_grouped || {};
+    let hasGrouped = false;
+    statusSections.forEach(function (section) {
+      const secItems = grouped[section.key] || [];
+      if (secItems.length) {
+        hasGrouped = true;
+        html += '<div class="section-title text-' + section.color + '">' + section.label + ' (' + secItems.length + ')</div>';
+        html += renderLoanTable(secItems, row);
       }
-    } else {
-      const items = row.items || row.chit_items || [];
-      html += '<div class="d-flex justify-content-between align-items-center mb-2">';
-      html += '<h6 class="fw-semibold text-info mb-0"><i class="ri-group-line me-1"></i>Chit Installments — Group ' + escapeHtml(row.account_number) + ' (' + escapeHtml(row.member_number !== '—' ? 'Member #' + row.member_number : 'Seat') + ')</h6>';
-      html += '</div>';
-
-      const grouped = row.chit_items_grouped || {};
-      let hasGrouped = false;
-      statusSections.forEach(function (section) {
-        const secItems = grouped[section.key] || [];
-        if (secItems.length) {
-          hasGrouped = true;
-          html += '<div class="section-title text-' + section.color + '">' + section.label + ' (' + secItems.length + ')</div>';
-          html += renderChitTable(secItems, row);
-        }
-      });
-      if (!hasGrouped) {
-        html += renderChitTable(items, row);
-      }
+    });
+    if (!hasGrouped) {
+      html += renderLoanTable(items, row);
     }
     html += '</div>';
     return html;
@@ -528,11 +411,16 @@ document.addEventListener('DOMContentLoaded', function () {
           html += (row.account_badge || '');
           html += '<a href="' + escapeHtml(row.account_url || '#') + '" class="fw-semibold text-primary ms-1">' + escapeHtml(data || '—') + '</a>';
           html += '</div>';
+          if (row.reminder_date) {
+            const isToday = !!row.is_reminder_today;
+            const isOverdue = !!row.is_reminder_overdue;
+            const badgeColor = isToday ? 'bg-warning text-dark' : (isOverdue ? 'bg-danger text-white' : 'bg-label-warning');
+            const badgeIcon = isToday ? 'ri-alarm-warning-line' : 'ri-calendar-event-line';
+            html += '<div class="mt-1"><span class="badge ' + badgeColor + ' cursor-pointer btn-open-notes text-wrap text-start" data-type="' + escapeHtml(row.record_type) + '" data-id="' + escapeHtml(row.id) + '" data-account="' + escapeHtml(row.account_number) + '" data-client="' + escapeHtml(row.client_name) + '" title="' + escapeHtml(row.latest_note || 'Reminder set') + '"><i class="' + badgeIcon + ' me-1"></i>Reminder: ' + escapeHtml(row.reminder_date) + '</span></div>';
+          }
           if (row.is_open_loan) {
             html += '<small class="text-muted mt-1">Remaining Principal: <strong class="text-dark">' + escapeHtml(row.principal_outstanding_formatted || '—') + '</strong></small>';
-          } else if (row.record_type === 'chit' && row.member_number && row.member_number !== '—') {
-            html += '<small class="text-muted mt-1">Member #' + escapeHtml(String(row.member_number)) + '</small>';
-          }
+          
           html += '</div>';
           return html;
         }
@@ -607,6 +495,11 @@ document.addEventListener('DOMContentLoaded', function () {
             items += '<li><a class="dropdown-item" href="' + escapeHtml(row.public_url) + '" target="_blank"><i class="ri-external-link-line me-2"></i>View Public Link</a></li>';
           }
 
+          if (items) {
+            items += '<li><hr class="dropdown-divider"></li>';
+          }
+          items += '<li><a class="dropdown-item btn-open-notes text-secondary" href="javascript:void(0)" data-type="' + escapeHtml(row.record_type) + '" data-id="' + escapeHtml(row.id) + '" data-account="' + escapeHtml(row.account_number) + '" data-client="' + escapeHtml(row.client_name) + '"><i class="ri-calendar-event-line me-2 text-warning"></i>Notes & Reminder</a></li>';
+
           if (!items) {
             return '<span class="text-muted">—</span>';
           }
@@ -638,16 +531,31 @@ document.addEventListener('DOMContentLoaded', function () {
       '>'
   });
 
+  const openRowIds = new Set();
+
   $('#clientCollectionsTable tbody').on('click', 'td.details-control', function () {
     const tr = $(this).closest('tr');
     const row = table.row(tr);
+    const rowData = row.data();
     if (row.child.isShown()) {
       row.child.hide();
       tr.removeClass('shown');
+      if (rowData) openRowIds.delete(rowData.id);
       return;
     }
-    row.child(formatDetails(row.data())).show();
+    row.child(formatDetails(rowData)).show();
     tr.addClass('shown');
+    if (rowData) openRowIds.add(rowData.id);
+  });
+
+  table.on('draw', function () {
+    table.rows().every(function () {
+      const d = this.data();
+      if (d && openRowIds.has(d.id)) {
+        this.child(formatDetails(d)).show();
+        $(this.node()).addClass('shown');
+      }
+    });
   });
 
   // Checkbox Selection Logic
@@ -789,7 +697,7 @@ document.addEventListener('DOMContentLoaded', function () {
   // -------------------------------------------------------------------------
   // SINGLE PAY MODAL LOGIC
   // -------------------------------------------------------------------------
-  let activePayTarget = null; // { row, item, type: 'loan_open' | 'loan_emi' | 'loan_account' | 'chit_installment' | 'chit_account' }
+  let activePayTarget = null; // { row, item, type: 'loan_open' | 'loan_emi' | 'loan_account' }
 
   const rowFromElement = function (el) {
     const child = $(el).closest('tr.child');
@@ -829,7 +737,7 @@ document.addEventListener('DOMContentLoaded', function () {
     activePayTarget = {
       row: row,
       item: item || null,
-      type: isRowOpenLoan ? 'loan_open' : (row.record_type === 'loan' ? (item ? 'loan_emi' : 'loan_account') : (item ? 'chit_installment' : 'chit_account'))
+      type: isRowOpenLoan ? 'loan_open' : (item ? 'loan_emi' : 'loan_account')
     };
 
     $('#singlePayClientName').text(row.client_name + (row.client_nickname ? ' (@' + row.client_nickname + ')' : ''));
@@ -981,19 +889,6 @@ document.addEventListener('DOMContentLoaded', function () {
     openSinglePayModal(row, 'open_loan', emi);
   });
 
-  $(document).on('click', '.btn-sub-chit-pay', function (e) {
-    e.preventDefault();
-    const accountId = $(this).data('account-id');
-    const instId = $(this).data('inst-id');
-    const payType = $(this).data('pay-type') || 'full';
-    const row = getRowById(accountId) || getParentRowData(this);
-    if (!row) return;
-    const inst = (row.items || row.chit_items || []).find(function (it) {
-      return String(it.installment_id) === String(instId);
-    });
-    if (!inst) return;
-    openSinglePayModal(row, payType, inst);
-  });
 
   $('#clientPayForm').on('submit', function (e) {
     e.preventDefault();
@@ -1060,41 +955,7 @@ document.addEventListener('DOMContentLoaded', function () {
       payload.paid_amount = amount.toFixed(2);
       payload.loan_account_id = row.record_id;
       payload.emi_ids = row.payable_loan_ids || [];
-    } else if (targetType === 'chit_installment') {
-      const amount = parseFloat($('#singlePayAmount').val() || 0);
-      if (amount <= 0) {
-        if (window.Swal) Swal.fire({ icon: 'warning', title: 'Enter amount', text: 'Payment amount is required.' });
-        return;
-      }
-
-      payload.pay_type = $('input[name="single_pay_type"]:checked').val() || 'full';
-      payload.paid_amount = amount.toFixed(2);
-      payload.installment_id = item.installment_id;
-      payload.client_id = item.client_id || row.client_id;
-      payload.items = [{
-        installment_id: item.installment_id,
-        client_id: item.client_id || row.client_id,
-        amount: amount
-      }];
-    } else {
-      // chit_account
-      const amount = parseFloat($('#singlePayAmount').val() || 0);
-      if (amount <= 0) {
-        if (window.Swal) Swal.fire({ icon: 'warning', title: 'Enter amount', text: 'Payment amount is required.' });
-        return;
-      }
-
-      payload.pay_type = $('input[name="single_pay_type"]:checked').val() || 'full';
-      payload.paid_amount = amount.toFixed(2);
-      payload.items = (row.payable_chit_items || []).map(function (it) {
-        return {
-          installment_id: it.installment_id,
-          client_id: it.client_id,
-          amount: it.amount
-        };
-      });
-    }
-
+   
     const btn = $('#clientPaySubmit');
     btn.prop('disabled', true);
 
@@ -1301,6 +1162,265 @@ document.addEventListener('DOMContentLoaded', function () {
         if (window.Swal) Swal.fire({ icon: 'error', title: 'Error', text: 'Something went wrong.' });
       });
   });
+
+  // -------------------------------------------------------------------------
+  // NOTES & REMINDER MODAL LOGIC
+  // -------------------------------------------------------------------------
+  const renderNotesHistory = function (notes) {
+    $('#notesCountBadge').text(notes.length + ' Note' + (notes.length === 1 ? '' : 's'));
+    if (!notes.length) {
+      $('#notesHistoryList').html('<div class="text-center py-4 text-muted small"><i class="ri-chat-voice-line fs-3 d-block mb-1 opacity-50"></i>No previous notes recorded for this item.</div>');
+      return;
+    }
+
+    const statusBadgeMap = {
+      postponed: 'bg-label-warning',
+      promise_to_pay: 'bg-label-primary',
+      not_available: 'bg-label-danger',
+      visit_scheduled: 'bg-label-info',
+      dispute: 'bg-label-danger',
+      general: 'bg-label-secondary'
+    };
+
+    let html = '<div class="timeline px-1">';
+    notes.forEach(function (n) {
+      const badgeCls = statusBadgeMap[n.status] || 'bg-label-secondary';
+      const statusLabel = (n.status || 'Note').replace(/_/g, ' ').toUpperCase();
+      let reminderInfo = '';
+      if (n.reminder_date) {
+        const isToday = n.is_today;
+        const isOverdue = n.is_overdue;
+        const rColor = isToday ? 'badge bg-warning text-dark' : (isOverdue ? 'badge bg-danger text-white' : 'badge bg-label-warning');
+        reminderInfo = '<span class="' + rColor + ' ms-2"><i class="ri-calendar-event-line me-1"></i>Reminder: ' + escapeHtml(n.reminder_date_formatted || n.reminder_date) + '</span>';
+      }
+
+      html += '<div class="border rounded p-3 mb-2 bg-white shadow-none">';
+      html += '<div class="d-flex justify-content-between align-items-center mb-1 flex-wrap gap-1">';
+      html += '<div><span class="badge ' + badgeCls + ' me-1">' + escapeHtml(statusLabel) + '</span>' + reminderInfo + '</div>';
+      html += '<small class="text-muted">' + escapeHtml(n.created_at || '') + ' (' + escapeHtml(n.created_at_human || '') + ')</small>';
+      html += '</div>';
+      html += '<div class="text-dark my-2" style="white-space: pre-wrap; font-size: 0.9rem;">' + escapeHtml(n.note) + '</div>';
+      html += '<div class="small text-muted"><i class="ri-user-line me-1"></i>Added by: <strong>' + escapeHtml(n.created_by || 'Admin') + '</strong></div>';
+      html += '</div>';
+    });
+    html += '</div>';
+
+    $('#notesHistoryList').html(html);
+  };
+
+  $(document).on('click', '.btn-open-notes', function (e) {
+    e.preventDefault();
+    e.stopPropagation();
+
+    // Close any open dropdown menus so they don't block clicks or focus
+    $('.dropdown-menu.show').removeClass('show');
+    $('[data-bs-toggle="dropdown"][aria-expanded="true"]').attr('aria-expanded', 'false');
+
+    // Ensure save button is enabled and reset to original label
+    const btn = $('#btnSaveNote');
+    btn.prop('disabled', false).html('<i class="ri-save-line me-1"></i>Save Note & Reminder');
+
+    const type = $(this).data('type') || 'loan';
+    const rawId = String($(this).data('id') || '');
+    let emiId = $(this).data('emi-id');
+    let instId = $(this).data('installment-id');
+    let loanAccId = $(this).data('loan-account-id');
+    let memberId = $(this).data('group-member-id');
+    let clientId = $(this).data('client-id');
+
+    if (type === 'loan') {
+      if (!emiId && rawId) {
+        emiId = rawId.startsWith('loan_') ? rawId.replace('loan_', '') : rawId;
+      }
+    } else {
+      if (!instId && rawId) {
+        instId = rawId;
+      }
+    }
+
+    const label = $(this).data('label') || '';
+    const account = $(this).data('account') || '';
+    const client = $(this).data('client') || '';
+
+    // Set form hidden fields
+    $('#noteFieldType').val(type);
+    $('#noteFieldEmiId').val(emiId || '');
+    $('#noteFieldInstallmentId').val(instId || '');
+    $('#noteFieldLoanAccountId').val(loanAccId || '');
+    $('#noteFieldGroupMemberId').val(memberId || '');
+    $('#noteFieldClientId').val(clientId || '');
+
+    // Set header labels
+    $('#notesModalClientInfo').text((client || 'Client') + ' — ' + (account || 'Account'));
+    $('#notesEntityTypeBadge').text(type.toUpperCase()).removeClass('bg-label-primary bg-label-info').addClass(type === 'loan' ? 'bg-label-primary' : 'bg-label-info');
+    $('#notesEntityLabel').text(label || 'Loan Collection');
+    $('#notesEntityDueDate').text('—');
+    $('#notesEntityDueAmount').text('—');
+
+    const isDueZeroInit = $(this).data('due-zero') === '1' || $(this).data('due-zero') === 1;
+
+    // Reset input fields
+    $('#noteText').val('');
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const tomorrowStr = tomorrow.toISOString().split('T')[0];
+
+    if (isDueZeroInit) {
+      $('#notesDueZeroWarning').removeClass('d-none').addClass('d-flex');
+      $('#noteReminderDate').prop('disabled', true).val('');
+      $('#noteReminderDateHelp').html('<span class="text-danger"><i class="ri-forbid-line me-1"></i>Reminder cannot be scheduled because the due amount is ₹0.00.</span>');
+      $('#noteStatus').val('general');
+    } else {
+      $('#notesDueZeroWarning').addClass('d-none').removeClass('d-flex');
+      $('#noteReminderDate').prop('disabled', false).val(tomorrowStr);
+      $('#noteReminderDateHelp').html('<span class="text-muted">EMI will be highlighted for collection on this reminder date.</span>');
+      $('#noteStatus').val('postponed');
+    }
+
+    $('#notesHistoryList').html('<div class="text-center py-4"><div class="spinner-border spinner-border-sm text-primary" role="status"></div> Loading notes...</div>');
+    $('#notesCountBadge').text('Loading...');
+
+    const modalEl = document.getElementById('collectionNotesModal');
+    if (window.bootstrap && bootstrap.Modal) {
+      bootstrap.Modal.getOrCreateInstance(modalEl).show();
+    } else {
+      $(modalEl).modal('show');
+    }
+
+    $.ajax({
+      url: window.clientCollectionsNotesUrl,
+      type: 'GET',
+      data: {
+        type: type,
+        id: rawId,
+        emi_id: emiId,
+        installment_id: instId,
+        loan_account_id: loanAccId,
+        group_member_id: memberId,
+        client_id: clientId
+      },
+      success: function (res) {
+        if (!res.success) return;
+        const entity = res.entity || {};
+        if (entity.client_name) {
+          $('#notesModalClientInfo').text(entity.client_name + ' — ' + (entity.account_number || account));
+        }
+        if (entity.label) {
+          $('#notesEntityLabel').text(entity.label);
+        }
+        if (entity.due_date) {
+          $('#notesEntityDueDate').text(entity.due_date);
+        }
+        if (entity.amount_due !== undefined) {
+          $('#notesEntityDueAmount').text(money(entity.amount_due));
+        }
+
+        const amtDue = parseFloat(entity.amount_due !== undefined ? entity.amount_due : 0);
+        const isCleared = (amtDue <= 0.009) || !!entity.is_paid;
+        if (isCleared) {
+          $('#notesDueZeroWarning').removeClass('d-none').addClass('d-flex');
+          $('#noteReminderDate').prop('disabled', true).val('');
+          $('#noteReminderDateHelp').html('<span class="text-danger"><i class="ri-forbid-line me-1"></i>Reminder cannot be scheduled because the due amount is ₹0.00.</span>');
+          if ($('#noteStatus').val() === 'postponed') {
+            $('#noteStatus').val('general');
+          }
+        } else {
+          $('#notesDueZeroWarning').addClass('d-none').removeClass('d-flex');
+          $('#noteReminderDate').prop('disabled', false);
+          if (!$('#noteReminderDate').val()) {
+            $('#noteReminderDate').val(tomorrowStr);
+          }
+          $('#noteReminderDateHelp').html('<span class="text-muted">EMI will be highlighted for collection on this reminder date.</span>');
+        }
+
+        renderNotesHistory(res.notes || []);
+      },
+      error: function () {
+        $('#notesHistoryList').html('<div class="text-center py-4 text-danger small">Failed to load notes. Please try again.</div>');
+        $('#notesCountBadge').text('0 Notes');
+      }
+    });
+  });
+
+  $('#collectionNotesModal').on('hidden.bs.modal', function () {
+    $('.modal-backdrop').remove();
+    $('body').removeClass('modal-open').css({ overflow: '', paddingRight: '' });
+    $('#btnSaveNote').prop('disabled', false).html('<i class="ri-save-line me-1"></i>Save Note & Reminder');
+    $('#noteText').val('');
+  });
+
+  $('#collectionNotesForm').on('submit', function (e) {
+    e.preventDefault();
+    const btn = $('#btnSaveNote');
+    btn.prop('disabled', true).html('<span class="spinner-border spinner-border-sm me-1" role="status"></span>Saving...');
+
+    const isReminderDisabled = $('#noteReminderDate').is(':disabled') || $('#notesDueZeroWarning').is(':visible');
+    const reminderDateVal = isReminderDisabled ? null : ($('#noteReminderDate').val() || null);
+
+    const payload = {
+      _token: window.clientCollectionsCsrf,
+      type: $('#noteFieldType').val(),
+      emi_id: $('#noteFieldEmiId').val() || null,
+      installment_id: $('#noteFieldInstallmentId').val() || null,
+      loan_account_id: $('#noteFieldLoanAccountId').val() || null,
+      group_member_id: $('#noteFieldGroupMemberId').val() || null,
+      client_id: $('#noteFieldClientId').val() || null,
+      note: $('#noteText').val(),
+      reminder_date: reminderDateVal,
+      status: $('#noteStatus').val()
+    };
+
+    $.ajax({
+      url: window.clientCollectionsSaveNoteUrl,
+      type: 'POST',
+      data: payload,
+      success: function (res) {
+        btn.prop('disabled', false).html('<i class="ri-save-line me-1"></i>Save Note & Reminder');
+        if (res.success) {
+          // Hide modal immediately so user can continue without stuck backdrop
+          const modalEl = document.getElementById('collectionNotesModal');
+          if (window.bootstrap && bootstrap.Modal) {
+            bootstrap.Modal.getOrCreateInstance(modalEl).hide();
+          } else {
+            $(modalEl).modal('hide');
+          }
+
+          $('.modal-backdrop').remove();
+          $('body').removeClass('modal-open').css({ overflow: '', paddingRight: '' });
+
+          if (window.Swal) {
+            Swal.fire({
+              icon: 'success',
+              title: 'Saved',
+              text: res.message || 'Note & reminder saved successfully.',
+              timer: 1600,
+              showConfirmButton: false,
+              toast: true,
+              position: 'top-end'
+            });
+          }
+          $('#noteText').val('');
+
+          // Reload collections table via AJAX — expanded rows will automatically stay open via openRowIds!
+          table.ajax.reload(null, false);
+        } else {
+          if (window.Swal) {
+            Swal.fire({ icon: 'error', title: 'Error', text: res.message || 'Failed to save note.' });
+          }
+        }
+      },
+      error: function (xhr) {
+        btn.prop('disabled', false).html('<i class="ri-save-line me-1"></i>Save Note & Reminder');
+        let errMsg = 'Failed to save note.';
+        if (xhr.responseJSON && xhr.responseJSON.message) {
+          errMsg = xhr.responseJSON.message;
+        }
+        if (window.Swal) {
+          Swal.fire({ icon: 'error', title: 'Error', text: errMsg });
+        }
+      }
+    });
+  });
 });
 </script>
 @endsection
@@ -1313,9 +1433,6 @@ document.addEventListener('DOMContentLoaded', function () {
   <li class="nav-item">
     <button type="button" class="nav-link" data-module="loan"><i class="ri-bank-line me-1"></i> Loan EMI</button>
   </li>
-  <li class="nav-item">
-    <button type="button" class="nav-link" data-module="chit"><i class="ri-group-line me-1"></i> Chit Installment</button>
-  </li>
 </ul>
 
 <div class="row g-4 mb-4">
@@ -1326,7 +1443,7 @@ document.addEventListener('DOMContentLoaded', function () {
           <div class="content-left">
             <p class="mb-1">Total</p>
             <h4 class="mb-0" id="stat-total">0</h4>
-            <small class="text-muted">EMI &amp; chit accounts</small>
+            <small class="text-muted">Loan accounts</small>
           </div>
           <div class="avatar">
             <span class="avatar-initial rounded bg-label-primary">
@@ -1485,7 +1602,7 @@ document.addEventListener('DOMContentLoaded', function () {
     </div>
 
     <div class="px-4 pt-3 pb-1 text-muted small">
-      Accounts are displayed separately per client (Loan accounts & Chit group seats). Expand a row to view specific EMIs or installments.
+      Accounts are displayed separately per client (Loan accounts). Expand a row to view specific EMIs.
     </div>
     <table class="datatables-client-collections table table-hover" id="clientCollectionsTable">
       <thead>
@@ -1523,7 +1640,7 @@ document.addEventListener('DOMContentLoaded', function () {
         <div class="alert alert-light border mb-3 d-flex align-items-center justify-content-between">
           <div>
             <small class="text-muted d-block">Account</small>
-            <div id="singlePayAccountTitle" class="fw-semibold text-primary">Loan / Chit</div>
+            <div id="singlePayAccountTitle" class="fw-semibold text-primary">Loan Account</div>
           </div>
         </div>
 
@@ -1579,7 +1696,7 @@ document.addEventListener('DOMContentLoaded', function () {
           </div>
         </div>
 
-        <!-- Section for Standard Loans & Chits -->
+        <!-- Section for Standard Loans -->
         <div id="singlePayStandardSection">
           <div class="row g-3 mb-3">
             <div class="col-md-6">
@@ -1660,7 +1777,7 @@ document.addEventListener('DOMContentLoaded', function () {
       <div class="modal-header">
         <div>
           <h5 class="modal-title mb-0">Bulk Payment Collection</h5>
-          <small class="text-muted">Collect payment for multiple loan and chit accounts in one batch</small>
+          <small class="text-muted">Collect payment for multiple loan accounts in one batch</small>
         </div>
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
       </div>
@@ -1729,6 +1846,107 @@ document.addEventListener('DOMContentLoaded', function () {
         <button type="submit" class="btn btn-success" id="bulkPaySubmit">Confirm Bulk Payment</button>
       </div>
     </form>
+  </div>
+</div>
+
+<!-- NOTES & REMINDER MODAL -->
+<div class="modal fade" id="collectionNotesModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-lg">
+    <div class="modal-content">
+      <div class="modal-header border-bottom">
+        <div>
+          <h5 class="modal-title mb-0 d-flex align-items-center gap-2">
+            <i class="ri-sticky-note-line text-warning fs-4"></i>
+            <span>Collection Notes &amp; Reminder</span>
+          </h5>
+          <small class="text-muted" id="notesModalClientInfo">Client — Account</small>
+        </div>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body p-4">
+        <!-- Entity Info Card -->
+        <div class="alert alert-light border mb-4 py-2 px-3 d-flex justify-content-between align-items-center flex-wrap gap-2">
+          <div>
+            <span class="badge bg-label-primary text-uppercase me-1" id="notesEntityTypeBadge">Loan</span>
+            <span class="fw-semibold text-dark" id="notesEntityLabel">—</span>
+          </div>
+          <div class="d-flex align-items-center gap-3">
+            <div><small class="text-muted">Due Date:</small> <strong id="notesEntityDueDate" class="text-dark">—</strong></div>
+            <div><small class="text-muted">Due Amount:</small> <strong id="notesEntityDueAmount" class="text-danger">₹0.00</strong></div>
+          </div>
+        </div>
+
+        <!-- Zero Due Warning Notice -->
+        <div id="notesDueZeroWarning" class="alert alert-warning py-2 px-3 mb-3 d-none align-items-center gap-2">
+          <i class="ri-alert-line fs-5 text-warning"></i>
+          <div>
+            <strong>Due amount is ₹0.00.</strong> Reminders cannot be scheduled for completed/cleared dues.
+          </div>
+        </div>
+
+        <!-- Add New Note Form -->
+        <form id="collectionNotesForm" class="border rounded p-3 mb-4 bg-light">
+          <input type="hidden" id="noteFieldType" name="type" value="loan">
+          <input type="hidden" id="noteFieldEmiId" name="emi_id" value="">
+          <input type="hidden" id="noteFieldInstallmentId" name="installment_id" value="">
+          <input type="hidden" id="noteFieldLoanAccountId" name="loan_account_id" value="">
+          <input type="hidden" id="noteFieldGroupMemberId" name="group_member_id" value="">
+          <input type="hidden" id="noteFieldClientId" name="client_id" value="">
+
+          <div class="fw-semibold mb-2 text-primary d-flex align-items-center gap-1">
+            <i class="ri-add-circle-line"></i> Add Collection Note / Postpone Reminder
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label fw-semibold" for="noteText">Note / Remark <span class="text-danger">*</span></label>
+            <textarea id="noteText" name="note" class="form-control" rows="2" placeholder="e.g. Client not available at shop, asked to collect tomorrow / postponed payment" required></textarea>
+          </div>
+
+          <div class="row g-3 mb-3">
+            <div class="col-md-6">
+              <label class="form-label fw-semibold" for="noteReminderDate">
+                <i class="ri-calendar-event-line text-warning me-1"></i>Reminder Follow-up Date
+              </label>
+              <input type="date" id="noteReminderDate" name="reminder_date" class="form-control" min="{{ date('Y-m-d') }}">
+              <small class="text-muted" id="noteReminderDateHelp">EMI will be highlighted for collection on this reminder date.</small>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label fw-semibold" for="noteStatus">
+                <i class="ri-flag-line text-info me-1"></i>Follow-up Status
+              </label>
+              <select id="noteStatus" name="status" class="form-select">
+                <option value="postponed" selected>Postponed (Not Available / Asked Later)</option>
+                <option value="promise_to_pay">Promise to Pay (PTP)</option>
+                <option value="not_available">Client Not Available</option>
+                <option value="visit_scheduled">Visit Scheduled</option>
+                <option value="dispute">Payment Dispute</option>
+                <option value="general">General Note</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="d-flex justify-content-end">
+            <button type="submit" class="btn btn-primary btn-sm px-3" id="btnSaveNote">
+              <i class="ri-save-line me-1"></i>Save Note &amp; Reminder
+            </button>
+          </div>
+        </form>
+
+        <!-- Notes History Section -->
+        <div>
+          <h6 class="fw-semibold text-secondary d-flex align-items-center justify-content-between mb-3">
+            <span><i class="ri-history-line me-1"></i>Notes &amp; Follow-up History</span>
+            <span class="badge bg-label-secondary" id="notesCountBadge">0 Notes</span>
+          </h6>
+          <div id="notesHistoryList" style="max-height: 280px; overflow-y: auto;">
+            <div class="text-center py-4 text-muted small">No previous notes recorded.</div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Close</button>
+      </div>
+    </div>
   </div>
 </div>
 @endsection

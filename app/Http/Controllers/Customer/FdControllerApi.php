@@ -258,7 +258,7 @@ class FdControllerApi extends Controller
             $query->where(function ($q) {
                 $q->whereIn('status', ['matured', 'closed', 'premature_closed', 'renewed'])
                   ->orWhereHas('transactions', function ($tq) {
-                      $tq->whereIn('transaction_type', ['closure', 'premature_closure', 'maturity', 'renewal', 'chit_adjustment']);
+                      $tq->whereIn('transaction_type', ['closure', 'premature_closure', 'maturity', 'renewal']);
                   });
             });
         }

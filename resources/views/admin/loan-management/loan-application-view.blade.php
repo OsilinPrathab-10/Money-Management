@@ -313,7 +313,10 @@ if (in_array($displayUnitVal, ['week', 'weeks', 'weekly'], true)) {
         <div class="col-md-3 col-6">
           <small class="text-muted text-uppercase d-block mb-1">Interest Rate</small>
           <h6 class="mb-0">
-            @if($interestRate === 0.0 && ($application->loan_mode ?? 'emi') !== 'interest_only')
+            @if($application->isManualInterest())
+              ₹{{ number_format((float) $application->manual_interest_amount, 2) }} / cycle
+              <span class="badge bg-label-warning ms-1">Manual</span>
+            @elseif($interestRate === 0.0 && ($application->loan_mode ?? 'emi') !== 'interest_only')
               <span class="badge bg-label-success">Free Loan · 0%</span>
             @else
               {{ optional($application->product)->interest_rate ?? 0 }}% p.a.
@@ -327,7 +330,9 @@ if (in_array($displayUnitVal, ['week', 'weeks', 'weekly'], true)) {
         <div class="col-md-3 col-6">
           <small class="text-muted text-uppercase d-block mb-1">Tenure</small>
           <h6 class="mb-0">
-            @if(($application->loan_mode ?? 'emi') === 'interest_only')
+            @if(($application->loan_mode ?? 'emi') === 'interest_only' && (int) $application->tenure > 0)
+              {{ $application->tenure }} {{ $displayUnit }} <span class="text-secondary small">(Open Loan)</span>
+            @elseif(($application->loan_mode ?? 'emi') === 'interest_only')
               <span class="text-secondary">Flexible (Interest-Only)</span>
             @else
               {{ $application->tenure ?? ($application->tenure_max ?? 'N/A') }} {{ $displayUnit }}
@@ -446,6 +451,7 @@ if (in_array($displayUnitVal, ['week', 'weeks', 'weekly'], true)) {
                  data-is-kandhuvatti="{{ $isKandhuvatti ? '1' : '0' }}"
                  data-orig-amount="{{ $application->loan_amount }}"
                  data-orig-rate="{{ $application->interest_rate ?? (optional($application->product)->interest_rate ?? 0) }}"
+                 data-orig-manual-interest="{{ (float) ($application->manual_interest_amount ?? 0) }}"
                  data-orig-tenure="{{ $application->tenure ?? ($application->tenure_max ?? (optional($application->product)->min_tenture ?? 12)) }}"
                  data-orig-emi-day="{{ $application->emi_day ?? 1 }}"
                  data-orig-emi-start="{{ $defaultStart }}">
@@ -459,6 +465,19 @@ if (in_array($displayUnitVal, ['week', 'weeks', 'weekly'], true)) {
                         <input type="number" class="form-control bg-light disbursal-term-field" id="input_approved_amount" name="approved_amount" value="{{ $application->loan_amount }}" readonly required min="1" max="{{ optional($application->product)->loan_amount_max ?? 9999999 }}">
                     </div>
                 </div>
+                @if($application->isManualInterest())
+                <div class="mb-4">
+                    <div class="d-flex justify-content-between align-items-center mb-1">
+                        <label class="form-label fw-bold mb-0">Interest Amount per Cycle (₹) <span class="text-danger">*</span></label>
+                        <span class="badge bg-label-warning">Manual Interest</span>
+                    </div>
+                    <div class="input-group input-group-lg">
+                        <span class="input-group-text">₹</span>
+                        <input type="number" step="0.01" name="manual_interest_amount" id="input_manual_interest_amount" class="form-control bg-light disbursal-term-field" value="{{ (float) $application->manual_interest_amount }}" readonly required min="0.01">
+                    </div>
+                    <input type="hidden" name="interest_rate" id="input_interest_rate" value="{{ $application->interest_rate }}">
+                </div>
+                @else
                 <div class="mb-4">
                     <div class="d-flex justify-content-between align-items-center mb-1">
                         <label class="form-label fw-bold mb-0">Interest Rate (%) <span class="text-danger">*</span></label>
@@ -466,6 +485,7 @@ if (in_array($displayUnitVal, ['week', 'weeks', 'weekly'], true)) {
                     </div>
                     <input type="number" step="0.01" name="interest_rate" id="input_interest_rate" class="form-control form-control-lg bg-light disbursal-term-field" value="{{ $application->interest_rate ?? (optional($application->product)->interest_rate ?? 0) }}" readonly required min="0" max="100">
                 </div>
+                @endif
                 <div class="row g-3 mb-4">
                     <div class="col-6">
                         <label class="form-label fw-semibold">Tenure ({{ $displayUnit }}) <span class="text-danger">*</span></label>
@@ -521,7 +541,7 @@ if (in_array($displayUnitVal, ['week', 'weeks', 'weekly'], true)) {
                     <h6 class="text-uppercase fw-bold text-muted mb-3 small"><i class="ri-calculator-line me-1"></i> Payout Preview</h6>
                     @if($isKandhuvatti)
                       <div class="d-flex justify-content-between mb-2">
-                          <span class="text-muted small">Interest / Cycle (<span id="preview-rate-label">{{ $application->interest_rate }}</span>%):</span>
+                          <span class="text-muted small">Interest / Cycle (<span id="preview-rate-label">{{ round((float) $application->interest_rate, 2) }}</span>%):</span>
                           <span class="fw-bold text-warning small" id="preview-interest-cycle">₹{{ number_format(($application->loan_amount * $application->interest_rate / 100), 2) }}</span>
                       </div>
                       <div class="d-flex justify-content-between mb-2">
@@ -1267,6 +1287,7 @@ if (in_array($displayUnitVal, ['week', 'weeks', 'weekly'], true)) {
         const iconEditTerms = document.getElementById('iconEditTerms');
         const inputApprovedAmount = document.getElementById('input_approved_amount');
         const inputInterestRate = document.getElementById('input_interest_rate');
+        const inputManualInterest = document.getElementById('input_manual_interest_amount');
         const inputTenure = document.getElementById('input_tenure');
         const inputEmiDay = document.getElementById('input_emi_day');
         const selectWeeklyEmiDay = document.getElementById('select_weekly_emi_day');
@@ -1281,6 +1302,10 @@ if (in_array($displayUnitVal, ['week', 'weeks', 'weekly'], true)) {
             if (!disbursalTermsCard) return;
 
             const principal = parseFloat(inputApprovedAmount ? inputApprovedAmount.value : 0) || 0;
+            if (inputManualInterest && inputInterestRate) {
+                const manualInterest = parseFloat(inputManualInterest.value) || 0;
+                inputInterestRate.value = principal > 0 ? ((manualInterest / principal) * 100).toFixed(6) : 0;
+            }
             const rate = parseFloat(inputInterestRate ? inputInterestRate.value : 0) || 0;
             const tenure = parseInt(inputTenure ? inputTenure.value : 0, 10) || 0;
             const totalCharges = parseFloat(disbursalTermsCard.dataset.totalCharges || 0) || 0;
@@ -1293,7 +1318,9 @@ if (in_array($displayUnitVal, ['week', 'weeks', 'weekly'], true)) {
             if (netPayoutEl) netPayoutEl.textContent = '₹' + formatInr(netPayout);
 
             if (isKandhuvatti) {
-                const interestCycle = (principal * rate) / 100;
+                const interestCycle = inputManualInterest
+                    ? (parseFloat(inputManualInterest.value) || 0)
+                    : (principal * rate) / 100;
                 const cycleEl = document.getElementById('preview-interest-cycle');
                 const rateLabelEl = document.getElementById('preview-rate-label');
                 if (cycleEl) cycleEl.textContent = '₹' + formatInr(interestCycle);
@@ -1381,6 +1408,7 @@ if (in_array($displayUnitVal, ['week', 'weeks', 'weekly'], true)) {
                 if (!disbursalTermsCard) return;
                 if (inputApprovedAmount) inputApprovedAmount.value = disbursalTermsCard.dataset.origAmount || '';
                 if (inputInterestRate) inputInterestRate.value = disbursalTermsCard.dataset.origRate || '';
+                if (inputManualInterest) inputManualInterest.value = disbursalTermsCard.dataset.origManualInterest || '';
                 if (inputTenure) inputTenure.value = disbursalTermsCard.dataset.origTenure || '';
                 if (inputEmiDay) inputEmiDay.value = disbursalTermsCard.dataset.origEmiDay || '';
                 if (selectWeeklyEmiDay) selectWeeklyEmiDay.value = disbursalTermsCard.dataset.origEmiDay || '1';
@@ -1404,7 +1432,7 @@ if (in_array($displayUnitVal, ['week', 'weeks', 'weekly'], true)) {
             });
         }
 
-        [inputApprovedAmount, inputInterestRate, inputTenure].forEach(input => {
+        [inputApprovedAmount, inputInterestRate, inputManualInterest, inputTenure].forEach(input => {
             if (input) {
                 input.addEventListener('input', recalculatePayoutPreview);
                 input.addEventListener('change', recalculatePayoutPreview);

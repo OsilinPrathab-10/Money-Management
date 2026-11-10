@@ -606,8 +606,22 @@ document.addEventListener('DOMContentLoaded', function() {
 
 <!-- Loan Summary Card -->
 <div class="card mb-6">
-  <div class="card-header">
+  <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
     <h5 class="mb-0">Loan Summary</h5>
+    <div class="d-flex align-items-center gap-2">
+      @if(strtolower((string)$loanAccount->status) === 'active' && !(bool)$loanAccount->is_foreclosed)
+      <button type="button" class="btn btn-sm btn-success d-inline-flex align-items-center gap-1 shadow-sm"
+              data-bs-toggle="modal" data-bs-target="#topupLoanModal">
+        <i class="ri-add-circle-line fs-5"></i>
+        <span class="fw-semibold">Top-Up Loan</span>
+      </button>
+      @endif
+      @if(($loanAccount->topup_amount ?? 0) > 0)
+      <span class="badge bg-label-success" title="Total Top-Up Amount Added">
+        <i class="ri-arrow-up-circle-line me-1"></i>Top-Up: ₹{{ number_format($loanAccount->topup_amount, 2) }}
+      </span>
+      @endif
+    </div>
   </div>
   <div class="card-body">
     <div class="row g-4">  
@@ -1911,5 +1925,9 @@ document.addEventListener('DOMContentLoaded', function() {
   </div>
 </div>
 @endif
+
+<!-- Top-Up Loan Modal -->
+@include('admin.clients.modals.modal-topup-loan')
+
 @endsection
  

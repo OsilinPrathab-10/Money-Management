@@ -44,6 +44,14 @@ class WebsiteSetupController extends Controller
             ]
         );
 
+        foreach (['footer_text', 'footer_link_text', 'footer_link_url', 'footer_custom_note'] as $footerKey) {
+            if (empty($companyDetail->$footerKey) && !empty($appearance->$footerKey)) {
+                $companyDetail->$footerKey = $appearance->$footerKey;
+            } elseif (!empty($companyDetail->$footerKey) && empty($appearance->$footerKey)) {
+                $appearance->$footerKey = $companyDetail->$footerKey;
+            }
+        }
+
         return view('admin.website-setup.homepage', compact('appearance', 'companyDetail'));
     }
 
@@ -80,6 +88,10 @@ class WebsiteSetupController extends Controller
             'agent_contact_email' => 'nullable|email|max:255',
             'agent_contact_mobile' => 'nullable|string|digits:10',
             'working_hours' => 'nullable|string|max:255',
+            'footer_text' => 'nullable|string|max:1000',
+            'footer_link_text' => 'nullable|string|max:255',
+            'footer_link_url' => 'nullable|string|max:255',
+            'footer_custom_note' => 'nullable|string|max:255',
             // India-specific tax/company IDs
             'gst_number' => [
                 'nullable',
@@ -131,9 +143,13 @@ class WebsiteSetupController extends Controller
             $appearanceData['favicon'] = $request->file('favicon')->store('admin/logos', 'public');
         }
 
-        // Save title and subtitle to appearance table (from company name/slogan)
+        // Save title, subtitle and footer fields to appearance table
         $appearanceData['title'] = $request->company_name;
         $appearanceData['subtitle'] = $request->company_slogan;
+        $appearanceData['footer_text'] = $request->footer_text ?? '';
+        $appearanceData['footer_link_text'] = $request->footer_link_text ?? '';
+        $appearanceData['footer_link_url'] = $request->footer_link_url ?? '';
+        $appearanceData['footer_custom_note'] = $request->footer_custom_note ?? '';
 
         $appearance->update($appearanceData);
 
@@ -143,6 +159,10 @@ class WebsiteSetupController extends Controller
         $companyData = [
             'company_name' => $request->company_name,
             'company_slogan' => $request->company_slogan,
+            'footer_text' => $request->footer_text,
+            'footer_link_text' => $request->footer_link_text,
+            'footer_link_url' => $request->footer_link_url,
+            'footer_custom_note' => $request->footer_custom_note,
             'company_email' => $request->company_email,
             'company_mobile' => $request->company_mobile,
             'alternate_mobile' => $request->alternate_mobile,
@@ -172,7 +192,10 @@ class WebsiteSetupController extends Controller
             $companyData['logo_path'] = $logoPath;
         }
 
-        $companyDetail->update($companyData); 
+        $companyDetail->update($companyData);
+
+        // Sync with appearance helper and clear cache
+        AppearanceHelper::set('footer_text', $request->footer_text ?? '');
         SettingsHelper::clearCache();
 
         return redirect()->route('website-homepage')->with('success', 'Company details updated successfully!');

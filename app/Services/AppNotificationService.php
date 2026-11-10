@@ -9,10 +9,7 @@ use App\Models\Client;
 use App\Models\CustomerNotification;
 use App\Models\Emi;
 use App\Models\FixedDepositApplication;
-use App\Models\GroupMember;
-use App\Models\Installment;
 use App\Models\LoanApplication;
-use App\Models\Payout;
 use App\Models\SupportTicket;
 use App\Models\SupportTicketReply;
 use App\Models\User;
@@ -101,38 +98,6 @@ class AppNotificationService
         ]);
     }
 
-    public function newChitApplication(GroupMember $member, string $source = 'admin'): void
-    {
-        $member->loadMissing('client', 'group.scheme');
-        $client = $member->client;
-        $name = $this->clientName($client);
-        $group = $member->group?->group_code ?? ('Group #' . $member->group_id);
-        $label = self::sourceLabel($source);
-
-        $this->notifyAll($client, [
-            'type' => 'new_chit_application',
-            'title' => 'New Chit Application',
-            'admin_message' => "{$name} applied for chit group {$group} from the {$label}.",
-            'customer_title' => 'Chit Application Submitted',
-            'customer_message' => "Your chit application for group {$group} has been submitted and is pending approval.",
-            'agent_title' => 'Client Chit Application',
-            'agent_message' => "{$name} applied for chit group {$group} via the {$label}.",
-            'link' => $this->safeRoute('chit.applications.show', $member),
-            'icon' => 'ri-group-line',
-            'related_id' => $member->id,
-            'unique' => true,
-            'fcm_type' => 'chit_application',
-            'data' => [
-                'screen' => 'chit_application',
-                'member_id' => (string) $member->id,
-                'group_id' => (string) $member->group_id,
-                'client_id' => (string) ($client->id ?? ''),
-                'customer_name' => $name,
-                'source' => $source,
-            ],
-            'extra_agent_ids' => array_filter([(int) ($member->referred_by_agent_id ?? 0)]),
-        ]);
-    }
 
     public function newFdApplication(FixedDepositApplication $application, string $source = 'admin'): void
     {
@@ -160,36 +125,6 @@ class AppNotificationService
                 'screen' => 'fd_application',
                 'application_id' => (string) $application->id,
                 'application_number' => (string) ($application->application_number ?? ''),
-                'source' => $source,
-            ],
-        ]);
-    }
-
-    public function newSettlementApplication(Payout $payout, string $source = 'admin'): void
-    {
-        $payout->loadMissing('winner.client', 'group');
-        $client = $payout->winner?->client;
-        $name = $this->clientName($client);
-        $group = $payout->group?->group_code ?? ('Group #' . $payout->group_id);
-        $amount = $this->money($payout->payout_amount);
-        $label = self::sourceLabel($source);
-
-        $this->notifyAll($client, [
-            'type' => 'new_settlement_application',
-            'title' => 'New Chit Settlement Application',
-            'admin_message' => "{$name} applied for chit settlement in {$group} ({$amount}) from the {$label}.",
-            'customer_title' => 'Settlement Application Submitted',
-            'customer_message' => "Your chit settlement application for {$group} ({$amount}) has been submitted.",
-            'agent_title' => 'Client Settlement Application',
-            'agent_message' => "{$name} applied for settlement in {$group} ({$amount}) via the {$label}.",
-            'link' => $this->safeRoute('chit.settlement-applications.show', $payout),
-            'icon' => 'ri-hand-coin-line',
-            'related_id' => $payout->id,
-            'unique' => true,
-            'fcm_type' => 'chit_settlement_application',
-            'data' => [
-                'screen' => 'chit_settlement',
-                'payout_id' => (string) $payout->id,
                 'source' => $source,
             ],
         ]);
@@ -270,63 +205,6 @@ class AppNotificationService
         ]);
     }
 
-    public function chitApproved(GroupMember $member): void
-    {
-        $member->loadMissing('client', 'group');
-        $client = $member->client;
-        $group = $member->group?->group_code ?? ('Group #' . $member->group_id);
-
-        $this->notifyAll($client, [
-            'type' => 'chit_application_approved',
-            'title' => 'Chit Application Approved',
-            'admin_message' => "{$this->clientName($client)} chit application for {$group} was approved.",
-            'customer_title' => 'Chit Application Approved',
-            'customer_message' => "Your chit application for group {$group} was approved.",
-            'agent_title' => 'Client Chit Approved',
-            'agent_message' => "{$this->clientName($client)} chit application for {$group} was approved.",
-            'link' => $this->safeRoute('chit.applications.show', $member),
-            'icon' => 'ri-checkbox-circle-line',
-            'related_id' => $member->id,
-            'unique' => true,
-            'fcm_type' => 'chit_approved',
-            'data' => [
-                'screen' => 'chit_application',
-                'member_id' => (string) $member->id,
-                'client_id' => (string) ($client->id ?? ''),
-                'customer_name' => $this->clientName($client),
-            ],
-            'extra_agent_ids' => array_filter([(int) ($member->referred_by_agent_id ?? 0)]),
-        ]);
-    }
-
-    public function chitRejected(GroupMember $member): void
-    {
-        $member->loadMissing('client', 'group');
-        $client = $member->client;
-        $group = $member->group?->group_code ?? ('Group #' . $member->group_id);
-
-        $this->notifyAll($client, [
-            'type' => 'chit_application_rejected',
-            'title' => 'Chit Application Rejected',
-            'admin_message' => "{$this->clientName($client)} chit application for {$group} was rejected.",
-            'customer_title' => 'Chit Application Rejected',
-            'customer_message' => "Your chit application for group {$group} was rejected.",
-            'agent_title' => 'Client Chit Rejected',
-            'agent_message' => "{$this->clientName($client)} chit application for {$group} was rejected.",
-            'link' => $this->safeRoute('chit.applications.show', $member),
-            'icon' => 'ri-close-circle-line',
-            'related_id' => $member->id,
-            'unique' => true,
-            'fcm_type' => 'chit_rejected',
-            'data' => [
-                'screen' => 'chit_application',
-                'member_id' => (string) $member->id,
-                'client_id' => (string) ($client->id ?? ''),
-                'customer_name' => $this->clientName($client),
-            ],
-            'extra_agent_ids' => array_filter([(int) ($member->referred_by_agent_id ?? 0)]),
-        ]);
-    }
 
     public function fdApproved(FixedDepositApplication $application): void
     {
@@ -556,184 +434,6 @@ class AppNotificationService
         return (count($nums) === 1 ? 'EMI ' : 'EMIs ') . implode(', ', $ranges);
     }
 
-    public function chitInstallmentCollected(Installment $installment, float $amount, ?Client $client = null, string $source = 'admin', ?Agent $collectingAgent = null, bool $verified = false): void
-    {
-        $installment->loadMissing('member.client', 'group');
-        $client = $client ?: $installment->member?->client;
-        $name = $this->clientName($client);
-        $group = $installment->group?->group_code ?? ('Group #' . $installment->group_id);
-        $money = $this->money($amount);
-        $label = self::sourceLabel($source);
-        $agentTitle = $verified ? 'Chit Payment Verified' : 'Chit Installment Collected';
-        $agentMessage = $verified
-            ? "{$money} verified for {$name} ({$group} month {$installment->month_number})."
-            : "{$money} collected from {$name} for {$group} month {$installment->month_number}.";
-
-        $this->notifyAll($client, [
-            'type' => 'chit_installment_collected',
-            'title' => $verified ? 'Chit Payment Verified' : 'Chit Installment Collected',
-            'admin_message' => $verified
-                ? "{$money} verified from {$name} for {$group} month {$installment->month_number}."
-                : "{$money} collected from {$name} for {$group} month {$installment->month_number} via the {$label}.",
-            'customer_title' => 'Chit Installment Received',
-            'customer_message' => "We received your chit installment of {$money} for {$group} (month {$installment->month_number}).",
-            'agent_title' => $agentTitle,
-            'agent_message' => $agentMessage,
-            'link' => $this->safeRoute('chit.installments.index'),
-            'icon' => 'ri-money-rupee-circle-line',
-            'related_id' => $installment->id,
-            'unique' => false,
-            'fcm_type' => 'chit_installment',
-            'data' => [
-                'screen' => 'chit_installment',
-                'installment_id' => (string) $installment->id,
-                'amount' => (string) $amount,
-                'source' => $source,
-            ],
-        ]);
-
-        if ($collectingAgent && $client && (int) $client->assigned_to !== (int) $collectingAgent->id) {
-            $this->notifyAgent(
-                $collectingAgent,
-                $agentTitle,
-                $agentMessage,
-                'chit_installment',
-                [
-                    'screen' => 'chit_installment',
-                    'installment_id' => (string) $installment->id,
-                    'amount' => (string) $amount,
-                ],
-                $installment->id
-            );
-        }
-    }
-
-    /**
-     * One customer + agent + admin notification for a bulk (or single) chit collection verify.
-     *
-     * @param  \Illuminate\Support\Collection<int, Installment>  $installments
-     */
-    public function chitBulkCollected($installments, float $amount, ?Agent $collectingAgent = null, string $source = 'admin'): void
-    {
-        $installments = collect($installments)->filter()->values();
-        $first = $installments->first();
-        if (! $first) {
-            return;
-        }
-
-        if ($installments->count() === 1) {
-            $this->chitInstallmentCollected($first, $amount, $first->member?->client, $source, $collectingAgent, true);
-
-            return;
-        }
-
-        $first->loadMissing('member.client', 'group');
-        $client = $first->member?->client;
-        $name = $this->clientName($client);
-        $group = $first->group?->group_code ?? ('Group #' . $first->group_id);
-        $money = $this->money($amount);
-        $monthLabel = $this->formatChitMonthList($installments);
-        $count = $installments->count();
-        $label = self::sourceLabel($source);
-
-        $this->notifyAll($client, [
-            'type' => 'chit_installment_collected',
-            'title' => 'Chit Payment Verified',
-            'admin_message' => "{$money} received from {$name} for {$group} {$monthLabel} ({$count} installments) via the {$label}.",
-            'customer_title' => 'Chit Installment Received',
-            'customer_message' => "We received your payment of {$money} for {$group} ({$monthLabel}).",
-            'agent_title' => 'Chit Payment Verified',
-            'agent_message' => "{$money} verified for {$name} ({$group} {$monthLabel}).",
-            'link' => $this->safeRoute('chit.installments.index'),
-            'icon' => 'ri-money-rupee-circle-line',
-            'related_id' => $first->id,
-            'unique' => false,
-            'fcm_type' => 'chit_installment',
-            'data' => [
-                'screen' => 'chit_installment',
-                'installment_id' => (string) $first->id,
-                'amount' => (string) $amount,
-                'installment_count' => (string) $count,
-                'source' => $source,
-            ],
-        ]);
-
-        if ($collectingAgent && $client && (int) $client->assigned_to !== (int) $collectingAgent->id) {
-            $this->notifyAgent(
-                $collectingAgent,
-                'Chit Payment Verified',
-                "{$money} verified for {$name} ({$group} {$monthLabel}).",
-                'chit_installment',
-                [
-                    'screen' => 'chit_installment',
-                    'installment_id' => (string) $first->id,
-                    'amount' => (string) $amount,
-                ],
-                $first->id
-            );
-        }
-    }
-
-    /**
-     * @param  \Illuminate\Support\Collection<int, Installment>  $installments
-     */
-    protected function formatChitMonthList($installments): string
-    {
-        $nums = collect($installments)
-            ->map(fn ($row) => (int) ($row->month_number ?? 0))
-            ->filter()
-            ->unique()
-            ->sort()
-            ->values()
-            ->all();
-
-        if ($nums === []) {
-            return 'chit installment';
-        }
-
-        $ranges = [];
-        $start = $end = $nums[0];
-        for ($i = 1, $len = count($nums); $i < $len; $i++) {
-            if ($nums[$i] === $end + 1) {
-                $end = $nums[$i];
-                continue;
-            }
-            $ranges[] = $start === $end ? "#{$start}" : "#{$start}–#{$end}";
-            $start = $end = $nums[$i];
-        }
-        $ranges[] = $start === $end ? "#{$start}" : "#{$start}–#{$end}";
-
-        return (count($nums) === 1 ? 'month ' : 'months ') . implode(', ', $ranges);
-    }
-
-    public function settlementPaid(Payout $payout): void
-    {
-        $payout->loadMissing('winner.client', 'group');
-        $client = $payout->winner?->client;
-        $name = $this->clientName($client);
-        $group = $payout->group?->group_code ?? ('Group #' . $payout->group_id);
-        $amount = $this->money($payout->net_payout_amount ?: $payout->payout_amount);
-
-        $this->notifyAll($client, [
-            'type' => 'chit_settlement_paid',
-            'title' => 'Chit Settlement Paid',
-            'admin_message' => "Settlement of {$amount} paid to {$name} for {$group} (month {$payout->month_number}).",
-            'customer_title' => 'Chit Settlement Paid',
-            'customer_message' => "Your chit settlement of {$amount} for {$group} has been paid.",
-            'agent_title' => 'Client Settlement Paid',
-            'agent_message' => "Settlement of {$amount} was paid to {$name} for {$group}.",
-            'link' => $this->safeRoute('chit.settlement-applications.show', $payout),
-            'icon' => 'ri-hand-coin-line',
-            'related_id' => $payout->id,
-            'unique' => true,
-            'fcm_type' => 'chit_settlement_paid',
-            'data' => [
-                'screen' => 'chit_settlement',
-                'payout_id' => (string) $payout->id,
-            ],
-        ]);
-    }
-
     public function clientAssigned(Client $client, Agent $agent): void
     {
         $name = $this->clientName($client);
@@ -781,7 +481,7 @@ class AppNotificationService
             'title' => 'KYC Approved',
             'admin_message' => "KYC for {$this->clientName($client)} was approved.",
             'customer_title' => 'KYC Approved',
-            'customer_message' => 'Congratulations! Your KYC has been approved. You can now apply for loans, chits and other services.',
+            'customer_message' => 'Congratulations! Your KYC has been approved. You can now apply for loans and other services.',
             'agent_title' => 'Client KYC Approved for',
             'agent_message' => "KYC for {$this->clientName($client)} was approved.",
             'link' => $this->safeRoute('client-view-kyc', $client->id),
@@ -1084,7 +784,7 @@ class AppNotificationService
     }
 
     /**
-     * Assigned agent, added-by agent, and extra ids (e.g. chit referrer).
+     * Assigned agent, added-by agent, and extra ids.
      * Resolves both agents.id and users.id because assigned_to is mixed in live data.
      *
      * @param  list<int|string|null>  $extraAgentIds

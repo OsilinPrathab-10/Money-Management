@@ -2,7 +2,6 @@
 
 namespace App\Services;
 
-use App\Models\ChitGroup;
 use App\Models\FixedDeposit;
 use App\Models\LoanAccount;
 use Carbon\Carbon;
@@ -69,56 +68,6 @@ class RevenueReportService
         ];
     }
 
-    /**
-     * @return array{items: LengthAwarePaginator, totals: array<string, float>, overall_total: float}
-     */
-    public function chitReport(array $filters): array
-    {
-        $query = ChitGroup::with(['scheme', 'payouts', 'installments']);
-
-        if (! empty($filters['from_date'])) {
-            $query->whereDate('start_date', '>=', Carbon::parse($filters['from_date']));
-        }
-        if (! empty($filters['to_date'])) {
-            $query->whereDate('start_date', '<=', Carbon::parse($filters['to_date']));
-        }
-        if (! empty($filters['search'])) {
-            $search = $filters['search'];
-            $query->where(function ($q) use ($search) {
-                $q->where('group_code', 'like', "%{$search}%")
-                    ->orWhereHas('scheme', fn ($sq) => $sq->where('name', 'like', "%{$search}%"));
-            });
-        }
-
-        $allFiltered = (clone $query)->get();
-        $totals = $this->emptyChitTotals();
-
-        foreach ($allFiltered as $group) {
-            $row = $this->mapChitRevenue($group);
-            foreach (array_keys($totals) as $key) {
-                $totals[$key] += $row[$key];
-            }
-        }
-
-        $items = $query->orderByDesc('start_date')
-            ->paginate(15)
-            ->withQueryString();
-
-        $items->getCollection()->transform(function ($group) {
-            $row = $this->mapChitRevenue($group);
-            foreach ($row as $key => $value) {
-                $group->{$key} = $value;
-            }
-
-            return $group;
-        });
-
-        return [
-            'items' => $items,
-            'totals' => $totals,
-            'overall_total' => max(0.00, array_sum($totals)),
-        ];
-    }
 
     /**
      * @return array{items: LengthAwarePaginator, totals: array<string, float>, overall_total: float}
@@ -201,28 +150,6 @@ class RevenueReportService
         });
     }
 
-    public function chitExportRows(array $filters): \Illuminate\Support\Collection
-    {
-        $query = ChitGroup::with(['scheme', 'payouts', 'installments']);
-        $this->applyChitFilters($query, $filters);
-
-        return $query->orderByDesc('start_date')->get()->map(function ($group, $index) {
-            $row = $this->mapChitRevenue($group);
-
-            return [
-                'S.No' => $index + 1,
-                'Group Code' => $group->group_code,
-                'Scheme' => $group->scheme->name ?? 'N/A',
-                'Chit Value (₹)' => number_format((float) $group->chit_value, 2),
-                'Foreman Profit (₹)' => number_format($row['foreman_profit'], 2),
-                'Processing Fee (₹)' => number_format($row['processing_fee'], 2),
-                'Document Charges (₹)' => number_format($row['document_charges'], 2),
-                'Other Charges (₹)' => number_format($row['other_charges'], 2),
-                'Penalty Collected (₹)' => number_format($row['penalty_collected'], 2),
-                'Total Revenue (₹)' => number_format($row['total_revenue'], 2),
-            ];
-        });
-    }
 
     public function fdExportRows(array $filters): \Illuminate\Support\Collection
     {
@@ -271,22 +198,6 @@ class RevenueReportService
         }
     }
 
-    private function applyChitFilters(Builder $query, array $filters): void
-    {
-        if (! empty($filters['from_date'])) {
-            $query->whereDate('start_date', '>=', Carbon::parse($filters['from_date']));
-        }
-        if (! empty($filters['to_date'])) {
-            $query->whereDate('start_date', '<=', Carbon::parse($filters['to_date']));
-        }
-        if (! empty($filters['search'])) {
-            $search = $filters['search'];
-            $query->where(function ($q) use ($search) {
-                $q->where('group_code', 'like', "%{$search}%")
-                    ->orWhereHas('scheme', fn ($sq) => $sq->where('name', 'like', "%{$search}%"));
-            });
-        }
-    }
 
     private function applyFdFilters(Builder $query, array $filters): void
     {
@@ -368,33 +279,6 @@ class RevenueReportService
     /**
      * @return array<string, float>
      */
-    private function mapChitRevenue(ChitGroup $group): array
-    {
-        $paidPayouts = $group->payouts->where('status', 'paid');
-
-        $payoutCommission = max(0.00, (float) $paidPayouts->sum('commission_amount'));
-        $groupCommission = $group->recognizedForemanCommissionAmount();
-        $foremanProfit = max($payoutCommission, $groupCommission);
-
-        $processingFee = max(0.00, (float) $paidPayouts->sum('processing_fee'));
-        $documentCharges = max(0.00, (float) $paidPayouts->sum('document_charges'));
-        $otherCharges = max(0.00, (float) $paidPayouts->sum('other_charges'));
-
-        $penaltyCollected = max(0.00, (float) $group->installments
-            ->whereIn('status', ['paid', 'partial'])
-            ->sum('penalty_amount'));
-
-        $totalRevenue = max(0.00, $foremanProfit + $processingFee + $documentCharges + $otherCharges + $penaltyCollected);
-
-        return [
-            'foreman_profit' => $foremanProfit,
-            'processing_fee' => $processingFee,
-            'document_charges' => $documentCharges,
-            'other_charges' => $otherCharges,
-            'penalty_collected' => $penaltyCollected,
-            'total_revenue' => $totalRevenue,
-        ];
-    }
 
     /**
      * @return array<string, float>
@@ -438,16 +322,6 @@ class RevenueReportService
     /**
      * @return array<string, float>
      */
-    private function emptyChitTotals(): array
-    {
-        return [
-            'foreman_profit' => 0.0,
-            'processing_fee' => 0.0,
-            'document_charges' => 0.0,
-            'other_charges' => 0.0,
-            'penalty_collected' => 0.0,
-        ];
-    }
 
     /**
      * @return array<string, float>

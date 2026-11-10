@@ -147,11 +147,6 @@ class FixedDeposit extends Model
         return $this->hasMany(FixedDepositTransaction::class);
     }
 
-    public function chitAllocations()
-    {
-        return $this->hasMany(FixedDepositChitAllocation::class);
-    }
-
     public function auditLogs()
     {
         return $this->hasMany(FixedDepositAuditLog::class);
@@ -336,7 +331,6 @@ class FixedDeposit extends Model
     {
         return match ($this->payout_option) {
             'wallet' => 'Wallet',
-            'chit' => 'Chit',
             'bank_transfer' => 'Bank Transfer',
             default => ucfirst(str_replace('_', ' ', (string) $this->payout_option)),
         };

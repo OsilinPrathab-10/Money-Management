@@ -181,11 +181,6 @@ class AppSettingControllerApi extends Controller
             ->map(fn ($path) => $toUrl($path))
             ->values()
             ->all();
-        $chitBanners = collect($setting->chit_banner_images ?? [])
-            ->filter()
-            ->map(fn ($path) => $toUrl($path))
-            ->values()
-            ->all();
         $fdBanners = collect($setting->fd_banner_images ?? [])
             ->filter()
             ->map(fn ($path) => $toUrl($path))
@@ -211,22 +206,18 @@ class AppSettingControllerApi extends Controller
             'background_color' => $setting->background_color,
             'overview_tab_color' => $setting->overview_tab_color ?? '#696CFF',
             'loan_tab_color' => $setting->loan_tab_color ?? '#00CFDD',
-            'chit_tab_color' => $setting->chit_tab_color ?? '#7367F0',
             'fixed_deposit_tab_color' => $setting->fixed_deposit_tab_color ?? '#FF4C51',
             'tab_colors' => [
                 'overview' => $setting->overview_tab_color ?? '#696CFF',
                 'loan' => $setting->loan_tab_color ?? '#00CFDD',
-                'chit' => $setting->chit_tab_color ?? '#7367F0',
                 'fixed_deposit' => $setting->fixed_deposit_tab_color ?? '#FF4C51',
             ],
             'banner_images' => $banners,
             'loan_banner_images' => $loanBanners,
-            'chit_banner_images' => $chitBanners,
             'fd_banner_images' => $fdBanners,
             'banners' => [
                 'overview' => $banners,
                 'loan' => $loanBanners,
-                'chit' => $chitBanners,
                 'fd' => $fdBanners,
             ],
             'onboarding_screens' => $onboardingScreens,

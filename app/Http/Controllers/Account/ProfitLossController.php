@@ -139,7 +139,7 @@ class ProfitLossController extends Controller
             'from_date' => 'nullable|date',
             'to_date' => 'nullable|date',
             'status_mode' => 'nullable|string|in:posted,all',
-            'module_tag' => 'nullable|string|in:all,CHIT,LOAN,FD,TRANSFER,OTHER',
+            'module_tag' => 'nullable|string|in:all,LOAN,FD,TRANSFER,OTHER',
             'bank_account_id' => 'nullable|integer',
             'client_id' => 'nullable|integer',
             'search' => 'nullable|string|max:255',

@@ -128,6 +128,16 @@ class Emi extends Model
         return $this->hasMany(EmiFollowup::class);
     }
 
+    public function collectionNotes()
+    {
+        return $this->hasMany(\App\Models\CollectionNote::class, 'emi_id');
+    }
+
+    public function latestCollectionNote()
+    {
+        return $this->hasOne(\App\Models\CollectionNote::class, 'emi_id')->latestOfMany();
+    }
+
     public function activities()
     {
         return $this->hasMany(AgentActivity::class);

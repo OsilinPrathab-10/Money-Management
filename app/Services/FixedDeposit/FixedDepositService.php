@@ -5,13 +5,9 @@ namespace App\Services\FixedDeposit;
 use App\Models\Client;
 use App\Models\FixedDeposit;
 use App\Models\FixedDepositApplication;
-use App\Models\FixedDepositChitAllocation;
 use App\Models\FixedDepositRenewal;
 use App\Models\FixedDepositScheme;
 use App\Models\FixedDepositTransaction;
-use App\Models\GroupMember;
-use App\Models\Installment;
-use App\Services\ChitPaymentService;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -26,7 +22,6 @@ class FixedDepositService
         protected WalletService $walletService,
         protected FixedDepositAccountingService $accountingService,
         protected FixedDepositAuditService $auditService,
-        protected ChitPaymentService $chitPaymentService,
         protected \App\Services\Account\FdAccountingService $fdCashbookService,
     ) {}
 
@@ -303,7 +298,7 @@ class FixedDepositService
                     'other_charges' => $otherCharges,
                     'banking_charges' => $bankingCharges,
                 ]));
-            } elseif (in_array($payout, ['wallet', 'chit'], true)) {
+            } elseif ($payout === 'wallet') {
                 $this->fdCashbookService->recordPayout($fd, $netAmount, array_merge($options, [
                     'payment_mode' => $payout,
                     'payout_option' => $payout,
@@ -355,8 +350,6 @@ class FixedDepositService
                     'payment_date' => $options['payment_date'] ?? now()->toDateString(),
                 ]);
                 $this->accountingService->postBankPayout($fd, $netAmount, $interest);
-            } elseif ($payout === 'chit') {
-                $this->allocateToChit($fd, $txn, $netAmount, $options);
             }
 
             $proofPath = $this->handlePaymentProofUpload($fd, $options);
@@ -391,131 +384,8 @@ class FixedDepositService
                 'banking_charges' => $bankingCharges,
             ]);
 
-            return $fd->fresh(['client', 'scheme', 'transactions', 'chitAllocations']);
+            return $fd->fresh(['client', 'scheme', 'transactions']);
         });
-    }
-
-    public function allocateToChit(FixedDeposit $fd, FixedDepositTransaction $txn, float $total, array $options): array
-    {
-        $allocationAmount = round((float) ($options['allocation_amount'] ?? $total), 2);
-        $allocationType = $options['allocation_type'] ?? 'pending_installment';
-        $groupId = $options['chit_group_id'] ?? null;
-
-        if ($allocationAmount <= 0) {
-            throw ValidationException::withMessages([
-                'allocation_amount' => 'Allocation amount must be greater than zero.',
-            ]);
-        }
-
-        if ($allocationAmount > $total) {
-            throw ValidationException::withMessages([
-                'allocation_amount' => 'Allocation amount cannot exceed maturity amount.',
-            ]);
-        }
-
-        $applied = 0.0;
-        $meta = [];
-
-        if (in_array($allocationType, ['pending_installment', 'advance'], true) && $groupId) {
-            $member = GroupMember::where('group_id', $groupId)
-                ->where('client_id', $fd->client_id)
-                ->whereIn('status', ['active', 'approved'])
-                ->first();
-
-            if (!$member) {
-                throw ValidationException::withMessages([
-                    'chit_group_id' => 'Customer is not an active member of the selected chit group.',
-                ]);
-            }
-
-            $installments = Installment::where('group_id', $groupId)
-                ->where('member_id', $member->id)
-                ->whereIn('status', ['pending', 'partial', 'overdue'])
-                ->orderBy('month_number')
-                ->get();
-
-            $remaining = $allocationAmount;
-            foreach ($installments as $installment) {
-                if ($remaining <= 0.01) {
-                    break;
-                }
-
-                $balance = round((float) $installment->balance, 2);
-                if ($balance <= 0.01) {
-                    continue;
-                }
-
-                $pay = min($remaining, $balance);
-                try {
-                    $this->chitPaymentService->collectInstallment($installment, [
-                        'paid_amount' => $pay,
-                        'payment_mode' => 'wallet',
-                        'payment_type' => $pay + 0.01 >= $balance ? 'full' : 'partial',
-                        'paid_date' => now()->toDateString(),
-                        'reference_no' => $fd->fd_number,
-                        'remarks' => 'FD Maturity Chit Adjustment',
-                        'bypass_min_validation' => true,
-                    ], Auth::id());
-                    $applied += $pay;
-                    $remaining = round($remaining - $pay, 2);
-                    $meta['installments'][] = ['id' => $installment->id, 'amount' => $pay];
-                } catch (\Throwable $e) {
-                    $meta['errors'][] = $e->getMessage();
-                    break;
-                }
-            }
-        } else {
-            // settlement / join_new / chit_wallet — record allocation; excess handling below
-            $applied = $allocationAmount;
-            $meta['note'] = 'Allocation recorded for ' . $allocationType;
-        }
-
-        FixedDepositChitAllocation::create([
-            'fixed_deposit_id' => $fd->id,
-            'fd_transaction_id' => $txn->id,
-            'chit_group_id' => $groupId,
-            'allocation_type' => $allocationType,
-            'amount' => $applied > 0 ? $applied : $allocationAmount,
-            'meta' => $meta,
-            'created_by' => Auth::id(),
-        ]);
-
-        FixedDepositTransaction::create([
-            'fixed_deposit_id' => $fd->id,
-            'transaction_type' => 'chit_adjustment',
-            'amount' => $applied > 0 ? $applied : $allocationAmount,
-            'description' => 'Chit Adjustment from FD',
-            'meta' => $meta,
-            'created_by' => Auth::id(),
-        ]);
-
-        $this->auditService->log('Chit Adjustment', $fd->id, $fd->scheme_id, null, [
-            'amount' => $applied > 0 ? $applied : $allocationAmount,
-            'allocation_type' => $allocationType,
-            'chit_group_id' => $groupId,
-        ]);
-
-        $used = $applied > 0 ? $applied : $allocationAmount;
-        $excess = round($total - $used, 2);
-        $remainingPayable = 0.0;
-
-        if ($excess > 0.01) {
-            $this->walletService->credit(
-                $fd->client_id,
-                $excess,
-                'Remaining Balance after Chit Allocation',
-                'fixed_deposit',
-                $fd->id
-            );
-        } elseif ($excess < -0.01) {
-            $remainingPayable = abs($excess);
-        }
-
-        return [
-            'allocated' => $used,
-            'excess_to_wallet' => max(0, $excess),
-            'remaining_payable' => $remainingPayable,
-        ];
     }
 
     public function prematureWithdraw(FixedDeposit $fd, array $options = []): array
@@ -579,7 +449,7 @@ class FixedDepositService
                     'other_charges' => $otherCharges,
                     'banking_charges' => $bankingCharges,
                 ]));
-            } elseif (in_array($payout, ['wallet', 'chit'], true)) {
+            } elseif ($payout === 'wallet') {
                 $this->fdCashbookService->recordPayout($fd, $netAmount, array_merge($options, [
                     'payment_mode' => $payout,
                     'payout_option' => $payout,
@@ -628,8 +498,6 @@ class FixedDepositService
                     'utr_reference' => $options['utr_reference'] ?? null,
                     'payment_date' => $withdrawalDate->toDateString(),
                 ]);
-            } elseif ($payout === 'chit') {
-                $this->allocateToChit($fd, $txn, $netAmount, $options);
             }
 
             $this->accountingService->postPrematureWithdrawal($fd, $netAmount, $eligibleInterest, $penalty);

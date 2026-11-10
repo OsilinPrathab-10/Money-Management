@@ -38,7 +38,7 @@ class ClientResource extends JsonResource
                 'has_account' => false,
                 'public_url' => null,
                 'view_schedule_url' => null,
-                'message' => "You don't have an active loan, chit, or fixed deposit account.",
+                'message' => "You don't have an active loan or fixed deposit account.",
             ];
 
         $data = [

@@ -77,7 +77,7 @@
 <div class="row mb-4">
   <div class="col-12">
     <h4 class="mb-1 text-primary"><i class="ri-receipt-line me-2"></i>Payment Receipts</h4>
-    <p class="text-muted mb-0">Print collection receipts for Loan EMI, Chit installments, and Fixed Deposit payments.</p>
+    <p class="text-muted mb-0">Print collection receipts for Loan EMI and Fixed Deposit payments.</p>
   </div>
 </div>
 
@@ -90,11 +90,6 @@
   <li class="nav-item">
     <a class="nav-link {{ $module === 'loan' ? 'active' : '' }}" href="{{ route('loan-payment-receipts', $filterQuery) }}">
       <i class="ri-bank-line me-1"></i> Loan
-    </a>
-  </li>
-  <li class="nav-item">
-    <a class="nav-link {{ $module === 'chit' ? 'active' : '' }}" href="{{ route('chit-payment-receipts', $filterQuery) }}">
-      <i class="ri-group-line me-1"></i> Chit
     </a>
   </li>
   <li class="nav-item">
@@ -117,7 +112,7 @@
           <h4 class="ms-1 mb-0">{{ number_format($stats['total_receipts']) }}</h4>
         </div>
         <p class="mb-1 fw-medium text-heading">Total Receipts</p>
-        <p class="mb-0 small text-muted">{{ $module === 'all' ? 'Loan, Chit and FD receipts' : ('All-time ' . $module . ' receipts') }}</p>
+        <p class="mb-0 small text-muted">{{ $module === 'all' ? 'Loan and FD receipts' : ('All-time ' . $module . ' receipts') }}</p>
       </div>
     </div>
   </div>
@@ -185,12 +180,10 @@
                 class="form-select form-select-sm"
                 data-all-url="{{ route('all-payment-receipts') }}"
                 data-loan-url="{{ route('loan-payment-receipts') }}"
-                data-chit-url="{{ route('chit-payment-receipts') }}"
                 data-fd-url="{{ route('fd-payment-receipts') }}"
                 onchange="var key=this.value||'all'; this.form.action=this.dataset[key+'Url']||this.form.action; this.form.requestSubmit();">
           <option value="" @selected($selectedType === '' || $selectedType === 'all')>All Types</option>
           <option value="loan" @selected($selectedType === 'loan')>Loan</option>
-          <option value="chit" @selected($selectedType === 'chit')>Chit</option>
           <option value="fd" @selected($selectedType === 'fd')>Fixed Deposit</option>
         </select>
       </div>
@@ -258,10 +251,10 @@
         @forelse(($rows ?? []) as $row)
           @php
             $typeKey = strtolower((string) ($row['module'] ?? 'loan'));
-            $typeClass = $typeKey === 'chit' ? 'info' : ($typeKey === 'fd' ? 'warning' : 'primary');
+            $typeClass = $typeKey === 'fd' ? 'warning' : 'primary';
             $printModule = strtolower((string) ($row['module'] ?? $module));
             $printUrl = $row['receipt_print_url'] ?? null;
-            if (!$printUrl && !empty($row['id']) && in_array($printModule, ['loan', 'chit', 'fd'], true)) {
+            if (!$printUrl && !empty($row['id']) && in_array($printModule, ['loan', 'fd'], true)) {
                 $printParams = ['module' => $printModule, 'id' => $row['id']];
                 if (!empty($row['bulk_key'])) {
                     $printParams['bulk'] = $row['bulk_key'];
@@ -279,7 +272,7 @@
               <span class="receipt-code">{{ $row['receipt_number'] }}</span>
               @if(!empty($row['is_bulk']))
                 @php
-                  $splitLabel = ($row['module'] ?? '') === 'chit' ? 'Inst' : 'EMI';
+                  $splitLabel = 'EMI';
                 @endphp
                 <button type="button"
                         class="btn btn-icon btn-text-info btn-sm rounded-pill view-bulk-emis ms-1"
@@ -424,14 +417,10 @@
         </div>
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
       </div>
-      <div class="modal-body p-0 position-relative" style="min-height: 520px; background: #f8fafc;">
-        <div id="receiptPreviewSpinner" class="d-flex flex-column align-items-center justify-content-center py-5" style="min-height: 500px;">
-          <div class="spinner-border text-primary mb-2" role="status"></div>
-          <span class="text-muted small">Loading payment receipt...</span>
-        </div>
+      <div class="modal-body p-0" style="background: #ffffff;">
         <iframe id="receiptPreviewFrame"
-                style="width: 100%; height: 560px; border: none; display: none;"
-                onload="if(this.src && this.src !== 'about:blank'){ document.getElementById('receiptPreviewSpinner').style.display='none'; this.style.display='block'; }">
+                src="about:blank"
+                style="width: 100%; height: 75vh; min-height: 600px; border: none; display: block;">
         </iframe>
       </div>
       <div class="modal-footer border-top py-2 d-flex justify-content-between">
@@ -450,4 +439,37 @@
     </div>
   </div>
 </div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  document.addEventListener('click', function (e) {
+    var btn = e.target.closest('.view-receipt-preview');
+    if (!btn) return;
+    e.preventDefault();
+    var url = btn.getAttribute('data-url');
+    var title = btn.getAttribute('data-title') || 'Payment Receipt';
+    if (!url) return;
+
+    var titleEl = document.getElementById('receiptPreviewModalTitle');
+    if (titleEl) titleEl.textContent = title;
+    var openBtn = document.getElementById('modalOpenReceiptBtn');
+    if (openBtn) openBtn.setAttribute('href', url);
+    var frame = document.getElementById('receiptPreviewFrame');
+    if (frame) frame.setAttribute('src', url);
+
+    var modalEl = document.getElementById('receiptPreviewModal');
+    if (modalEl && window.bootstrap) {
+      bootstrap.Modal.getOrCreateInstance(modalEl).show();
+    }
+  });
+
+  var modalEl = document.getElementById('receiptPreviewModal');
+  if (modalEl) {
+    modalEl.addEventListener('hidden.bs.modal', function () {
+      var frame = document.getElementById('receiptPreviewFrame');
+      if (frame) frame.setAttribute('src', 'about:blank');
+    });
+  }
+});
+</script>
 @endsection

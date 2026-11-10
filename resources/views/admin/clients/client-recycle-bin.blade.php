@@ -23,7 +23,7 @@
   <div>
     <h4 class="mb-1">Client Recycle Bin</h4>
     <p class="text-muted mb-0">
-      Deleted clients are kept here with their loans, chit memberships and fixed deposits.
+      Deleted clients are kept here with their loans and fixed deposits.
       Restoring a client brings all of those accounts back.
     </p>
   </div>

@@ -67,7 +67,7 @@
 
             <div class="alert alert-info mb-0">
               <i class="ri-information-line me-1"></i>
-              These settings are stored for future GST calculations. Loan, chit, FD fees, receipts, and accounting reports are not changed yet.
+              These settings are stored for future GST calculations. Loan and FD fees, receipts, and accounting reports are not changed yet.
             </div>
           </div>
 

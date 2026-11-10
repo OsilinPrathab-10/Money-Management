@@ -9,7 +9,7 @@
 <div class="account-module">
   @include('admin.account.shared.page-header', [
     'title' => __('Bank Transactions Management'),
-    'subtitle' => __('Posted movements per bank account — shows bank name and Chit / Loan / FD tags.'),
+    'subtitle' => __('Posted movements per bank account — shows bank name and Loan / FD tags.'),
   ])
 
   @php

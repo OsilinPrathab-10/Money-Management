@@ -76,7 +76,7 @@ class LoanApplicationsController extends Controller
         
         $verifiedClients = $verifiedClientsQuery->get();
         
-        $loanProducts = LoanProduct::all();
+        $loanProducts = LoanProduct::where('loan_code', '!=', LoanProduct::MANUAL_OPEN_LOAN_CODE)->get();
         
         $activePaymentMethods = PaymentMethod::where('is_enabled', true)->get();
         $activeGateways = PaymentGateway::where('enabled', true)->get();
@@ -123,6 +123,11 @@ class LoanApplicationsController extends Controller
         $productMinTenure = $product->min_tenture ?? 1;
         $productMaxTenure = $product->max_tenture ?? 1;
         $productInterestRate = $product->interest_rate ?? 0;
+        $isManualInterest = $application->isManualInterest();
+        if ($isManualInterest) {
+            $minAmount = 1;
+            $creditLimit = max((float) $creditLimit, (float) $request->input('approved_amount', 0), (float) $application->loan_amount);
+        }
 
         $request->validate([
             'approved_amount' => [
@@ -144,7 +149,7 @@ class LoanApplicationsController extends Controller
                 'max:' . $productMaxTenure,
                 'gte:approved_tenure_min',
             ],
-            'interest_rate' => [
+            'interest_rate' => $isManualInterest ? ['nullable', 'numeric'] : [
                 'required',
                 'numeric',
                 'min:' . $productInterestRate,
@@ -168,7 +173,9 @@ class LoanApplicationsController extends Controller
                     'tenure' => $request->approved_tenure_max, // Set default tenure to max during approval
                     'tenure_min' => $request->approved_tenure_min,
                     'tenure_max' => $request->approved_tenure_max,
-                    'interest_rate' => $request->interest_rate,
+                    'interest_rate' => $isManualInterest
+                        ? LoanApplication::rateFromInterestAmount((float) $request->approved_amount, (float) $application->manual_interest_amount)
+                        : $request->interest_rate,
                     'term_unit' => optional($application->product)->term_unit ?? 'months',
                     'status' => 'approved',
                     'approved_at' => now(),
@@ -244,9 +251,12 @@ class LoanApplicationsController extends Controller
             $request->input('emi_start_date') ?: $application->emi_start_date
         );
 
+        $isManualInterest = $application->isManualInterest();
+
         $request->validate([
             'approved_amount' => 'required|numeric|min:1',
-            'interest_rate' => 'required|numeric',
+            'interest_rate' => $isManualInterest ? 'nullable|numeric' : 'required|numeric',
+            'manual_interest_amount' => $isManualInterest ? 'required|numeric|min:0.01|lt:approved_amount' : 'nullable',
             'tenure' => 'required|integer',
             'emi_day' => 'required|integer|min:1|max:' . $emiDayMax,
             'emi_start_date' => 'nullable|date',
@@ -278,6 +288,14 @@ class LoanApplicationsController extends Controller
                 'payment_method' => 'manual',
                 'status' => 'in_progress',
             ];
+
+            if ($isManualInterest) {
+                $updateData['manual_interest_amount'] = (float) $request->manual_interest_amount;
+                $updateData['interest_rate'] = LoanApplication::rateFromInterestAmount(
+                    (float) $request->approved_amount,
+                    (float) $request->manual_interest_amount
+                );
+            }
 
             if ($request->filled('emi_start_date')) {
                 $emiStartDate = Carbon::parse($request->emi_start_date);
@@ -631,13 +649,13 @@ class LoanApplicationsController extends Controller
                 \App\Services\Account\AccountingTags::ENTRY_DISBURSEMENT
             );
 
-            $chitAccounting = app(\App\Services\Account\ChitAccountingService::class);
+            $bankAccounting = app(\App\Services\Account\SocietyBankAccountingService::class);
             $disburseDate = $disburseAt instanceof \Carbon\Carbon
                 ? $disburseAt->toDateString()
                 : (string) $disburseAt;
 
             // Company bank transfer charges — separate bank debit + expense, not deducted from client.
-            $chitAccounting->recordBankTransferCharges(
+            $bankAccounting->recordBankTransferCharges(
                 (int) $internalBank->id,
                 (float) $bankingCharges,
                 ($utrNumber ?: $account->customer_loan_account_number) . '-BANKCHG',
@@ -681,7 +699,7 @@ class LoanApplicationsController extends Controller
                     continue;
                 }
                 try {
-                    $chitAccounting->postExternalRevenue(
+                    $bankAccounting->postExternalRevenue(
                         $fee['name'],
                         $fee['code'],
                         $fee['amount'],
@@ -1032,9 +1050,12 @@ class LoanApplicationsController extends Controller
 
         $validated = $request->validate([
             'client_id' => 'required|exists:clients,id',
-            'loan_code' => 'required|exists:loan_products,loan_code',
+            'loan_code' => 'nullable|required_unless:interest_source,manual|exists:loan_products,loan_code',
             'loan_amount' => 'required|numeric|min:1',
             'loan_mode' => 'nullable|in:emi,interest_only',
+            'interest_source' => 'nullable|in:product,manual',
+            'manual_interest_amount' => 'nullable|required_if:interest_source,manual|numeric|min:0.01|lt:loan_amount',
+            'manual_tenure' => 'nullable|integer|min:1|max:3650',
             'tenure' => 'required_if:loan_mode,emi|nullable|integer|min:0',
             'repayment_frequency' => 'required|in:daily,weekly,monthly',
             'emi_day' => 'required|integer|min:1|max:' . $emiDayMax,
@@ -1042,6 +1063,8 @@ class LoanApplicationsController extends Controller
             'applied_at' => 'nullable|date',
         ], [
             'emi_day.max' => 'EMI day cannot be greater than ' . $emiDayMax . ' for the selected start month.',
+            'manual_interest_amount.required_if' => 'Please enter the interest amount per cycle.',
+            'manual_interest_amount.lt' => 'Interest amount per cycle must be less than the loan amount.',
         ]);
 
         // Eligibility Check: Block if client has a pending loan
@@ -1081,26 +1104,48 @@ class LoanApplicationsController extends Controller
                 ], 422);
             }
 
+        $loanMode = $validated['loan_mode'] ?? 'emi';
+        $isManualInterest = $loanMode === 'interest_only'
+            && ($validated['interest_source'] ?? 'product') === 'manual';
+
+        if (! $isManualInterest && empty($validated['loan_code'])) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Please select a loan product.',
+            ], 422);
+        }
+
         try {
-            $product = LoanProduct::where('loan_code', $validated['loan_code'])->firstOrFail();
+            $product = $isManualInterest
+                ? LoanProduct::manualOpenLoanProduct()
+                : LoanProduct::where('loan_code', $validated['loan_code'])->firstOrFail();
             
             DB::beginTransaction();
 
-            $loanMode = $validated['loan_mode'] ?? 'emi';
-            if ((float) $product->interest_rate === 0.0
-                || $product->interest_type === 'reducing'
-                || $product->interest_type === 'declining_balance') {
+            if ($product->interest_type === 'reducing'
+                || $product->interest_type === 'declining_balance'
+                || ((float) $product->interest_rate === 0.0 && ! $isManualInterest)) {
                 $loanMode = 'emi';
+                $isManualInterest = false;
             }
+
+            $manualInterestAmount = $isManualInterest ? (float) $validated['manual_interest_amount'] : null;
+            $interestRate = $isManualInterest
+                ? LoanApplication::rateFromInterestAmount((float) $validated['loan_amount'], $manualInterestAmount)
+                : $product->interest_rate;
 
             $application = LoanApplication::create([
                 'client_id' => $validated['client_id'],
-                'loan_code' => $validated['loan_code'],
+                'loan_code' => $product->loan_code,
                 'loan_mode' => $loanMode,
+                'interest_source' => $isManualInterest ? 'manual' : 'product',
+                'manual_interest_amount' => $manualInterestAmount,
                 'loan_amount' => $validated['loan_amount'],
-                'tenure' => $loanMode === 'interest_only' ? 0 : $validated['tenure'],
+                'tenure' => $loanMode === 'interest_only'
+                    ? ($isManualInterest ? (int) ($validated['manual_tenure'] ?? 0) : 0)
+                    : $validated['tenure'],
                 'term_unit' => $validated['repayment_frequency'],
-                'interest_rate' => $product->interest_rate,
+                'interest_rate' => $interestRate,
                 'status' => 'pending',
                 'emi_day' => $emiDay,
                 'emi_start_year' => $emiStartDate->year,
@@ -1174,81 +1219,11 @@ class LoanApplicationsController extends Controller
             $message = "Client has a {$pendingApplication->status} loan application (#{$pendingApplication->application_number}).";
         }
 
-        $chitDetails = $this->getClientChitDetails($clientId);
-
         return response()->json([
             'eligible' => $eligible,
             'message' => $message,
-            'chit_details' => $chitDetails,
+            'chit_details' => ['has_chit' => false],
         ]);
-    }
-
-    /**
-     * Get chit fund details for a client (used during loan application)
-     */
-    private function getClientChitDetails(int $clientId): array
-    {
-        $memberships = \App\Models\GroupMember::with(['group.scheme'])
-            ->involvingClient($clientId)
-            ->whereIn('status', ['active', 'approved', 'applied'])
-            ->get();
-
-        if ($memberships->isEmpty()) {
-            return ['has_chit' => false];
-        }
-
-        $memberIds = $memberships->pluck('id');
-
-        $installments = \App\Models\Installment::whereIn('member_id', $memberIds)->get();
-
-        $today = Carbon::now()->startOfDay();
-
-        $totalChitValue = 0;
-        $totalMonthlyInstallment = 0;
-        $groups = [];
-
-        foreach ($memberships as $membership) {
-            $group = $membership->group;
-            if (! $group) {
-                continue;
-            }
-
-            $groupInstallments = $installments->where('member_id', $membership->id);
-            $overdueInstallments = $groupInstallments->filter(fn ($i) => ! in_array($i->status, ['paid', 'waived']) && $i->due_date && $i->due_date->lt($today));
-            $overdueAmount = $overdueInstallments->sum(fn ($i) => max(0, (float) $i->amount + (float) $i->penalty_amount - (float) $i->paid_amount));
-
-            $totalChitValue += (float) $group->chit_value;
-            $totalMonthlyInstallment += (float) $group->installment_amount;
-
-            $groups[] = [
-                'group_code' => $group->group_code,
-                'scheme_name' => $group->scheme->name ?? '—',
-                'chit_value' => (float) $group->chit_value,
-                'installment_amount' => (float) $group->installment_amount,
-                'status' => $group->status,
-                'total_installments' => $groupInstallments->count(),
-                'paid_count' => $groupInstallments->where('status', 'paid')->count(),
-                'overdue_count' => $overdueInstallments->count(),
-                'overdue_amount' => round($overdueAmount, 2),
-                'total_paid' => round($groupInstallments->sum('paid_amount'), 2),
-                'total_balance' => round($groupInstallments->sum(fn ($i) => max(0, (float) $i->amount + (float) $i->penalty_amount - (float) $i->paid_amount)), 2),
-            ];
-        }
-
-        $totalOverdue = collect($groups)->sum('overdue_amount');
-        $totalBalance = collect($groups)->sum('total_balance');
-        $totalPaid = collect($groups)->sum('total_paid');
-
-        return [
-            'has_chit' => true,
-            'total_groups' => count($groups),
-            'total_chit_value' => round($totalChitValue, 2),
-            'total_monthly_installment' => round($totalMonthlyInstallment, 2),
-            'total_overdue' => round($totalOverdue, 2),
-            'total_balance' => round($totalBalance, 2),
-            'total_paid' => round($totalPaid, 2),
-            'groups' => $groups,
-        ];
     }
 
     /**

@@ -5,7 +5,6 @@ namespace App\Http\Controllers;
 use App\Models\Client;
 use App\Models\FixedDeposit;
 use App\Models\FixedDepositScheme;
-use App\Models\GroupMember;
 use App\Services\FixedDeposit\FixedDepositAuditService;
 use App\Services\FixedDeposit\FixedDepositInterestService;
 use App\Services\FixedDeposit\FixedDepositService;
@@ -185,25 +184,15 @@ class FixedDepositController extends Controller
             'scheme',
             'transactions' => fn ($q) => $q->latest(),
             'interestPayouts' => fn ($q) => $q->latest(),
-            'chitAllocations.chitGroup',
             'renewalsAsOld.newDeposit',
             'renewedFrom',
             'creator',
             'closedByUser',
         ]);
 
-        $chitGroups = GroupMember::with('group')
-            ->where('client_id', $deposit->client_id)
-            ->whereIn('status', ['active', 'approved'])
-            ->get()
-            ->pluck('group')
-            ->filter()
-            ->unique('id')
-            ->values();
-
         $bankAccounts = \App\Models\Account\BankAccount::where('is_active', true)->orderBy('bank_name')->get();
 
-        return view('admin.fd.deposits.form', compact('deposit', 'chitGroups', 'bankAccounts') + ['mode' => 'show']);
+        return view('admin.fd.deposits.form', compact('deposit', 'bankAccounts') + ['mode' => 'show']);
     }
 
     public function certificate(FixedDeposit $deposit)
@@ -257,7 +246,7 @@ class FixedDepositController extends Controller
     public function processMaturity(Request $request, FixedDeposit $deposit)
     {
         $validated = $request->validate([
-            'payout_option' => ['required', Rule::in(['wallet', 'chit', 'cash', 'bank_transfer'])],
+            'payout_option' => ['required', Rule::in(['wallet', 'cash', 'bank_transfer'])],
             'bank_name' => ['nullable', 'string', 'max:255'],
             'account_number' => ['nullable', 'string', 'max:64'],
             'ifsc_code' => ['nullable', 'string', 'max:32'],
@@ -269,9 +258,6 @@ class FixedDepositController extends Controller
             'payment_proof' => ['nullable', 'file', 'mimes:jpeg,jpg,png,pdf', 'max:10240'],
             'utr_reference' => ['nullable', 'string', 'max:100'],
             'payment_date' => ['nullable', 'date'],
-            'chit_group_id' => ['nullable', 'exists:chit_groups,id'],
-            'allocation_type' => ['nullable', Rule::in(['pending_installment', 'advance', 'settlement', 'join_new', 'chit_wallet'])],
-            'allocation_amount' => ['nullable', 'numeric', 'min:0'],
             'internal_bank_account_id' => ['nullable', 'exists:bank_accounts,id'],
             'processing_fee' => ['nullable', 'numeric', 'min:0'],
             'document_charges' => ['nullable', 'numeric', 'min:0'],
@@ -296,7 +282,7 @@ class FixedDepositController extends Controller
     {
         $validated = $request->validate([
             'withdrawal_date' => ['nullable', 'date'],
-            'payout_option' => ['required', Rule::in(['wallet', 'chit', 'cash', 'bank_transfer'])],
+            'payout_option' => ['required', Rule::in(['wallet', 'cash', 'bank_transfer'])],
             'bank_name' => ['nullable', 'string', 'max:255'],
             'account_number' => ['nullable', 'string', 'max:64'],
             'ifsc_code' => ['nullable', 'string', 'max:32'],
@@ -307,9 +293,6 @@ class FixedDepositController extends Controller
             'customer_holder_name' => ['nullable', 'string', 'max:255'],
             'payment_proof' => ['nullable', 'file', 'mimes:jpeg,jpg,png,pdf', 'max:10240'],
             'utr_reference' => ['nullable', 'string', 'max:100'],
-            'chit_group_id' => ['nullable', 'exists:chit_groups,id'],
-            'allocation_type' => ['nullable', Rule::in(['pending_installment', 'advance', 'settlement', 'join_new', 'chit_wallet'])],
-            'allocation_amount' => ['nullable', 'numeric', 'min:0'],
             'remarks' => ['nullable', 'string'],
             'internal_bank_account_id' => ['nullable', 'exists:bank_accounts,id'],
             'processing_fee' => ['nullable', 'numeric', 'min:0'],

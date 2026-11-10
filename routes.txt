@@ -1,0 +1,940 @@
+
+  GET|HEAD        / ....................................................... Auth\AuthenticatedSessionController@create
+  GET|HEAD        account .......................................... account.index › Account\DashboardController@index
+  GET|HEAD        account-deletion .................... public.account-deletion › PublicAccountDeletionController@show
+  POST            account-deletion ............. public.account-deletion.store › PublicAccountDeletionController@store
+  GET|HEAD        account/account-categories account.account-categories.index › Account\AccountCategoryController@ind…
+  POST            account/account-categories account.account-categories.store › Account\AccountCategoryController@sto…
+  GET|HEAD        account/account-categories/export account.account-categories.export › Account\AccountCategoryContro…
+  PUT             account/account-categories/{accountcategory} account.account-categories.update › Account\AccountCat…
+  DELETE          account/account-categories/{accountcategory} account.account-categories.destroy › Account\AccountCa…
+  GET|HEAD        account/account-types ............ account.account-types.index › Account\AccountTypeController@index
+  POST            account/account-types ............ account.account-types.store › Account\AccountTypeController@store
+  GET|HEAD        account/account-types/export ... account.account-types.export › Account\AccountTypeController@export
+  PUT             account/account-types/{accounttype} account.account-types.update › Account\AccountTypeController@up…
+  DELETE          account/account-types/{accounttype} account.account-types.destroy › Account\AccountTypeController@d…
+  GET|HEAD        account/bank-accounts ............ account.bank-accounts.index › Account\BankAccountController@index
+  POST            account/bank-accounts ............ account.bank-accounts.store › Account\BankAccountController@store
+  GET|HEAD        account/bank-accounts/api/list account.bank-accounts.api.list › Account\BankAccountController@bankA…
+  GET|HEAD        account/bank-accounts/export ... account.bank-accounts.export › Account\BankAccountController@export
+  PUT             account/bank-accounts/{bankaccount} account.bank-accounts.update › Account\BankAccountController@up…
+  DELETE          account/bank-accounts/{bankaccount} account.bank-accounts.destroy › Account\BankAccountController@d…
+  GET|HEAD        account/bank-accounts/{bankaccount}/edit account.bank-accounts.edit › Account\BankAccountController…
+  GET|HEAD        account/bank-transactions account.bank-transactions.index › Account\BankTransactionController@index
+  GET|HEAD        account/bank-transactions/export account.bank-transactions.export › Account\BankTransactionControll…
+  POST            account/bank-transactions/{id}/mark-reconciled account.bank-transactions.mark-reconciled › Account\…
+  GET|HEAD        account/bank-transfers ......... account.bank-transfers.index › Account\BankTransferController@index
+  POST            account/bank-transfers ......... account.bank-transfers.store › Account\BankTransferController@store
+  GET|HEAD        account/bank-transfers/export account.bank-transfers.export › Account\BankTransferController@export
+  PUT             account/bank-transfers/{banktransfer} account.bank-transfers.update › Account\BankTransferControlle…
+  DELETE          account/bank-transfers/{banktransfer} account.bank-transfers.destroy › Account\BankTransferControll…
+  POST            account/bank-transfers/{banktransfer}/process account.bank-transfers.process › Account\BankTransfer…
+  GET|HEAD        account/chart-of-accounts . account.chart-of-accounts.index › Account\ChartOfAccountController@index
+  POST            account/chart-of-accounts . account.chart-of-accounts.store › Account\ChartOfAccountController@store
+  GET|HEAD        account/chart-of-accounts/export account.chart-of-accounts.export › Account\ChartOfAccountControlle…
+  GET|HEAD        account/chart-of-accounts/{chartofaccount} account.chart-of-accounts.show › Account\ChartOfAccountC…
+  PUT             account/chart-of-accounts/{chartofaccount} account.chart-of-accounts.update › Account\ChartOfAccoun…
+  DELETE          account/chart-of-accounts/{chartofaccount} account.chart-of-accounts.destroy › Account\ChartOfAccou…
+  GET|HEAD        account/chart-of-accounts/{chartofaccount}/edit account.chart-of-accounts.edit › Account\ChartOfAcc…
+  GET|HEAD        account/chit-accounts ... account.chit-accounts.index › Account\LoanPortfolioController@chitAccounts
+  GET|HEAD        account/configuration/gst account.configuration.gst › Account\AccountingConfigurationController@gst
+  POST            account/configuration/gst account.configuration.gst.update › Account\AccountingConfigurationControl…
+  GET|HEAD        account/credit-notes ............... account.credit-notes.index › Account\CreditNoteController@index
+  GET|HEAD        account/credit-notes/export ...... account.credit-notes.export › Account\CreditNoteController@export
+  DELETE          account/credit-notes/{creditNote} account.credit-notes.destroy › Account\CreditNoteController@destr…
+  GET|HEAD        account/credit-notes/{creditNote} .... account.credit-notes.show › Account\CreditNoteController@show
+  POST            account/credit-notes/{creditNote}/approve account.credit-notes.approve › Account\CreditNoteControll…
+  GET|HEAD        account/customer-payments account.customer-payments.index › Account\CustomerPaymentController@index
+  POST            account/customer-payments account.customer-payments.store › Account\CustomerPaymentController@store
+  GET|HEAD        account/customer-payments/customers/{customerId}/outstanding account.customer-payments.outstanding-…
+  GET|HEAD        account/customer-payments/export account.customer-payments.export › Account\CustomerPaymentControll…
+  DELETE          account/customer-payments/{customerPayment} account.customer-payments.destroy › Account\CustomerPay…
+  PATCH           account/customer-payments/{customerPayment}/update-status account.customer-payments.update-status  …
+  GET|HEAD        account/customers ....................... account.customers.index › Account\CustomerController@index
+  POST            account/customers ....................... account.customers.store › Account\CustomerController@store
+  GET|HEAD        account/customers/create .............. account.customers.create › Account\CustomerController@create
+  GET|HEAD        account/customers/export .............. account.customers.export › Account\CustomerController@export
+  GET|HEAD        account/customers/{customer} .............. account.customers.show › Account\CustomerController@show
+  PUT|PATCH       account/customers/{customer} .......... account.customers.update › Account\CustomerController@update
+  DELETE          account/customers/{customer} ........ account.customers.destroy › Account\CustomerController@destroy
+  GET|HEAD        account/customers/{customer}/edit ......... account.customers.edit › Account\CustomerController@edit
+  GET|HEAD        account/day-book .......................... account.day-book.index › Account\DayBookController@index
+  GET|HEAD        account/day-book/export ................. account.day-book.export › Account\DayBookController@export
+  GET|HEAD        account/debit-notes .................. account.debit-notes.index › Account\DebitNoteController@index
+  GET|HEAD        account/debit-notes/export ......... account.debit-notes.export › Account\DebitNoteController@export
+  DELETE          account/debit-notes/{debitNote} .. account.debit-notes.destroy › Account\DebitNoteController@destroy
+  GET|HEAD        account/debit-notes/{debitNote} ........ account.debit-notes.show › Account\DebitNoteController@show
+  POST            account/debit-notes/{debitNote}/approve account.debit-notes.approve › Account\DebitNoteController@a…
+  GET|HEAD        account/emis ............................. account.emis.index › Account\LoanPortfolioController@emis
+  GET|HEAD        account/emis/export ............... account.emis.export › Account\LoanPortfolioController@emisExport
+  GET|HEAD        account/expense-categories account.expense-categories.index › Account\ExpenseCategoriesController@i…
+  POST            account/expense-categories account.expense-categories.store › Account\ExpenseCategoriesController@s…
+  GET|HEAD        account/expense-categories/export account.expense-categories.export › Account\ExpenseCategoriesCont…
+  PUT             account/expense-categories/{expensecategories} account.expense-categories.update › Account\ExpenseC…
+  DELETE          account/expense-categories/{expensecategories} account.expense-categories.destroy › Account\Expense…
+  GET|HEAD        account/expense-categories/{expensecategories}/edit account.expense-categories.edit › Account\Expen…
+  GET|HEAD        account/expenses .......................... account.expenses.index › Account\ExpenseController@index
+  POST            account/expenses .......................... account.expenses.store › Account\ExpenseController@store
+  GET|HEAD        account/expenses/export ................. account.expenses.export › Account\ExpenseController@export
+  GET|HEAD        account/expenses/{expense} .................. account.expenses.show › Account\ExpenseController@show
+  PUT             account/expenses/{expense} .............. account.expenses.update › Account\ExpenseController@update
+  DELETE          account/expenses/{expense} ............ account.expenses.destroy › Account\ExpenseController@destroy
+  POST            account/expenses/{expense}/approve .... account.expenses.approve › Account\ExpenseController@approve
+  POST            account/expenses/{expense}/post ............. account.expenses.post › Account\ExpenseController@post
+  GET|HEAD        account/fd-accounts ......... account.fd-accounts.index › Account\LoanPortfolioController@fdAccounts
+  GET|HEAD        account/ledger ............................... account.ledger.index › Account\LedgerController@index
+  GET|HEAD        account/ledger/export ...................... account.ledger.export › Account\LedgerController@export
+  GET|HEAD        account/loan-accounts ... account.loan-accounts.index › Account\LoanPortfolioController@loanAccounts
+  GET|HEAD        account/loan-accounts/export account.loan-accounts.export › Account\LoanPortfolioController@loanAcc…
+  GET|HEAD        account/profit-loss ................. account.profit-loss.index › Account\ProfitLossController@index
+  GET|HEAD        account/profit-loss/export ........ account.profit-loss.export › Account\ProfitLossController@export
+  GET|HEAD        account/reports ............................ account.reports.index › Account\ReportsController@index
+  GET|HEAD        account/reports/account-summary account.reports.account-summary › Account\ReportsController@account…
+  GET|HEAD        account/reports/balance-sheet account.reports.balance-sheet › Account\ReportsController@balanceSheet
+  GET|HEAD        account/reports/bank-book ........... account.reports.bank-book › Account\ReportsController@bankBook
+  GET|HEAD        account/reports/bill-aging ........ account.reports.bill-aging › Account\ReportsController@billAging
+  GET|HEAD        account/reports/bill-aging/export account.reports.bill-aging.export › Account\ReportsController@exp…
+  GET|HEAD        account/reports/bill-aging/print account.reports.bill-aging.print › Account\ReportsController@print…
+  GET|HEAD        account/reports/cash-book ........... account.reports.cash-book › Account\ReportsController@cashBook
+  GET|HEAD        account/reports/cash-flow ........... account.reports.cash-flow › Account\ReportsController@cashFlow
+  GET|HEAD        account/reports/customer-balance account.reports.customer-balance › Account\ReportsController@custo…
+  GET|HEAD        account/reports/customer-balance/export account.reports.customer-balance.export › Account\ReportsCo…
+  GET|HEAD        account/reports/customer-balance/print account.reports.customer-balance.print › Account\ReportsCont…
+  GET|HEAD        account/reports/customer/{customer} account.reports.customer-detail › Account\ReportsController@cus…
+  GET|HEAD        account/reports/customer/{customer}/print account.reports.customer-detail.print › Account\ReportsCo…
+  GET|HEAD        account/reports/day-book .............. account.reports.day-book › Account\ReportsController@dayBook
+  GET|HEAD        account/reports/expense-category account.reports.expense-category › Account\ReportsController@expen…
+  GET|HEAD        account/reports/expense-report account.reports.expense-report › Account\ReportsController@expenseRe…
+  GET|HEAD        account/reports/general-ledger account.reports.general-ledger › Account\ReportsController@generalLe…
+  GET|HEAD        account/reports/invoice-aging account.reports.invoice-aging › Account\ReportsController@invoiceAging
+  GET|HEAD        account/reports/invoice-aging/export account.reports.invoice-aging.export › Account\ReportsControll…
+  GET|HEAD        account/reports/invoice-aging/print account.reports.invoice-aging.print › Account\ReportsController…
+  GET|HEAD        account/reports/loan-disbursement account.reports.loan-disbursement › Account\ReportsController@loa…
+  GET|HEAD        account/reports/outstanding-loans account.reports.outstanding-loans › Account\ReportsController@out…
+  GET|HEAD        account/reports/profit-loss ..... account.reports.profit-loss › Account\ReportsController@profitLoss
+  GET|HEAD        account/reports/revenue-category account.reports.revenue-category › Account\ReportsController@reven…
+  GET|HEAD        account/reports/revenue-report account.reports.revenue-report › Account\ReportsController@revenueRe…
+  GET|HEAD        account/reports/tax-summary ..... account.reports.tax-summary › Account\ReportsController@taxSummary
+  GET|HEAD        account/reports/tax-summary/export account.reports.tax-summary.export › Account\ReportsController@e…
+  GET|HEAD        account/reports/tax-summary/print account.reports.tax-summary.print › Account\ReportsController@pri…
+  GET|HEAD        account/reports/trial-balance account.reports.trial-balance › Account\ReportsController@trialBalance
+  GET|HEAD        account/revenue-categories account.revenue-categories.index › Account\RevenueCategoriesController@i…
+  POST            account/revenue-categories account.revenue-categories.store › Account\RevenueCategoriesController@s…
+  GET|HEAD        account/revenue-categories/export account.revenue-categories.export › Account\RevenueCategoriesCont…
+  PUT             account/revenue-categories/{revenuecategories} account.revenue-categories.update › Account\RevenueC…
+  DELETE          account/revenue-categories/{revenuecategories} account.revenue-categories.destroy › Account\Revenue…
+  GET|HEAD        account/revenue-categories/{revenuecategories}/edit account.revenue-categories.edit › Account\Reven…
+  GET|HEAD        account/revenues .......................... account.revenues.index › Account\RevenueController@index
+  POST            account/revenues .......................... account.revenues.store › Account\RevenueController@store
+  GET|HEAD        account/revenues/export ................. account.revenues.export › Account\RevenueController@export
+  GET|HEAD        account/revenues/{revenue} .................. account.revenues.show › Account\RevenueController@show
+  PUT             account/revenues/{revenue} .............. account.revenues.update › Account\RevenueController@update
+  DELETE          account/revenues/{revenue} ............ account.revenues.destroy › Account\RevenueController@destroy
+  POST            account/revenues/{revenue}/approve .... account.revenues.approve › Account\RevenueController@approve
+  POST            account/revenues/{revenue}/post ............. account.revenues.post › Account\RevenueController@post
+  GET|HEAD        account/year-end-closing ... account.year-end-closing.index › Account\YearEndClosingController@index
+  POST            account/year-end-closing/close account.year-end-closing.close › Account\YearEndClosingController@cl…
+  GET|HEAD        admin/account-deletion ............. admin-account-deletion › AccountDeletionRequestController@index
+  GET|HEAD        admin/account-deletion/data . admin-account-deletion.data › AccountDeletionRequestController@getData
+  GET|HEAD        admin/account-deletion/{id} .... admin-account-deletion.show › AccountDeletionRequestController@show
+  DELETE          admin/account-deletion/{id} admin-account-deletion.destroy › AccountDeletionRequestController@destr…
+  POST            admin/account-deletion/{id}/status admin-account-deletion.update-status › AccountDeletionRequestCon…
+  GET|HEAD        admin/appearance ............................ website-appearance › WebsiteSetupController@appearance
+  POST            admin/appearance/update ........ website-appearance-update › WebsiteSetupController@updateAppearance
+  GET|HEAD        admin/chit/accounts ............................. chit.accounts.index › ChitAccountsController@index
+  GET|HEAD        admin/chit/accounts/data .......................... chit.accounts.data › ChitAccountsController@data
+  GET|HEAD        admin/chit/accounts/{member} ...................... chit.accounts.show › ChitAccountsController@view
+  GET|HEAD        admin/chit/applications .................. chit.applications.index › ChitApplicationController@index
+  POST            admin/chit/applications/apply ............ chit.applications.apply › ChitApplicationController@apply
+  GET|HEAD        admin/chit/applications/data ............... chit.applications.data › ChitApplicationController@data
+  GET|HEAD        admin/chit/applications/{member} ........... chit.applications.show › ChitApplicationController@show
+  POST            admin/chit/applications/{member}/approve chit.applications.approve › ChitApplicationController@appr…
+  POST            admin/chit/applications/{member}/reject chit.applications.reject › ChitApplicationController@reject
+  GET|HEAD        admin/chit/auctions .............................. chit.auctions.index › ChitAuctionController@index
+  POST            admin/chit/auctions .............................. chit.auctions.store › ChitAuctionController@store
+  GET|HEAD        admin/chit/auctions/create ..................... chit.auctions.create › ChitAuctionController@create
+  GET|HEAD        admin/chit/auctions/{auction} ...................... chit.auctions.show › ChitAuctionController@show
+  POST            admin/chit/auctions/{auction}/bid .................... chit.auctions.bid › ChitAuctionController@bid
+  POST            admin/chit/auctions/{auction}/declare-winner chit.auctions.declare-winner › ChitAuctionController@d…
+  GET|HEAD        admin/chit/chit-configuration ......... chit.configuration.index › ChitConfigurationController@index
+  POST            admin/chit/chit-configuration ....... chit.configuration.update › ChitConfigurationController@update
+  GET|HEAD        admin/chit/dashboard ................................ chit.dashboard › ChitDashboardController@index
+  GET|HEAD        admin/chit/dividends ........................... chit.dividends.index › ChitDividendController@index
+  GET|HEAD        admin/chit/dividends/pool/{group} ............ chit.dividends.pool › ChitDividendController@showPool
+  GET|HEAD        admin/chit/dividends/{dividend} .................. chit.dividends.show › ChitDividendController@show
+  POST            admin/chit/dividends/{dividend}/distribute chit.dividends.distribute › ChitDividendController@distr…
+  GET|HEAD        admin/chit/families ............................... chit.families.index › ChitFamilyController@index
+  POST            admin/chit/families ............................... chit.families.store › ChitFamilyController@store
+  GET|HEAD        admin/chit/families/{family} ........................ chit.families.show › ChitFamilyController@show
+  PUT             admin/chit/families/{family} .................... chit.families.update › ChitFamilyController@update
+  DELETE          admin/chit/families/{family} .................. chit.families.destroy › ChitFamilyController@destroy
+  POST            admin/chit/families/{family}/bulk-collect chit.families.bulk-collect › ChitFamilyController@bulkCol…
+  POST            admin/chit/families/{family}/members .. chit.families.members.store › ChitFamilyController@addMember
+  DELETE          admin/chit/families/{family}/members/{member} chit.families.members.destroy › ChitFamilyController@…
+  GET|HEAD        admin/chit/groups .................................... chit.groups.index › ChitGroupController@index
+  POST            admin/chit/groups .................................... chit.groups.store › ChitGroupController@store
+  GET|HEAD        admin/chit/groups/create ........................... chit.groups.create › ChitGroupController@create
+  GET|HEAD        admin/chit/groups/{group} .............................. chit.groups.show › ChitGroupController@show
+  PUT             admin/chit/groups/{group} .......................... chit.groups.update › ChitGroupController@update
+  DELETE          admin/chit/groups/{group} ........................ chit.groups.destroy › ChitGroupController@destroy
+  POST            admin/chit/groups/{group}/activate ............. chit.groups.activate › ChitGroupController@activate
+  POST            admin/chit/groups/{group}/cancel-termination chit.groups.cancel-termination › ChitGroupController@c…
+  POST            admin/chit/groups/{group}/close ...................... chit.groups.close › ChitGroupController@close
+  GET|HEAD        admin/chit/groups/{group}/edit ......................... chit.groups.edit › ChitGroupController@edit
+  POST            admin/chit/groups/{group}/reopen ................... chit.groups.reopen › ChitGroupController@reopen
+  DELETE          admin/chit/groups/{id}/force-delete ..... chit.groups.force-delete › ChitGroupController@forceDelete
+  POST            admin/chit/groups/{id}/restore ................... chit.groups.restore › ChitGroupController@restore
+  GET|HEAD        admin/chit/installments .................. chit.installments.index › ChitInstallmentController@index
+  POST            admin/chit/installments/bulk-collect chit.installments.bulk-collect › ChitInstallmentController@bul…
+  GET|HEAD        admin/chit/installments/client/{client} chit.installments.client › ChitInstallmentController@client…
+  GET|HEAD        admin/chit/installments/data ............ chit.installments.data › ChitInstallmentController@getData
+  GET|HEAD        admin/chit/installments/{group}/{month} .... chit.installments.show › ChitInstallmentController@show
+  POST            admin/chit/installments/{installment}/collect chit.installments.collect › ChitInstallmentController…
+  GET|HEAD        admin/chit/installments/{installment}/partial-rules chit.installments.partial-rules › ChitInstallme…
+  POST            admin/chit/installments/{installment}/undo . chit.installments.undo › ChitInstallmentController@undo
+  GET|HEAD        admin/chit/members ................................. chit.members.index › ChitMemberController@index
+  POST            admin/chit/members ................................. chit.members.store › ChitMemberController@store
+  GET|HEAD        admin/chit/members/create ........................ chit.members.create › ChitMemberController@create
+  PUT             admin/chit/members/{member} ...................... chit.members.update › ChitMemberController@update
+  DELETE          admin/chit/members/{member} .................... chit.members.destroy › ChitMemberController@destroy
+  POST            admin/chit/members/{member}/approve ............ chit.members.approve › ChitMemberController@approve
+  POST            admin/chit/members/{member}/cancel ............... chit.members.cancel › ChitMemberController@cancel
+  GET|HEAD        admin/chit/members/{member}/edit ..................... chit.members.edit › ChitMemberController@edit
+  POST            admin/chit/members/{member}/reject ............... chit.members.reject › ChitMemberController@reject
+  GET|HEAD        admin/chit/members/{member}/transfer chit.members.transfer.create › ChitMemberTransferController@cr…
+  POST            admin/chit/members/{member}/transfer chit.members.transfer.store › ChitMemberTransferController@sto…
+  GET|HEAD        admin/chit/members/{member}/transfer/preview chit.members.transfer.preview › ChitMemberTransferCont…
+  GET|HEAD        admin/chit/payouts ................................. chit.payouts.index › ChitPayoutController@index
+  POST            admin/chit/payouts ................................. chit.payouts.store › ChitPayoutController@store
+  GET|HEAD        admin/chit/payouts/{payout} .......................... chit.payouts.show › ChitPayoutController@show
+  POST            admin/chit/payouts/{payout}/process ............ chit.payouts.process › ChitPayoutController@process
+  GET|HEAD        admin/chit/referral-bonuses ........ chit.referral-bonuses.index › ChitReferralBonusController@index
+  POST            admin/chit/referral-bonuses ........ chit.referral-bonuses.store › ChitReferralBonusController@store
+  GET|HEAD        admin/chit/referral-bonuses/options chit.referral-bonuses.options › ChitReferralBonusController@get…
+  POST            admin/chit/referral-bonuses/{bonus}/pay chit.referral-bonuses.pay › ChitReferralBonusController@pay
+  GET|HEAD        admin/chit/reports ................................ chit.reports.index › ChitReportsController@index
+  GET|HEAD        admin/chit/reports/{report} ......................... chit.reports.show › ChitReportsController@show
+  GET|HEAD        admin/chit/reports/{report}/export .............. chit.reports.export › ChitReportsController@export
+  GET|HEAD        admin/chit/schemes ................................. chit.schemes.index › ChitSchemeController@index
+  POST            admin/chit/schemes ................................. chit.schemes.store › ChitSchemeController@store
+  GET|HEAD        admin/chit/schemes/create ........................ chit.schemes.create › ChitSchemeController@create
+  POST            admin/chit/schemes/payout-template/pdf chit.schemes.payout-template-pdf › ChitSchemeController@payo…
+  DELETE          admin/chit/schemes/{id}/force-delete .. chit.schemes.force-delete › ChitSchemeController@forceDelete
+  POST            admin/chit/schemes/{id}/restore ................ chit.schemes.restore › ChitSchemeController@restore
+  GET|HEAD        admin/chit/schemes/{scheme} .......................... chit.schemes.show › ChitSchemeController@show
+  PUT             admin/chit/schemes/{scheme} ...................... chit.schemes.update › ChitSchemeController@update
+  DELETE          admin/chit/schemes/{scheme} .................... chit.schemes.destroy › ChitSchemeController@destroy
+  GET|HEAD        admin/chit/schemes/{scheme}/edit ..................... chit.schemes.edit › ChitSchemeController@edit
+  GET|HEAD        admin/chit/schemes/{scheme}/flyer .................. chit.schemes.flyer › ChitSchemeController@flyer
+  GET|HEAD        admin/chit/settlement-applications chit.settlement-applications.index › ChitSettlementApplicationCo…
+  GET|HEAD        admin/chit/settlement-applications/data chit.settlement-applications.data › ChitSettlementApplicati…
+  GET|HEAD        admin/chit/settlement-applications/{payout} chit.settlement-applications.show › ChitSettlementAppli…
+  POST            admin/chit/settlement-applications/{payout}/update-month chit.settlement-applications.update-month …
+  GET|HEAD        admin/chit/settlements ................... chit.settlements.manage › ChitSettlementController@manage
+  POST            admin/chit/settlements/apply ............... chit.settlements.apply › ChitSettlementController@apply
+  GET|HEAD        admin/chit/settlements/export ............ chit.settlements.export › ChitSettlementController@export
+  GET|HEAD        admin/chit/settlements/history ......... chit.settlements.history › ChitSettlementController@history
+  GET|HEAD        admin/chit/settlements/{group}/{member}/confirm chit.settlements.confirm › ChitSettlementController…
+  POST            admin/chit/settlements/{group}/{member}/process chit.settlements.process › ChitSettlementController…
+  POST            admin/chit/settlements/{group}/{member}/update-future-installment chit.settlements.update-future-in…
+  POST            admin/chit/settlements/{payout}/cancel ... chit.settlements.cancel › ChitSettlementController@cancel
+  GET|HEAD        admin/chit/settlements/{payout}/promissory-note chit.settlements.promissory-note › ChitSettlementCo…
+  GET|HEAD        admin/chit/settlements/{payout}/promissory-note/pdf chit.settlements.promissory-note.pdf › ChitSett…
+  GET|HEAD        admin/chit/transfers ..................... chit.transfers.index › ChitMemberTransferController@index
+  GET|HEAD        admin/chit/transfers/{transfer} ............ chit.transfers.show › ChitMemberTransferController@show
+  POST            admin/chit/transfers/{transfer}/release-outgoing-settlement chit.transfers.release-outgoing-settlem…
+  GET|HEAD        admin/client-ledger/{id} .................... admin-client-ledger-show › ClientLedgerController@show
+  GET|HEAD        admin/client-ledgers ........................... admin-client-ledgers › ClientLedgerController@index
+  GET|HEAD        admin/client-ledgers/data ............... admin-client-ledgers.data › ClientLedgerController@getData
+  GET|HEAD        admin/fd/applications ....................... fd.applications.index › FdApplicationsController@index
+  POST            admin/fd/applications ....................... fd.applications.store › FdApplicationsController@store
+  GET|HEAD        admin/fd/applications/data .................... fd.applications.data › FdApplicationsController@data
+  GET|HEAD        admin/fd/applications/{application} ........... fd.applications.show › FdApplicationsController@show
+  POST            admin/fd/applications/{application}/approve fd.applications.approve › FdApplicationsController@appr…
+  POST            admin/fd/applications/{application}/book ...... fd.applications.book › FdApplicationsController@book
+  POST            admin/fd/applications/{application}/reject fd.applications.reject › FdApplicationsController@reject
+  GET|HEAD        admin/fd/dashboard ............................ fd.dashboard › FixedDepositDashboardController@index
+  GET|HEAD        admin/fd/deposits ................................. fd.deposits.index › FixedDepositController@index
+  POST            admin/fd/deposits ................................. fd.deposits.store › FixedDepositController@store
+  GET|HEAD        admin/fd/deposits/calculate ............... fd.deposits.calculate › FixedDepositController@calculate
+  GET|HEAD        admin/fd/deposits/create ........................ fd.deposits.create › FixedDepositController@create
+  PUT             admin/fd/deposits/{deposit} ..................... fd.deposits.update › FixedDepositController@update
+  GET|HEAD        admin/fd/deposits/{deposit} ......................... fd.deposits.show › FixedDepositController@show
+  DELETE          admin/fd/deposits/{deposit} ................... fd.deposits.destroy › FixedDepositController@destroy
+  GET|HEAD        admin/fd/deposits/{deposit}/certificate fd.deposits.certificate › FixedDepositController@certificate
+  POST            admin/fd/deposits/{deposit}/close ................. fd.deposits.close › FixedDepositController@close
+  GET|HEAD        admin/fd/deposits/{deposit}/edit .................... fd.deposits.edit › FixedDepositController@edit
+  POST            admin/fd/deposits/{deposit}/maturity . fd.deposits.maturity › FixedDepositController@processMaturity
+  POST            admin/fd/deposits/{deposit}/premature fd.deposits.premature › FixedDepositController@prematureWithd…
+  GET|HEAD        admin/fd/deposits/{deposit}/premature-receipt fd.deposits.premature-receipt › FixedDepositControlle…
+  POST            admin/fd/deposits/{deposit}/renew ................. fd.deposits.renew › FixedDepositController@renew
+  GET|HEAD        admin/fd/reports ............................ fd.reports.index › FixedDepositReportsController@index
+  GET|HEAD        admin/fd/reports/{report} ..................... fd.reports.show › FixedDepositReportsController@show
+  GET|HEAD        admin/fd/reports/{report}/export .......... fd.reports.export › FixedDepositReportsController@export
+  GET|HEAD        admin/fd/schemes ............................. fd.schemes.index › FixedDepositSchemeController@index
+  POST            admin/fd/schemes ............................. fd.schemes.store › FixedDepositSchemeController@store
+  GET|HEAD        admin/fd/schemes/create .................... fd.schemes.create › FixedDepositSchemeController@create
+  GET|HEAD        admin/fd/schemes/{scheme} ...................... fd.schemes.show › FixedDepositSchemeController@show
+  PUT             admin/fd/schemes/{scheme} .................. fd.schemes.update › FixedDepositSchemeController@update
+  DELETE          admin/fd/schemes/{scheme} ................ fd.schemes.destroy › FixedDepositSchemeController@destroy
+  GET|HEAD        admin/fd/schemes/{scheme}/edit ................. fd.schemes.edit › FixedDepositSchemeController@edit
+  GET|HEAD        admin/fd/wallets ................................. fd.wallets.index › CustomerWalletController@index
+  GET|HEAD        admin/fd/wallets/client/{client} ......... fd.wallets.client › CustomerWalletController@showByClient
+  GET|HEAD        admin/fd/wallets/client/{client}/balance ..... fd.wallets.balance › CustomerWalletController@balance
+  GET|HEAD        admin/fd/wallets/{wallet} .......................... fd.wallets.show › CustomerWalletController@show
+  POST            admin/fd/wallets/{wallet}/withdraw ......... fd.wallets.withdraw › CustomerWalletController@withdraw
+  GET|HEAD        admin/homepage-setup ............................ website-homepage › WebsiteSetupController@homepage
+  POST            admin/homepage-setup/update ........ website-homepage-update › WebsiteSetupController@updateHomepage
+  PUT             admin/mobile-apps/policies/{id} admin.mobile-apps.update-policy › MobileAppManagementController@upd…
+  DELETE          admin/mobile-apps/policies/{id} admin.mobile-apps.destroy-policy › MobileAppManagementController@de…
+  POST            admin/mobile-apps/policies/{id}/toggle-status admin.mobile-apps.toggle-policy-status › MobileAppMan…
+  GET|HEAD        admin/mobile-apps/{appType} .......... admin.mobile-apps.index › MobileAppManagementController@index
+  POST            admin/mobile-apps/{appType}/delete-banner admin.mobile-apps.delete-banner › MobileAppManagementCont…
+  POST            admin/mobile-apps/{appType}/policies admin.mobile-apps.store-policy › MobileAppManagementController…
+  POST            admin/mobile-apps/{appType}/settings admin.mobile-apps.update-settings › MobileAppManagementControl…
+  GET|HEAD        admin/notification/send ............................................ AdminBroadCastController@create
+  POST            admin/notification/send .............................................. AdminBroadCastController@send
+  GET|HEAD        admin/notifications ............................. admin-notifications › NotificationController@index
+  POST            admin/notifications/clear-read ... admin-notifications.clear-read › NotificationController@clearRead
+  GET|HEAD        admin/notifications/latest ........... admin-notifications.latest › NotificationController@getLatest
+  POST            admin/notifications/mark-all-read admin-notifications.mark-all-read › NotificationController@markAl…
+  GET|HEAD        admin/notifications/unread-count admin-notifications.unread-count › NotificationController@getUnrea…
+  DELETE          admin/notifications/{id} .............. admin-notifications.destroy › NotificationController@destroy
+  POST            admin/notifications/{id}/mark-read admin-notifications.mark-read › NotificationController@markAsRead
+  GET|HEAD        agent-management/attendance/daily ... agent-management.submenu.attendance.daily › routes/web.php:622
+  GET|HEAD        agent-management/attendance/report . agent-management.submenu.attendance.report › routes/web.php:631
+  GET|HEAD        agent-management/directory ................. agent-management.submenu.directory › routes/web.php:615
+  GET|HEAD        agent-management/holidays ................... agent-management.submenu.holidays › routes/web.php:655
+  GET|HEAD        agent-management/payroll ..................... agent-management.submenu.payroll › routes/web.php:641
+  GET|HEAD        agent-management/roles ......................... agent-management.submenu.roles › routes/web.php:648
+  POST            api/account-deletion/request ........................ PublicAccountDeletionController@storeForClient
+  GET|HEAD        api/agent/agent-collections/bank-accounts agent. › Agent\AgentCollectionControllerApi@collectionBan…
+  POST            api/agent/agent-collections/bulk-store ....... agent. › Agent\AgentCollectionControllerApi@bulkStore
+  GET|HEAD        api/agent/agent-collections/search-dues ... agent. › Agent\AgentCollectionControllerApi@assignedDues
+  POST            api/agent/agent-collections/store ................ agent. › Agent\AgentCollectionControllerApi@store
+  GET|HEAD        api/agent/agent/cases/collected-today ..... agent. › Agent\AgentCaseControllerApi@todayCollectedList
+  GET|HEAD        api/agent/agent/cases/collections ........... agent. › Agent\AgentCaseControllerApi@agentCollections
+  GET|HEAD        api/agent/agent/cases/pending ............. agent. › Agent\AgentCaseControllerApi@pendingCollections
+  GET|HEAD        api/agent/agent/cases/recovered ............... agent. › Agent\AgentCaseControllerApi@recoveredCases
+  GET|HEAD        api/agent/agent/cases/recovered/{emiId} .. agent. › Agent\AgentCaseControllerApi@recoveredCaseDetail
+  GET|HEAD        api/agent/agent/cases/risk ......................... agent. › Agent\AgentCaseControllerApi@riskCases
+  POST            api/agent/agent/check-in ........................ agent. › Agent\AgentDashboardControllerApi@checkIn
+  POST            api/agent/agent/check-out ...................... agent. › Agent\AgentDashboardControllerApi@checkOut
+  GET|HEAD        api/agent/app-settings .................... agent.app-settings › Agent\AppSettingControllerApi@index
+  GET|HEAD        api/agent/cases ........................................ agent. › Agent\AgentCaseControllerApi@index
+  GET|HEAD        api/agent/cases/collected-today ........... agent. › Agent\AgentCaseControllerApi@todayCollectedList
+  GET|HEAD        api/agent/cases/collections ................. agent. › Agent\AgentCaseControllerApi@agentCollections
+  GET|HEAD        api/agent/cases/pending ................... agent. › Agent\AgentCaseControllerApi@pendingCollections
+  GET|HEAD        api/agent/cases/recovered ..................... agent. › Agent\AgentCaseControllerApi@recoveredCases
+  GET|HEAD        api/agent/cases/recovered/{emiId} ........ agent. › Agent\AgentCaseControllerApi@recoveredCaseDetail
+  GET|HEAD        api/agent/cases/risk ............................... agent. › Agent\AgentCaseControllerApi@riskCases
+  POST            api/agent/cases/update-call-status .......... agent. › Agent\AgentCaseControllerApi@updateCallStatus
+  POST            api/agent/check-in .............................. agent. › Agent\AgentDashboardControllerApi@checkIn
+  POST            api/agent/check-out ............................ agent. › Agent\AgentDashboardControllerApi@checkOut
+  GET|HEAD        api/agent/chit-account/{id} ............. agent. › Agent\ChitManagementControllerApi@viewChitAccount
+  GET|HEAD        api/agent/chit-accounts .................... agent. › Agent\ChitManagementControllerApi@chitAccounts
+  GET|HEAD        api/agent/chit-applications ....................... agent. › Agent\ChitManagementControllerApi@index
+  POST            api/agent/chit-applications/apply ................. agent. › Agent\ChitManagementControllerApi@apply
+  GET|HEAD        api/agent/chit-applications/collections ..... agent. › Agent\ChitManagementControllerApi@collections
+  GET|HEAD        api/agent/chit-applications/metadata ........... agent. › Agent\ChitManagementControllerApi@metadata
+  GET|HEAD        api/agent/chit-applications/{member} ............... agent. › Agent\ChitManagementControllerApi@show
+  GET|HEAD        api/agent/clients ............................... agent. › Agent\ClientManagementControllerApi@index
+  POST            api/agent/clients ............................... agent. › Agent\ClientManagementControllerApi@store
+  GET|HEAD        api/agent/clients/{id} ........................... agent. › Agent\ClientManagementControllerApi@show
+  POST            api/agent/clients/{id} ......................... agent. › Agent\ClientManagementControllerApi@update
+  DELETE          api/agent/clients/{id} ........................ agent. › Agent\ClientManagementControllerApi@destroy
+  POST            api/agent/collections .............................. agent. › Agent\EmiCollectionControllerApi@store
+  POST            api/agent/collections/action ............ agent. › Agent\EmiCollectionControllerApi@collectionAction
+  GET|HEAD        api/agent/collections/dashboard ...... agent. › Agent\EmiCollectionControllerApi@collectionDashboard
+  GET|HEAD        api/agent/collections/details ....... agent. › Agent\EmiCollectionControllerApi@getCollectionDetails
+  GET|HEAD        api/agent/collections/in-progress .. agent. › Agent\EmiCollectionControllerApi@inProgressCollections
+  POST            api/agent/collections/resend-otp ............... agent. › Agent\EmiCollectionControllerApi@resendOtp
+  GET|HEAD        api/agent/collections/today ............. agent. › Agent\EmiCollectionControllerApi@todayCollections
+  GET|HEAD        api/agent/collections/upcoming ....... agent. › Agent\EmiCollectionControllerApi@upcomingCollections
+  GET|HEAD        api/agent/daily-logs .......................... agent. › Agent\AgentDashboardControllerApi@dailyLogs
+  GET|HEAD        api/agent/daily-logs/{id} .................. agent. › Agent\AgentDashboardControllerApi@showDailyLog
+  GET|HEAD        api/agent/daily-summary ................. agent. › Agent\AgentDashboardControllerApi@checkoutSummary
+  GET|HEAD        api/agent/dashboard ............................... agent. › Agent\AgentDashboardControllerApi@index
+  GET|HEAD        api/agent/emi/{emi}/collections .................... agent. › Agent\EmiCollectionControllerApi@index
+  GET|HEAD        api/agent/emis/{emiId}/collect ................... agent. › Agent\EmiCollectionControllerApi@showEmi
+  POST            api/agent/emis/{emiId}/update-status ........... agent. › Agent\EmiPaymentControllerApi@updateStatus
+  GET|HEAD        api/agent/followups ............................... agent. › Agent\EmiPaymentControllerApi@followups
+  PUT             api/agent/followups/{followupId}/reschedule agent. › Agent\EmiPaymentControllerApi@rescheduleFollow…
+  POST            api/agent/forget-password/change-password .. agent. › Agent\AuthControllerApi@changePasswordAfterOtp
+  POST            api/agent/forget-password/verify-otp ...... agent. › Agent\AuthControllerApi@verifyForgetPasswordOtp
+  GET|HEAD        api/agent/high-risk-clients ............. agent. › Agent\AgentDashboardControllerApi@highRiskClients
+  GET|HEAD        api/agent/loan-account/{id} ............. agent. › Agent\LoanManagementControllerApi@viewLoanAccount
+  POST            api/agent/loan-account/{id}/regenerate-documents agent. › Agent\LoanManagementControllerApi@regener…
+  GET|HEAD        api/agent/loan-accounts .................... agent. › Agent\LoanManagementControllerApi@loanAccounts
+  GET|HEAD        api/agent/loan-accounts/{loanAccountId}/actions-history agent. › Agent\EmiCollectionControllerApi@v…
+  GET|HEAD        api/agent/loan-accounts/{loanAccountId}/collect ..... agent. › Agent\EmiCollectionControllerApi@show
+  GET|HEAD        api/agent/loan-accounts/{loanAccountId}/customer-details agent. › Agent\EmiCollectionControllerApi@…
+  GET|HEAD        api/agent/loan-accounts/{loanAccountId}/overdue-breakdown agent. › Agent\EmiCollectionControllerApi…
+  GET|HEAD        api/agent/loan-applications ....................... agent. › Agent\LoanManagementControllerApi@index
+  POST            api/agent/loan-applications/check-eligibility agent. › Agent\LoanManagementControllerApi@checkLoanE…
+  GET|HEAD        api/agent/loan-applications/collections ..... agent. › Agent\LoanManagementControllerApi@collections
+  GET|HEAD        api/agent/loan-applications/metadata ........... agent. › Agent\LoanManagementControllerApi@metadata
+  POST            api/agent/loan-applications/preview-emi ...... agent. › Agent\LoanManagementControllerApi@previewEmi
+  POST            api/agent/loan-applications/quick-apply agent. › Agent\LoanManagementControllerApi@storeQuickApplic…
+  GET|HEAD        api/agent/loan-applications/{application} .......... agent. › Agent\LoanManagementControllerApi@show
+  POST            api/agent/location/update .......................... agent. › Agent\AuthControllerApi@updateLocation
+  POST            api/agent/login ........................................ agent.login › Agent\AuthControllerApi@login
+  POST            api/agent/logout ..................................... agent.logout › Agent\AuthControllerApi@logout
+  GET|HEAD        api/agent/me ................................................. agent.me › Agent\AuthControllerApi@me
+  GET|HEAD        api/agent/notifications ....................... agent. › Agent\EmiPaymentControllerApi@notifications
+  POST            api/agent/notifications/clear-all ..... agent. › Agent\EmiPaymentControllerApi@clearAllNotifications
+  POST            api/agent/notifications/mark-all-read ......... agent. › Agent\EmiPaymentControllerApi@markAllAsRead
+  POST            api/agent/notifications/mark-read ................ agent. › Agent\EmiPaymentControllerApi@markAsRead
+  GET|HEAD        api/agent/outstanding-overview ....... agent. › Agent\AgentOverviewControllerApi@outstandingOverview
+  POST            api/agent/password/forgot ................... agent. › Agent\AuthControllerApi@sendForgetPasswordOtp
+  GET|HEAD        api/agent/payment-history .................... agent. › Agent\EmiPaymentControllerApi@paymentHistory
+  GET|HEAD        api/agent/payment-status ................... agent. › Agent\EmiCollectionControllerApi@paymentStatus
+  POST            api/agent/payments/callback .......... agent.payment.callback › Agent\EmiPaymentControllerApi@handle
+  GET|HEAD        api/agent/policy-pages ................................ agent. › Agent\PolicyPageControllerApi@index
+  GET|HEAD        api/agent/policy-pages/{slug} .......................... agent. › Agent\PolicyPageControllerApi@show
+  GET|HEAD        api/agent/privacy_policy ........ agent.privacy-policy › Agent\AppSettingControllerApi@privacyPolicy
+  GET|HEAD        api/agent/profile ............................... agent. › Agent\AgentDashboardControllerApi@profile
+  POST            api/agent/profile-update .................. agent. › Agent\AgentDashboardControllerApi@updateProfile
+  POST            api/agent/refresh .................................. agent.refresh › Agent\AuthControllerApi@refresh
+  GET|HEAD        api/agent/status-options ................. agent. › Agent\EmiPaymentControllerApi@getFollowupOptions
+  GET|HEAD        api/agent/support ........................................ agent. › Agent\SupportControllerApi@index
+  GET|HEAD        api/agent/terms_conditions .. agent.terms-conditions › Agent\AppSettingControllerApi@termsConditions
+  GET|HEAD        api/agent/today-cases ............................. agent. › Agent\AgentCaseControllerApi@todayCases
+  GET|HEAD        api/agent/visits ...................................... agent. › Agent\AgentVisitControllerApi@index
+  GET|HEAD        api/agent/visits/recovered .................. agent. › Agent\AgentVisitControllerApi@recoveredVisits
+  POST            api/agent/visits/start ........................... agent. › Agent\AgentVisitControllerApi@startVisit
+  POST            api/agent/visits/stop ............................. agent. › Agent\AgentVisitControllerApi@stopVisit
+  GET|HEAD        api/agent/visits/today .......................... agent. › Agent\AgentVisitControllerApi@todayVisits
+  GET|HEAD        api/agent/zones ................................. agent. › Agent\ClientManagementControllerApi@zones
+  GET|HEAD        api/app/color ..................................................... Api\AppControllerApi@getAppColor
+  GET|HEAD        api/app/locations ................................................ Api\AppControllerApi@getLocations
+  GET|HEAD        api/app/settings ............................................ Customer\AppSettingControllerApi@index
+  GET|HEAD        api/app/slide-imgs ................................................... Api\SlideController@slideImgs
+  POST            api/auth/create-password ................................. Customer\AuthControllerApi@createPassword
+  POST            api/auth/forgot-mpin/reset .............................. Customer\AuthControllerApi@forgotMpinReset
+  POST            api/auth/forgot-mpin/send-otp ......................... Customer\AuthControllerApi@forgotMpinSendOtp
+  POST            api/auth/forgot-mpin/verify-otp ..................... Customer\AuthControllerApi@forgotMpinVerifyOtp
+  POST            api/auth/login .................................................... Customer\AuthControllerApi@login
+  POST            api/auth/register .............................................. Customer\AuthControllerApi@register
+  POST            api/auth/resend-otp ........................................... Customer\AuthControllerApi@resendOtp
+  POST            api/auth/reset-password ................................... Customer\AuthControllerApi@resetPassword
+  POST            api/auth/send-otp ............................................... Customer\AuthControllerApi@sendOtp
+  POST            api/auth/set-mpin ............................................... Customer\AuthControllerApi@setMpin
+  POST            api/auth/set-password .................................... Customer\AuthControllerApi@createPassword
+  POST            api/auth/verify-mpin ......................................... Customer\AuthControllerApi@verifyMpin
+  POST            api/auth/verify-otp ........................................... Customer\AuthControllerApi@verifyOtp
+  POST            api/cashfree/create-order ................................ Api\PaymentControllerApi@cashFreeEmiOrder
+  GET|POST|HEAD   api/cashfree/return ................................. Api\PaymentControllerApi@cashfreeReturnHandler
+  POST            api/cashfree/verify-payment ...................... Api\PaymentControllerApi@verifyCashFreeEmiPayment
+  GET|HEAD        api/chits/my-chits ................................................ Api\ChitControllerApi@getMyChits
+  POST            api/chits/request-settlement ............................... Api\ChitControllerApi@requestSettlement
+  GET|HEAD        api/customer/app-settings ................................... Customer\AppSettingControllerApi@index
+  GET|HEAD        api/customer/app-settings/policies/{type?} ............... Customer\AppSettingControllerApi@policies
+  POST            api/customer/auth/change-mpin ................................ Customer\AuthControllerApi@changeMpin
+  POST            api/customer/auth/create-password ........................ Customer\AuthControllerApi@createPassword
+  POST            api/customer/auth/forgot-mpin/reset ..................... Customer\AuthControllerApi@forgotMpinReset
+  POST            api/customer/auth/forgot-mpin/send-otp ................ Customer\AuthControllerApi@forgotMpinSendOtp
+  POST            api/customer/auth/forgot-mpin/verify-otp ............ Customer\AuthControllerApi@forgotMpinVerifyOtp
+  POST            api/customer/auth/forgot-password/reset ................... Customer\AuthControllerApi@resetPassword
+  POST            api/customer/auth/forgot-password/send-otp ........ Customer\AuthControllerApi@forgotPasswordSendOtp
+  POST            api/customer/auth/forgot-password/verify-otp .... Customer\AuthControllerApi@forgotPasswordVerifyOtp
+  GET|HEAD        api/customer/auth/locations ................................... Customer\AuthControllerApi@locations
+  POST            api/customer/auth/login ........................................... Customer\AuthControllerApi@login
+  POST            api/customer/auth/logout ......................................... Customer\AuthControllerApi@logout
+  GET|HEAD        api/customer/auth/me ................................................. Customer\AuthControllerApi@me
+  POST            api/customer/auth/register ..................................... Customer\AuthControllerApi@register
+  GET|HEAD        api/customer/auth/register-dropdowns .................. Customer\AuthControllerApi@registerDropdowns
+  POST            api/customer/auth/resend-otp .................................. Customer\AuthControllerApi@resendOtp
+  POST            api/customer/auth/reset-password .......................... Customer\AuthControllerApi@resetPassword
+  POST            api/customer/auth/send-otp ...................................... Customer\AuthControllerApi@sendOtp
+  POST            api/customer/auth/set-mpin ...................................... Customer\AuthControllerApi@setMpin
+  POST            api/customer/auth/set-password ........................... Customer\AuthControllerApi@createPassword
+  POST            api/customer/auth/verify-mpin ................................ Customer\AuthControllerApi@verifyMpin
+  POST            api/customer/auth/verify-otp .................................. Customer\AuthControllerApi@verifyOtp
+  GET|HEAD        api/customer/banners/{module?} ............................... Customer\CatalogControllerApi@banners
+  GET|HEAD        api/customer/chit-groups .................................. Customer\CatalogControllerApi@chitGroups
+  GET|HEAD        api/customer/chit-schemes ................................ Customer\CatalogControllerApi@chitSchemes
+  GET|HEAD        api/customer/chit-schemes/{id} ........................ Customer\CatalogControllerApi@chitSchemeShow
+  GET|HEAD        api/customer/chit-schemes/{schemeId}/groups ............. Customer\CatalogControllerApi@schemeGroups
+  GET|HEAD        api/customer/chits/accounts/{id?} .......................... Customer\ChitControllerApi@chitAccounts
+  GET|HEAD        api/customer/chits/applications-with-accounts .. Customer\ChitControllerApi@applicationsWithAccounts
+  GET|HEAD        api/customer/chits/applications/{id?} .................. Customer\ChitControllerApi@chitApplications
+  POST            api/customer/chits/apply ...................................... Customer\ChitControllerApi@applyChit
+  GET|HEAD        api/customer/chits/dropdowns .............................. Customer\ChitControllerApi@chitDropdowns
+  GET|HEAD        api/customer/chits/family-members ......................... Customer\ChitControllerApi@familyMembers
+  POST            api/customer/chits/request-settlement ................... Customer\ChitControllerApi@applySettlement
+  GET|HEAD        api/customer/chits/settlement-history ............ Customer\ChitControllerApi@settlementApplications
+  POST            api/customer/chits/settlements .......................... Customer\ChitControllerApi@applySettlement
+  GET|HEAD        api/customer/chits/settlements/dropdowns ............. Customer\ChitControllerApi@settlementMetadata
+  GET|HEAD        api/customer/chits/settlements/metadata .............. Customer\ChitControllerApi@settlementMetadata
+  GET|HEAD        api/customer/chits/settlements/preview ................ Customer\ChitControllerApi@settlementPreview
+  GET|HEAD        api/customer/chits/settlements/{id?} ............. Customer\ChitControllerApi@settlementApplications
+  GET|HEAD        api/customer/fd-schemes .................................... Customer\CatalogControllerApi@fdSchemes
+  GET|HEAD        api/customer/fd-schemes/{id} ............................ Customer\CatalogControllerApi@fdSchemeShow
+  GET|HEAD        api/customer/fd/accounts/{id?} ................................. Customer\FdControllerApi@fdAccounts
+  GET|HEAD        api/customer/fd/applications-with-accounts ....... Customer\FdControllerApi@applicationsWithAccounts
+  GET|HEAD        api/customer/fd/applications/{id?} ......................... Customer\FdControllerApi@fdApplications
+  POST            api/customer/fd/apply ............................................. Customer\FdControllerApi@applyFd
+  GET|HEAD        api/customer/fd/dropdowns ..................................... Customer\FdControllerApi@fdDropdowns
+  GET|HEAD        api/customer/loan-types .................................... Customer\CatalogControllerApi@loanTypes
+  GET|HEAD        api/customer/loan-types/{id} ............................ Customer\CatalogControllerApi@loanTypeShow
+  GET|HEAD        api/customer/loans/accounts/{id?} .......................... Customer\LoanControllerApi@loanAccounts
+  GET|HEAD        api/customer/loans/applications-with-accounts .. Customer\LoanControllerApi@applicationsWithAccounts
+  GET|HEAD        api/customer/loans/applications/{id?} .................. Customer\LoanControllerApi@loanApplications
+  POST            api/customer/loans/apply ...................................... Customer\LoanControllerApi@applyLoan
+  GET|HEAD        api/customer/loans/dropdowns .............................. Customer\LoanControllerApi@loanDropdowns
+  GET|HEAD        api/customer/locations ........................................ Customer\AuthControllerApi@locations
+  GET|HEAD        api/customer/privacy_policy ......................... Customer\AppSettingControllerApi@privacyPolicy
+  GET|HEAD        api/customer/register-dropdowns ....................... Customer\AuthControllerApi@registerDropdowns
+  GET|HEAD        api/customer/terms_conditions ..................... Customer\AppSettingControllerApi@termsConditions
+  POST            api/kyc/aadhaar/otp-verify .......................... Api\VerificationControllerApi@verifyAadhaarOtp
+  POST            api/kyc/aadhaar/resend-otp .......................... Api\VerificationControllerApi@resendAadhaarOtp
+  POST            api/kyc/aadhaar/verify ................................. Api\VerificationControllerApi@verifyAadhaar
+  POST            api/kyc/bank/verify ....................................... Api\VerificationControllerApi@verifyBank
+  POST            api/kyc/email/resend-otp .............................. Api\VerificationControllerApi@resendEmailOtp
+  POST            api/kyc/email/send-otp .................................. Api\VerificationControllerApi@sendEmailOtp
+  POST            api/kyc/email/verify-otp .............................. Api\VerificationControllerApi@verifyEmailOtp
+  GET|HEAD        api/kyc/locations .................................................. Api\LocationControllerApi@index
+  POST            api/kyc/pan/verify ......................................... Api\VerificationControllerApi@verifyPan
+  POST            api/kyc/selfie/upload ................................................ Api\KycControllerApi@addImage
+  GET|HEAD        api/loan-document/{loan_account_id} ................... Api\ClientDocumentControllerApi@getDocuments
+  POST            api/loan/{id}/statement/download ................. Api\ClientDocumentControllerApi@downloadStatement
+  POST            api/loan/{id}/statement/email ....................... Api\ClientDocumentControllerApi@emailStatement
+  GET|HEAD        api/loans/applications/{id?} ..................... Api\LoanApplicationControllerApi@listApplications
+  POST            api/loans/apply ...................................... Api\LoanApplicationControllerApi@applyForLoan
+  GET|HEAD        api/loans/emi-history .............................................. Api\EmiControllerApi@emiHistory
+  GET|HEAD        api/loans/emi/{emi_id}/partial-min ...................... LoanAccountsController@emiPartialMinAmount
+  GET|HEAD        api/loans/emi/{id}/receipt ................................. Api\EmiControllerApi@generateEmiReceipt
+  GET|HEAD        api/loans/loan-account/{id} ............................ Api\LoanApplicationControllerApi@loanDetail
+  GET|HEAD        api/loans/loan-history ................................ Api\LoanApplicationControllerApi@loanHistory
+  GET|HEAD        api/loans/loan-products/{id} ..................................... Api\LoanProductControllerApi@show
+  GET|HEAD        api/loans/loan-statements/{loan_account_id} .................. LoanAccountsController@loanStatements
+  POST            api/loans/proceed-application .................. Api\LoanApplicationControllerApi@proceedApplication
+  GET|HEAD        api/loans/{id}/foreclose-loan ............................... LoanAccountsController@foreclosureInfo
+  GET|HEAD        api/loans/{id}/prepayment-eligible ........................... LoanAccountsController@prepaymentInfo
+  POST            api/loans/{id}/prepayment-loan ............................... LoanAccountsController@prepaymentInfo
+  GET|HEAD        api/notifications .............................................. Api\NotificationControllerApi@index
+  POST            api/notifications/clear-read ............................... Api\NotificationControllerApi@clearRead
+  GET|HEAD        api/notifications/latest ................................... Api\NotificationControllerApi@getLatest
+  POST            api/notifications/mark-all-read ........................ Api\NotificationControllerApi@markAllAsRead
+  GET|HEAD        api/notifications/stats ..................................... Api\NotificationControllerApi@getStats
+  GET|HEAD        api/notifications/unread-count ........................ Api\NotificationControllerApi@getUnreadCount
+  GET|HEAD        api/notifications/{id} .......................................... Api\NotificationControllerApi@show
+  DELETE          api/notifications/{id} ....................................... Api\NotificationControllerApi@destroy
+  POST            api/notifications/{id}/mark-read .......................... Api\NotificationControllerApi@markAsRead
+  GET|HEAD        api/payment-methods/enabled ................................ Api\PaymentControllerApi@enabledMethods
+  POST            api/razor-pay/create-order ......................... Api\RazorpayPaymentControllerApi@createEmiOrder
+  POST            api/razor-pay/webhook ............................. Api\RazorpayPaymentControllerApi@razorpayWebhook
+  GET|HEAD        api/support-tickets/get ....................................... Api\SupportTicketControllerApi@index
+  POST            api/support-tickets/send ....................................... Api\SupportTicketControllerApi@send
+  GET|HEAD        api/support-tickets/tickets/{id} ............................... Api\SupportTicketControllerApi@show
+  POST            api/support-tickets/tickets/{id}/reply ........................ Api\SupportTicketControllerApi@reply
+  GET|HEAD        api/userDetails/faq .................................................... Api\PolicyControllerApi@faq
+  GET|HEAD        api/userDetails/kyc ............................................. Api\ClientControllerApi@kycDetails
+  GET|HEAD        api/userDetails/loan-products ................................... Api\LoanProductControllerApi@index
+  POST            api/userDetails/policies/accept ............................. Api\PolicyControllerApi@acceptPolicies
+  GET|HEAD        api/userDetails/policies/{slug?} ............................... Api\PolicyControllerApi@getPolicies
+  GET|HEAD        api/userDetails/profile .............................................. Api\ClientControllerApi@index
+  POST            api/userDetails/profile-update ............................... Api\ClientControllerApi@updateProfile
+  GET|HEAD        api/userDetails/profile/check-details ................... Api\ClientControllerApi@checkClientDetails
+  GET|HEAD        api/users/all-bank-details ............................ Api\DashboardControllerApi@getAllBankDetails
+  POST            api/users/contact .................................................... Api\ContactControllerApi@send
+  GET|HEAD        api/users/dashboard ........................................... Api\DashboardControllerApi@dashboard
+  POST            api/users/emi/calculate ................................. Api\UserDataSyncControllerApi@calculateEmi
+  POST            api/users/employee-information/add ..................... Api\KycControllerApi@addEmployeeInformation
+  POST            api/users/fcm-token ..................................... Api\LoginControllerApi@registerDeviceToken
+  POST            api/users/fcm-token/update .............................. Api\LoginControllerApi@registerDeviceToken
+  POST            api/users/location/update ............................. Api\UserDataSyncControllerApi@updateLocation
+  POST            api/users/logout ................................................. Customer\AuthControllerApi@logout
+  POST            api/users/nominee/add .............................................. Api\KycControllerApi@addNominee
+  POST            api/users/user/calls ................................... Api\UserDataSyncControllerApi@storeCallLogs
+  POST            api/users/user/contacts ................................ Api\UserDataSyncControllerApi@storeContacts
+  POST            api/users/user/device ................................... Api\LoginControllerApi@registerDeviceToken
+  POST            api/users/user/fcm-token ................................ Api\LoginControllerApi@registerDeviceToken
+  POST            api/users/user/sms .......................................... Api\UserDataSyncControllerApi@storeSms
+  POST            api/users/user/update ..................................... Api\VerificationControllerApi@userUpdate
+  GET|HEAD        app/agents ...................... agent-management.index › AgentManagementController@AgentManagement
+  POST            app/agents/add-advance .......... agent-management.addAdvance › AgentManagementController@addAdvance
+  POST            app/agents/add-expense .......... agent-management.addExpense › AgentManagementController@addExpense
+  GET|HEAD        app/agents/agent-attendance ..................................................... routes/web.php:381
+  GET|HEAD        app/agents/agent-collections ................... agent-collections › AgentCollectionController@index
+  POST            app/agents/agent-collections ............. agent-collections.store › AgentCollectionController@store
+  POST            app/agents/agent-collections/assign .... agent-collections.assign › AgentCollectionController@assign
+  GET|HEAD        app/agents/agent-collections/assigned-dues agent-collections.assigned-dues › AgentCollectionControl…
+  POST            app/agents/agent-collections/bulk-store agent-collections.bulk-store › AgentCollectionController@bu…
+  POST            app/agents/agent-collections/bulk-verify agent-collections.bulk-verify › AgentCollectionController@…
+  GET|HEAD        app/agents/agent-collections/chit-list agent-collections.chit-list › AgentCollectionController@chit…
+  GET|HEAD        app/agents/agent-collections/get-emi-info/{id} agent-collections.get-emi-info › AgentCollectionCont…
+  GET|HEAD        app/agents/agent-collections/list .......... agent-collections.list › AgentCollectionController@list
+  GET|HEAD        app/agents/agent-collections/partial-payment-rules/{id} agent-collections.partial-payment-rules › A…
+  GET|HEAD        app/agents/agent-collections/search-emis agent-collections.search-emis › AgentCollectionController@…
+  GET|HEAD        app/agents/agent-collections/stats ....... agent-collections.stats › AgentCollectionController@stats
+  GET|HEAD        app/agents/agent-collections/{id} .......... agent-collections.show › AgentCollectionController@show
+  GET|HEAD        app/agents/agent-collections/{id}/history agent-collections.history › AgentCollectionController@get…
+  POST            app/agents/agent-collections/{id}/repay .. agent-collections.repay › AgentCollectionController@repay
+  POST            app/agents/agent-collections/{id}/verify agent-collections.verify › AgentCollectionController@verify
+  GET|HEAD        app/agents/assignments ................... agent-assignments.index › AgentAssignmentController@index
+  GET|HEAD        app/agents/assignments/list ................ agent-assignments.list › AgentAssignmentController@list
+  GET|HEAD        app/agents/attendance ........... agent-management.attendance › AgentManagementController@attendance
+  POST            app/agents/bulk-mark-attendance agent-management.bulkMarkAttendance › AgentManagementController@bul…
+  GET|HEAD        app/agents/dashboard .............................. agent-dashboard › AgentDashboardController@index
+  GET|HEAD        app/agents/data ............................. agent-management.data › AgentManagementController@data
+  GET|HEAD        app/agents/export-attendance agent-management.exportAttendance › AgentManagementController@exportAt…
+  GET|HEAD        app/agents/export-attendance-pdf agent-management.exportAttendancePDF › AgentManagementController@e…
+  POST            app/agents/mark-attendance agent-management.markAttendance › AgentManagementController@markAttendan…
+  GET|HEAD        app/agents/print-attendance agent-management.printAttendance › AgentManagementController@printAtten…
+  POST            app/agents/store .......................... agent-management.store › AgentManagementController@store
+  GET|HEAD        app/agents/view/{id} ........................ agent-management.view › AgentManagementController@view
+  GET|HEAD        app/agents/view/{id}/visits .... agent-management.view-visits › AgentManagementController@viewVisits
+  GET|HEAD        app/agents/view/{id}/visits/data agent-management.visits.data › AgentManagementController@getVisitD…
+  GET|HEAD        app/agents/view/{id}/work .......... agent-management.view-work › AgentManagementController@viewWork
+  GET|HEAD        app/agents/view/{id}/work/client/{clientId} agent-management.view-assigned-client › AgentManagement…
+  GET|HEAD        app/agents/view/{id}/work/clients agent-management.get-assigned-clients › AgentManagementController…
+  GET|HEAD        app/agents/visits/{visit_id} agent-management.visit-details › AgentManagementController@viewVisitDe…
+  DELETE          app/agents/{id} ....................... agent-management.destroy › AgentManagementController@destroy
+  POST            app/agents/{id}/update ... agent-management.update-account › AgentManagementController@updateAccount
+  GET|HEAD        audit-logs/activity-logs ............... audit-logs-activity-logs › AuditLogsController@activityLogs
+  GET|HEAD        audit-logs/activity-logs/location/{id} audit-logs-location-details › AuditLogsController@getLocatio…
+  GET|HEAD        audit-logs/activity-logs/view-location/{id} audit-logs-view-location › AuditLogsController@viewLoca…
+  GET|HEAD        audit-logs/login-logout-history audit-logs-login-logout-history › AuditLogsController@loginLogoutHi…
+  GET|HEAD        client-list ................................... client-list.index › ClientManagementController@index
+  POST            client-list ................................... client-list.store › ClientManagementController@store
+  GET|HEAD        client-list/create .......................... client-list.create › ClientManagementController@create
+  GET|HEAD        client-list/{client_list} ....................... client-list.show › ClientManagementController@show
+  PUT|PATCH       client-list/{client_list} ................... client-list.update › ClientManagementController@update
+  DELETE          client-list/{client_list} ................. client-list.destroy › ClientManagementController@destroy
+  GET|HEAD        client-list/{client_list}/edit .................. client-list.edit › ClientManagementController@edit
+  GET|HEAD        client-management .................. client-management › ClientManagementController@ClientManagement
+  GET|HEAD        client-management/add .................... client-management-add › ClientManagementController@create
+  POST            client-management/bulk-assign ...... client-bulk-assign › ClientManagementController@bulkAssignAgent
+  POST            client-management/bulk-assign-zone client-bulk-assign-zone › ClientManagementController@bulkAssignZ…
+  POST            client-management/bulk-delete ........... client-bulk-delete › ClientManagementController@bulkDelete
+  POST            client-management/bulk-import client-management-bulk-import › ClientManagementController@bulkImport
+  POST            client-management/check-duplicate client-management-check-duplicate › ClientManagementController@ch…
+  GET|HEAD        client-management/download-template client-management-download-template › ClientManagementControlle…
+  POST            client-management/penalty/apply-chit client-penalty-apply-chit › ClientManagementController@applyCh…
+  POST            client-management/penalty/apply-loan client-penalty-apply-loan › ClientManagementController@applyLo…
+  GET|HEAD        client-management/recycle-bin client-management-recycle-bin › ClientManagementController@recycleBin
+  POST            client-management/resend-aadhaar-otp client-management-resend-aadhaar-otp › ClientManagementControl…
+  POST            client-management/store ................. client-management-store › ClientManagementController@store
+  POST            client-management/verify-aadhaar client-management-verify-aadhaar › ClientManagementController@veri…
+  POST            client-management/verify-aadhaar-otp client-management-verify-aadhaar-otp › ClientManagementControl…
+  POST            client-management/verify-bank client-management-verify-bank › ClientManagementController@verifyBank
+  POST            client-management/verify-pan ... client-management-verify-pan › ClientManagementController@verifyPan
+  GET|HEAD        client-management/{client}/penalty-accounts client-penalty-accounts › ClientManagementController@pe…
+  DELETE          client-management/{id}/force-delete client-management-force-delete › ClientManagementController@for…
+  POST            client-management/{id}/restore ...... client-management-restore › ClientManagementController@restore
+  POST            client-management/{id}/toggle-status client-toggle-status › ClientManagementController@toggleStatus
+  GET|HEAD        client/dashboard ................................ client.dashboard › ClientDashboardController@index
+  GET|HEAD        client/emi/{emiId}/history ............ client-emi-history › ClientViewLoansController@getEmiHistory
+  POST            client/loan/emi/pay ......................... client-loan-emi-pay › ClientViewLoansController@payEmi
+  GET|HEAD        client/loan/{id} ............................. client.loan-view › ClientDashboardController@loanView
+  GET|HEAD        client/loan/{loanId}/document/{documentType}/download client-loan-document-download › ClientViewLoa…
+  GET|HEAD        client/loan/{loanId}/document/{documentType}/view client-loan-document-view › ClientViewLoansContro…
+  GET|HEAD        client/loan/{loanId}/emi-details client-loan-emi-details › ClientViewLoansController@emiDetailsPage
+  GET|HEAD        client/loan/{loanId}/emis ............... client-loan-emis › ClientViewLoansController@getEmiDetails
+  GET|HEAD        client/login ................................ client.login › Auth\ClientAuthController@showLoginForm
+  POST            client/login ................................... client.login.post › Auth\ClientAuthController@login
+  POST            client/logout ..................................... client.logout › Auth\ClientAuthController@logout
+  GET|HEAD        client/profile .................................. client.profile › ClientDashboardController@profile
+  POST            client/send-otp ................................ client.send-otp › Auth\ClientAuthController@sendOtp
+  POST            client/verify-otp .......................... client.verify-otp › Auth\ClientAuthController@verifyOtp
+  GET|HEAD        client/view/chits/{id} ......................... client-view-chits › ClientViewChitsController@index
+  GET|HEAD        client/view/loans/{id} ......................... client-view-loans › ClientViewLoansController@index
+  GET|HEAD        clients/view/account/{id} .................. client-view-account › ClientViewAccountController@index
+  POST            clients/view/account/{id}/update ... client-view-account.update › ClientViewAccountController@update
+  GET|HEAD        clients/view/kyc/{id} ............................. client-view-kyc › KycVerificationController@view
+  GET|HEAD        clients/view/ledger/{id} ................... client-view-ledger › ClientViewAccountController@ledger
+  GET|HEAD        clients/view/notifications ................. client-view-notifications › UserViewNotifications@index
+  POST            clients/{id}/blacklist .................... client-blacklist › ClientViewAccountController@blacklist
+  GET|HEAD        clients/{id}/info ............................ client.info › AgentManagementController@getClientInfo
+  POST            clients/{id}/unblacklist .............. client-unblacklist › ClientViewAccountController@unblacklist
+  GET|HEAD        confirm-password ........................ password.confirm › Auth\ConfirmablePasswordController@show
+  POST            confirm-password .......................................... Auth\ConfirmablePasswordController@store
+  GET|HEAD        credit-check/report/{creditScoreHistory} public.credit-check.report › PublicCreditCheckController@d…
+  POST            credit-check/send-otp ........... public.credit-check.send-otp › PublicCreditCheckController@sendOtp
+  POST            credit-check/verify ........ public.credit-check.verify › PublicCreditCheckController@verifyAndFetch
+  GET|HEAD        dashboard .................................................... dashboard › DashboardController@index
+  GET|HEAD        dashboard/agents/{agent}/collection-details dashboard.agent-collection-details › DashboardControlle…
+  GET|HEAD        dashboard/stats ..................................... dashboard.stats › DashboardController@getStats
+  POST            email/verification-notification verification.send › Auth\EmailVerificationNotificationController@st…
+  POST            emi/calculate .................................... emi-calculate › EmiCalculatorController@calculate
+  DELETE          emi/collection/{collectionId}/delete ........ emi.collection.delete › EmiController@deleteCollection
+  GET|HEAD        emi/emi-calculator .................................. emi-calculator › EmiCalculatorController@index
+  GET|HEAD        emi/loan-closing/{id} ............... emi.loan-closing.details › EmiController@getLoanClosingDetails
+  POST            emi/loan-closing/{id} ................... emi.loan-closing.settle › EmiController@settleAndCloseLoan
+  POST            emi/partial-payment ...................... emi.partial-payment › EmiController@processPartialPayment
+  POST            emi/payment/{emiId}/undo .............................. emi.payment.undo › EmiController@undoPayment
+  GET|HEAD        emi/receipts ........................................ payment-receipts › EmiController@receiptsIndex
+  POST            emi/receipts/create ................................... create-receipt › EmiController@createReceipt
+  GET|HEAD        emi/receipts/data ............................ payment-receipts-data › EmiController@getReceiptsData
+  POST            emi/receipts/pay-selected ................ emi.receipts.pay-selected › EmiController@paySelectedEmis
+  GET|HEAD        emi/receipts/pending-emis .............................. pending-emis › EmiController@getPendingEmis
+  GET|HEAD        emi/receipts/print/{id} ................................. print-receipt › EmiController@printReceipt
+  GET|HEAD        emi/receipts/view/{id} ................................... view-receipt › EmiController@printReceipt
+  GET|HEAD        emi/repayments ................................................ emi-repayments › EmiController@index
+  GET|HEAD        emi/repayments/all-ids ............................... emi-repayments-all-ids › EmiController@allIds
+  POST            emi/repayments/bulk-assign .............. emi-repayments-bulk-assign › EmiController@bulkAssignAgent
+  POST            emi/repayments/bulk-pay ............................ emi-repayments-bulk-pay › EmiController@bulkPay
+  POST            emi/repayments/bulk-undo ......................... emi-repayments-bulk-undo › EmiController@bulkUndo
+  GET|HEAD        emi/repayments/data .................................... emi-repayments-data › EmiController@getData
+  GET|HEAD        emi/repayments/emi/{emiId} ................................ emi-repayments-show › EmiController@show
+  GET|HEAD        emi/repayments/emi/{emiId}/history ..... emi-repayments-history › EmiController@getCollectionHistory
+  GET|HEAD        emi/repayments/view/{applicationNumber} ........................... emi-details › EmiController@view
+  GET|HEAD        emi/statement/print/{id} ............................ print-statement › EmiController@printStatement
+  GET|HEAD        emi/{emi_id}/partial-payment-rules emi.partial-payment-rules › LoanAccountsController@emiPartialMin…
+  GET|HEAD        forgot-password ......................... password.request › Auth\PasswordResetLinkController@create
+  POST            forgot-password ............................ password.email › Auth\PasswordResetLinkController@store
+  POST            loan-accounts/{id}/prepayment ... loan-account.prepayment › LoanAccountsController@processPrepayment
+  GET|HEAD        loan-accounts/{id}/prepayment-info loan-account.prepayment-info › LoanAccountsController@prepayment…
+  GET|HEAD        loan-application ......................... loan-application-index › LoanApplicationsController@index
+  POST            loan-application/check-eligibility loan-application-check-eligibility › LoanApplicationsController@…
+  POST            loan-application/preview-emi .. loan-application-preview-emi › LoanApplicationsController@previewEmi
+  POST            loan-application/quick-apply loan-application-quick-apply › LoanApplicationsController@storeQuickAp…
+  GET|HEAD        loan-application/view/{application} ........ loan-application-view › LoanApplicationsController@view
+  POST            loan/foreclosure-config/update foreclosure-config.update › LoanAccountsController@updateForeclosure…
+  GET|HEAD        loan/loan-account/{id} ............................. loan-account-view › LoanAccountsController@view
+  POST            loan/loan-account/{id}/regenerate-documents loan-account-regenerate-documents › LoanAccountsControl…
+  GET|HEAD        loan/loan-accounts .................................... loan-accounts › LoanAccountsController@index
+  GET|HEAD        loan/loan-accounts/data ........................... loan-accounts-data › LoanAccountsController@data
+  POST            loan/loan-accounts/{id}/foreclose ........ loan-account.foreclose › LoanAccountsController@foreclose
+  GET|HEAD        loan/loan-accounts/{id}/foreclosure-info loan-account.foreclosure-info › LoanAccountsController@for…
+  GET|HEAD        loan/loan-applications ........................ loan-applications › LoanApplicationsController@index
+  GET|HEAD        loan/loan-applications/data ............... loan-applications.data › LoanApplicationsController@data
+  DELETE          loan/loan-applications/{application} loan-applications.destroy › LoanApplicationsController@destroy
+  POST            loan/loan-applications/{application}/admin-proceed loan-applications.admin-proceed › LoanApplicatio…
+  POST            loan/loan-applications/{application}/approve loan-applications.approve › LoanApplicationsController…
+  POST            loan/loan-applications/{application}/disburse loan-applications.disburse › LoanApplicationsControll…
+  POST            loan/loan-applications/{application}/reject loan-applications.reject › LoanApplicationsController@r…
+  GET|HEAD        loan/loan-configuration ..................... loan-configuration › LoanConfigurationController@index
+  GET|HEAD        loan/loan-configuration/partial-payment-settings loan-configuration.partial-payment-settings › Loan…
+  POST            loan/loan-configuration/save-account-prefix loan-configuration.save-account-prefix › LoanConfigurat…
+  POST            loan/loan-configuration/save-foreclosure loan-configuration.save-foreclosure › LoanConfigurationCon…
+  POST            loan/loan-configuration/save-partial-payment loan-configuration.save-partial-payment › LoanConfigur…
+  POST            loan/loan-configuration/save-penalty loan-configuration.save-penalty › LoanConfigurationController@…
+  POST            loan/loan-configuration/save-prepayment loan-configuration.save-prepayment › LoanConfigurationContr…
+  GET|HEAD        loan/loan-product-view/{id} ........................ loan-product-view › LoanProductsController@view
+  GET|HEAD        loan/loan-products .................................... loan-products › LoanProductsController@index
+  GET|HEAD        loan/loan-products/data ........................ loan-products-data › LoanProductsController@getData
+  POST            loan/loan-products/store ................................ loans.store › LoanProductsController@store
+  DELETE          loan/loan-products/{id} ..................... loan-products.destroy › LoanProductsController@destroy
+  POST            loan/loan-products/{id}/toggle-status loan-products.toggle-status › LoanProductsController@toggleSt…
+  POST            loan/loan-products/{id}/update ................ loan-products.update › LoanProductsController@update
+  GET|HEAD        loan/loan-types ........................................ loan-types.index › LoanTypeController@index
+  POST            loan/loan-types ........................................ loan-types.store › LoanTypeController@store
+  GET|HEAD        loan/loan-types/create ............................... loan-types.create › LoanTypeController@create
+  POST            loan/loan-types/{id}/toggle-status ...... loan-types-toggle-status › LoanTypeController@toggleStatus
+  GET|HEAD        loan/loan-types/{loan_type} .............................. loan-types.show › LoanTypeController@show
+  PUT|PATCH       loan/loan-types/{loan_type} .......................... loan-types.update › LoanTypeController@update
+  DELETE          loan/loan-types/{loan_type} ........................ loan-types.destroy › LoanTypeController@destroy
+  GET|HEAD        loan/loan-types/{loan_type}/edit ......................... loan-types.edit › LoanTypeController@edit
+  GET|HEAD        loan/{loanAccountId}/document/{type} ....................... LoanDocumentTemplateController@generate
+  GET|HEAD        location-management ........................... location-management.index › LocationController@index
+  GET|HEAD        location-management/data ..................... location-management.data › LocationController@getData
+  POST            location-management/districts/api location-management.districts.api › LocationController@getDistric…
+  GET|HEAD        location-management/districts/data location-management.districts.data › LocationController@getDistr…
+  GET|HEAD        location-management/districts/local/{stateId} location-management.districts.local › LocationControl…
+  POST            location-management/districts/store location-management.districts.store › LocationController@storeD…
+  POST            location-management/districts/{id}/update location-management.districts.update › LocationController…
+  POST            location-management/fetch ............ location-management.fetch › LocationController@fetchLocations
+  GET|HEAD        location-management/states/api .... location-management.states.api › LocationController@getStatesApi
+  GET|HEAD        location-management/states/data .. location-management.states.data › LocationController@getStateData
+  POST            location-management/states/store .. location-management.states.store › LocationController@storeState
+  POST            location-management/states/{id}/update location-management.states.update › LocationController@updat…
+  POST            location-management/store ..................... location-management.store › LocationController@store
+  GET|HEAD        location-management/villages/{id}/data location-management.villages.data › LocationController@getVi…
+  POST            location-management/villages/{id}/update location-management.villages.update › LocationController@u…
+  DELETE          location-management/{type}/{id} ........... location-management.destroy › LocationController@destroy
+  GET|HEAD        login ........................................... login › Auth\AuthenticatedSessionController@create
+  POST            login .................................................... Auth\AuthenticatedSessionController@store
+  POST            logout ........................................ logout › Auth\AuthenticatedSessionController@destroy
+  GET|HEAD        management/api-wallet ..................... api-wallet.index › VerificationApiWalletController@index
+  GET|HEAD        management/api-wallet/export ............ api-wallet.export › VerificationApiWalletController@export
+  GET|HEAD        media/{path} .................................................. media.serve › StorageServeController
+  GET|HEAD        notifications ...................................... notifications › AdminBroadCastController@create
+  GET|HEAD        page/{slug} ......................................... public.page › PageConfigurationController@show
+  GET|HEAD        pages/comingsoon ............................. pages-comingsoon › ErrorPageController@miscComingSoon
+  GET|HEAD        pages/error ................................................ pages-error › ErrorPageController@index
+  GET|HEAD        pages/maintenance ..................... pages-maintenance › ErrorPageController@miscUnderMaintenance
+  GET|HEAD        pages/notauthorized .................... pages-notauthorized › ErrorPageController@miscNotAuthorized
+  GET|HEAD        pages/servererror .......................... pages-servererror › ErrorPageController@miscServerError
+  PUT             password .......................................... password.update › Auth\PasswordController@update
+  GET|HEAD        permission ................................. role-permissions › RolesPermissionController@permission
+  GET|HEAD        permissions/data ................... permissions.data › RolesPermissionController@getPermissionsData
+  POST            permissions/destroy .............. permissions.destroy › RolesPermissionController@destroyPermission
+  POST            permissions/store .................... permissions.store › RolesPermissionController@storePermission
+  GET|HEAD        privacy-policy ............................ public.privacy-policy › PageConfigurationController@show
+  GET|HEAD        profile .................................................... profile.index › ProfileController@index
+  PUT             profile .................................................. profile.update › ProfileController@update
+  PUT             profile/password ........................ profile.password.update › ProfileController@updatePassword
+  GET|HEAD        reports/applications ................ reports-applications › ReportsAnalyticsController@applications
+  GET|HEAD        reports/applications/export reports-applications-export › ReportsAnalyticsController@exportApplicat…
+  GET|HEAD        reports/clients ............................... reports-clients › ReportsAnalyticsController@clients
+  GET|HEAD        reports/clients/export ........... reports-clients-export › ReportsAnalyticsController@exportClients
+  GET|HEAD        reports/emi ........................................... reports-emi › ReportsAnalyticsController@emi
+  GET|HEAD        reports/emi/export ....................... reports-emi-export › ReportsAnalyticsController@exportEmi
+  GET|HEAD        reports/loans ..................................... reports-loans › ReportsAnalyticsController@loans
+  GET|HEAD        reports/loans/export ................. reports-loans-export › ReportsAnalyticsController@exportLoans
+  GET|HEAD        reports/revenue .................................... reports-revenue › RevenueReportController@index
+  GET|HEAD        reports/revenue/export ..................... reports-revenue-export › RevenueReportController@export
+  POST            reset-password ................................... password.store › Auth\NewPasswordController@store
+  GET|HEAD        reset-password/{token} .......................... password.reset › Auth\NewPasswordController@create
+  GET|HEAD        roles ................................................. role-users › RolesPermissionController@index
+  POST            roles/destroy .................................... roles.destroy › RolesPermissionController@destroy
+  GET|HEAD        roles/menus ................................................. roles.menus › RoleMenuController@index
+  POST            roles/menus ......................................... roles.menus.update › RoleMenuController@update
+  GET|HEAD        roles/permissions ................. roles.permissions › RolesPermissionController@getRolePermissions
+  POST            roles/store .......................................... roles.store › RolesPermissionController@store
+  POST            roles/update ....................................... roles.update › RolesPermissionController@update
+  GET|HEAD        roles/users ....................................... roles.users › RolesPermissionController@getUsers
+  GET|HEAD        sanctum/csrf-cookie .............. sanctum.csrf-cookie › Laravel\Sanctum › CsrfCookieController@show
+  GET|HEAD        setup-app/app-info ............................ app-setup-app-info › AppSetupController@appInfoIndex
+  POST            setup-app/app-info/update ............. app-setup-app-info-update › AppSetupController@appInfoUpdate
+  GET|HEAD        setup-app/appearance ..................... app-setup-appearance › AppSetupController@appearanceIndex
+  POST            setup-app/appearance/update ...... app-setup-appearance-update › AppSetupController@appearanceUpdate
+  GET|HEAD        setup-app/slides .................................. app-setup-slides › AppSetupController@slideIndex
+  GET|HEAD        setup-app/slides/create ................... app-setup-slides-create › AppSetupController@slideCreate
+  DELETE          setup-app/slides/delete/{id} ............. app-setup-slides-delete › AppSetupController@slideDestroy
+  GET|HEAD        setup-app/slides/edit/{id} .................... app-setup-slides-edit › AppSetupController@slideEdit
+  POST            setup-app/slides/store ...................... app-setup-slides-store › AppSetupController@slideStore
+  PUT             setup-app/slides/update/{id} .............. app-setup-slides-update › AppSetupController@slideUpdate
+  GET|HEAD        setup-configuration/api-configuration setup-configuration-api-configuration › SetupConfigurationCon…
+  POST            setup-configuration/api-configuration/{service} setup-configuration-api-configuration.save › SetupC…
+  GET|HEAD        setup-configuration/faq .......................... faq-index › SetupConfigurationController@faqIndex
+  GET|HEAD        setup-configuration/faq/create ................. faq-create › SetupConfigurationController@faqCreate
+  DELETE          setup-configuration/faq/delete/{id} ........... faq-delete › SetupConfigurationController@faqDestroy
+  GET|HEAD        setup-configuration/faq/edit/{id} .................. faq-edit › SetupConfigurationController@faqEdit
+  POST            setup-configuration/faq/store .................... faq-store › SetupConfigurationController@faqStore
+  PUT             setup-configuration/faq/update/{id} ............ faq-update › SetupConfigurationController@faqUpdate
+  GET|HEAD        setup-configuration/feature-activation ..... feature-activation › SetupConfigurationController@index
+  POST            setup-configuration/feature-activation/toggle-maintenance feature-activation-toggle-maintenance › S…
+  GET|HEAD        setup-configuration/loan-document-templates loan-document-templates.index › LoanDocumentTemplateCon…
+  POST            setup-configuration/loan-document-templates loan-document-templates.store › LoanDocumentTemplateCon…
+  GET|HEAD        setup-configuration/loan-document-templates/create loan-document-templates.create › LoanDocumentTem…
+  GET|HEAD        setup-configuration/loan-document-templates/{loan_document_template} loan-document-templates.show  …
+  PUT|PATCH       setup-configuration/loan-document-templates/{loan_document_template} loan-document-templates.update…
+  DELETE          setup-configuration/loan-document-templates/{loan_document_template} loan-document-templates.destro…
+  GET|HEAD        setup-configuration/loan-document-templates/{loan_document_template}/edit loan-document-templates.e…
+  GET|HEAD        setup-configuration/page-configuration ...... page-configuration › PageConfigurationController@index
+  GET|HEAD        setup-configuration/page-configuration/create page-configuration-create › PageConfigurationControll…
+  DELETE          setup-configuration/page-configuration/delete/{id} page-configuration-delete › PageConfigurationCon…
+  GET|HEAD        setup-configuration/page-configuration/edit/{id} page-configuration-edit › PageConfigurationControl…
+  POST            setup-configuration/page-configuration/store page-configuration-store › PageConfigurationController…
+  PUT             setup-configuration/page-configuration/update/{id} page-configuration-update › PageConfigurationCon…
+  GET|HEAD        setup-configuration/payment-methods .. payment-methods › SetupConfigurationController@paymentMethods
+  POST            setup-configuration/payment-methods/toggle payment-methods-toggle › SetupConfigurationController@to…
+  POST            setup-configuration/payment-methods/update payment-methods-update › SetupConfigurationController@up…
+  GET|HEAD        setup-configuration/s3/config ............. s3-config-get › SetupConfigurationController@getS3Config
+  POST            setup-configuration/s3/config ....... s3-config-update › SetupConfigurationController@updateS3Config
+  POST            setup-configuration/s3/test ................ s3-test › SetupConfigurationController@testS3Connection
+  POST            setup-configuration/s3/toggle .............. s3-toggle › SetupConfigurationController@toggleS3Status
+  GET|HEAD        setup-configuration/smtp-settings ........ smtp-settings › SetupConfigurationController@smtpSettings
+  POST            setup-configuration/smtp-settings/test smtp-settings-test › SetupConfigurationController@testSmtpCo…
+  POST            setup-configuration/smtp-settings/update smtp-settings-update › SetupConfigurationController@update…
+  GET|HEAD        staff .......................................... admin.staff.index › StaffManagementController@index
+  GET|HEAD        staff-management/attendance/daily ........... staff-management.attendance.daily › routes/web.php:562
+  GET|HEAD        staff-management/attendance/report ......... staff-management.attendance.report › routes/web.php:571
+  GET|HEAD        staff-management/branches ........................... staff-management.branches › routes/web.php:588
+  GET|HEAD        staff-management/directory ......................... staff-management.directory › routes/web.php:555
+  GET|HEAD        staff-management/holidays ........................... staff-management.holidays › routes/web.php:602
+  GET|HEAD        staff-management/payroll ............................. staff-management.payroll › routes/web.php:581
+  GET|HEAD        staff-management/roles ................................. staff-management.roles › routes/web.php:595
+  POST            staff/add-advance .................... admin.staff.addAdvance › StaffManagementController@addAdvance
+  POST            staff/add-expense .................... admin.staff.addExpense › StaffManagementController@addExpense
+  GET|HEAD        staff/attendance ..................... admin.staff.attendance › StaffManagementController@attendance
+  GET|HEAD        staff/attendance-report . admin.staff.attendance-report › StaffManagementController@attendanceReport
+  POST            staff/branches/store ............ admin.staff.branches.store › StaffManagementController@storeBranch
+  DELETE          staff/branches/{id} ........... admin.staff.branches.delete › StaffManagementController@deleteBranch
+  POST            staff/branches/{id}/update .... admin.staff.branches.update › StaffManagementController@updateBranch
+  POST            staff/bulk-mark-attendance admin.staff.bulkMarkAttendance › StaffManagementController@bulkMarkAtten…
+  GET|HEAD        staff/export-attendance .. admin.staff.exportAttendance › StaffManagementController@exportAttendance
+  GET|HEAD        staff/export-attendance-pdf admin.staff.exportAttendancePDF › StaffManagementController@exportAtten…
+  GET|HEAD        staff/holidays ................. admin.staff.holidays.index › StaffManagementController@holidayIndex
+  POST            staff/holidays/store ........... admin.staff.holidays.store › StaffManagementController@storeHoliday
+  DELETE          staff/holidays/{id} .......... admin.staff.holidays.delete › StaffManagementController@deleteHoliday
+  POST            staff/holidays/{id}/update ... admin.staff.holidays.update › StaffManagementController@updateHoliday
+  POST            staff/mark-attendance ........ admin.staff.markAttendance › StaffManagementController@markAttendance
+  GET|HEAD        staff/payroll .............................. admin.staff.payroll › StaffManagementController@payroll
+  POST            staff/store .................................... admin.staff.store › StaffManagementController@store
+  DELETE          staff/{id}/delete ........................... admin.staff.delete › StaffManagementController@destroy
+  POST            staff/{id}/update ............................ admin.staff.update › StaffManagementController@update
+  GET|HEAD        storage/{path} .............................................. storage.serve › StorageServeController
+  GET|HEAD        support/tickets .................................... support-tickets › SupportTicketController@index
+  POST            support/tickets .............................. support-tickets.store › SupportTicketController@store
+  GET|HEAD        support/tickets/data ........................ support-tickets-data › SupportTicketController@getData
+  GET|HEAD        support/tickets/users ..................... support-tickets.users › SupportTicketController@getUsers
+  DELETE          support/tickets/{id} ..................... support-tickets.destroy › SupportTicketController@destroy
+  GET|HEAD        support/tickets/{id} ........................... support-tickets.show › SupportTicketController@show
+  POST            support/tickets/{id}/assign ................ support-tickets.assign › SupportTicketController@assign
+  POST            support/tickets/{id}/reply ................ support-tickets.reply › SupportTicketController@addReply
+  POST            support/tickets/{id}/status ... support-tickets.update-status › SupportTicketController@updateStatus
+  GET|HEAD        system/cache/clear ............... system-cache-clear › SetupConfigurationController@fileSystemCache
+  POST            system/cache/clear ........................... cache-clear › SetupConfigurationController@clearCache
+  GET|HEAD        system/collection-log ....................... system-collection-log › SystemController@collectionLog
+  POST            system/collection-log/clear ...... system-collection-log-clear › SystemController@clearCollectionLog
+  GET|HEAD        system/collection-log/export ... system-collection-log-export › SystemController@exportCollectionLog
+  GET|HEAD        system/database-backup .................... system-database-backup › SystemController@databaseBackup
+  POST            system/database-backup/auto-config/save ........ system-backup-auto-config-save › routes/web.php:688
+  POST            system/database-backup/create ................. system-backup-create › SystemController@createBackup
+  DELETE          system/database-backup/delete/{filename} ...... system-backup-delete › SystemController@deleteBackup
+  GET|HEAD        system/database-backup/download/{filename} system-backup-download › SystemController@downloadBackup
+  GET|HEAD        system/login-log ...................................... system-login-log › SystemController@loginLog
+  POST            system/login-log/clear ..................... system-login-log-clear › SystemController@clearLoginLog
+  GET|HEAD        system/server-status .......................... system-server-status › SystemController@serverStatus
+  GET|HEAD        templates/email ....................... email-template-index › TemplateController@emailTemplateIndex
+  GET|HEAD        templates/email/create .............. email-template-create › TemplateController@emailTemplateCreate
+  POST            templates/email/store ................. email-template-store › TemplateController@emailTemplateStore
+  DELETE          templates/email/{id}/delete ........ email-template-delete › TemplateController@emailTemplateDestroy
+  GET|HEAD        templates/email/{id}/edit ............... email-template-edit › TemplateController@emailTemplateEdit
+  PUT             templates/email/{id}/update ......... email-template-update › TemplateController@emailTemplateUpdate
+  GET|HEAD        templates/sms ............................. sms-template-index › TemplateController@smsTemplateIndex
+  GET|HEAD        templates/sms/create .................... sms-template-create › TemplateController@smsTemplateCreate
+  POST            templates/sms/store ....................... sms-template-store › TemplateController@smsTemplateStore
+  DELETE          templates/sms/{id}/delete .............. sms-template-delete › TemplateController@smsTemplateDestroy
+  GET|HEAD        templates/sms/{id}/edit ..................... sms-template-edit › TemplateController@smsTemplateEdit
+  PUT             templates/sms/{id}/update ............... sms-template-update › TemplateController@smsTemplateUpdate
+  GET|HEAD        templates/whatsapp .............. whatsapp-template-index › TemplateController@whatsappTemplateIndex
+  GET|HEAD        templates/whatsapp/create ..... whatsapp-template-create › TemplateController@whatsappTemplateCreate
+  GET|HEAD        templates/whatsapp/fetch-gallabox whatsapp-template-fetch-gallabox › TemplateController@fetchGallab…
+  POST            templates/whatsapp/store ........ whatsapp-template-store › TemplateController@whatsappTemplateStore
+  DELETE          templates/whatsapp/{id}/delete whatsapp-template-delete › TemplateController@whatsappTemplateDestroy
+  GET|HEAD        templates/whatsapp/{id}/edit ...... whatsapp-template-edit › TemplateController@whatsappTemplateEdit
+  POST            templates/whatsapp/{id}/toggle-status whatsapp-template-toggle-status › TemplateController@whatsapp…
+  PUT             templates/whatsapp/{id}/update whatsapp-template-update › TemplateController@whatsappTemplateUpdate
+  GET|HEAD        templates/whatsapp/{id}/view ...... whatsapp-template-view › TemplateController@whatsappTemplateView
+  GET|HEAD        terms-and-conditions ................ public.terms-and-conditions › PageConfigurationController@show
+  GET|HEAD        up ..... vendor/laravel/framework/src/Illuminate/Foundation/Configuration/ApplicationBuilder.php:219
+  GET|HEAD        user-management ................................... user-management › UserManagementController@index
+  GET|HEAD        user-management/data ....................... user-management.data › UserManagementController@getData
+  POST            user-management/store ....................... user-management.store › UserManagementController@store
+  DELETE          user-management/{id} .................... user-management.destroy › UserManagementController@destroy
+  POST            user-management/{id}/assign-role . user-management.assign-role › UserManagementController@assignRole
+  POST            user-management/{id}/toggle-status user-management.toggle-status › UserManagementController@toggleS…
+  POST            user-management/{id}/update ............... user-management.update › UserManagementController@update
+  GET|HEAD        verification/credit-score-history .. verification-credit-score-history › CreditScoreController@index
+  POST            verification/credit-score-history/fetch verification-credit-score-fetch › CreditScoreController@fet…
+  GET|HEAD        verification/credit-score-history/{creditScoreHistory} verification-credit-score-show › CreditScore…
+  DELETE          verification/credit-score-history/{creditScoreHistory} verification-credit-score-destroy › CreditSc…
+  POST            verification/credit-score-history/{creditScoreHistory}/mail verification-credit-score-mail › Credit…
+  GET|HEAD        verification/credit-score-history/{creditScoreHistory}/pdf verification-credit-score-pdf › CreditSc…
+  POST            verification/credit-score-history/{creditScoreHistory}/whatsapp verification-credit-score-whatsapp …
+  GET|HEAD        verification/kyc-verification ...... verification-kyc-verification › KycVerificationController@index
+  GET|HEAD        verification/view/kyc/{id} .................. verification-kyc-view › KycVerificationController@view
+  POST            verification/view/kyc/{id}/approve .... verification-kyc-approve › KycVerificationController@approve
+  POST            verification/view/kyc/{id}/re-kyc ......... verification-kyc-rekyc › KycVerificationController@reKyc
+  POST            verification/view/kyc/{id}/reject ....... verification-kyc-reject › KycVerificationController@reject
+  POST            verification/view/kyc/{id}/skip .......... verification-kyc-skip › KycVerificationController@skipKyc
+  POST            verification/view/kyc/{id}/update ....... verification-kyc-update › KycVerificationController@update
+  POST            verification/view/kyc/{id}/update-fields verification-kyc-update-fields › KycVerificationController…
+  POST            verification/view/kyc/{id}/verify-aadhaar verification-kyc-verify-aadhaar › KycVerificationControll…
+  POST            verification/view/kyc/{id}/verify-aadhaar-otp verification-kyc-verify-aadhaar-otp › KycVerification…
+  POST            verification/view/kyc/{id}/verify-bank verification-kyc-verify-bank › KycVerificationController@ver…
+  POST            verification/view/kyc/{id}/verify-pan verification-kyc-verify-pan › KycVerificationController@verif…
+  GET|HEAD        verify-email .......................... verification.notice › Auth\EmailVerificationPromptController
+  GET|HEAD        verify-email/{id}/{hash} .......................... verification.verify › Auth\VerifyEmailController
+  GET|HEAD        view-chit-schedule/{token} . public.view-chit-schedule › PublicClientScheduleController@viewSchedule
+  GET|HEAD        view-client-schedule/{token} public.view-client-schedule › PublicClientScheduleController@viewSched…
+  GET|HEAD        view-schedule/{token} ........... public.view-schedule › PublicClientScheduleController@viewSchedule
+
+                                                                                                  Showing [936] routes
+

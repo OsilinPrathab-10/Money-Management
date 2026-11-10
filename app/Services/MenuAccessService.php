@@ -751,8 +751,7 @@ class MenuAccessService
         if ($user->hasRole('Agent')) {
             $preferred = ['agent-dashboard', 'agent-collections', 'client-management'];
         } elseif ($user->hasRole('Staff')) {
-            // Prefer Staff-accessible pages (avoid Admin-only dashboard).
-            $preferred = ['verification-kyc-verification', 'admin-account-deletion', 'chit.applications.index'];
+            $preferred = ['verification-kyc-verification', 'admin-account-deletion', 'loan.applications.index'];
         }
 
         foreach ($preferred as $prefKey) {

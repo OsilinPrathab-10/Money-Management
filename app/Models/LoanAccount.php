@@ -49,6 +49,7 @@ class LoanAccount extends Model
         'foreclosure_notes',
         'foreclosure_processed_by',
         'prepayment_amount',
+        'topup_amount',
         'prepayment_eligibility_months',
         'prepayment_charges_percentage',
     ];
@@ -56,12 +57,13 @@ class LoanAccount extends Model
     protected $casts = [
         'loan_amount' => 'integer',
         'disbursed_amount' => 'decimal:2',
-        'interest_rate' => 'decimal:2',
+        'interest_rate' => 'float',
         'emi_amount' => 'decimal:2',
         'total_payable' => 'decimal:2',
         'paid_amount' => 'decimal:2',
         'outstanding_amount' => 'decimal:2',
         'prepayment_amount' => 'decimal:2',
+        'topup_amount' => 'decimal:2',
         'prepayment_eligibility_months' => 'integer',
         'prepayment_charges_percentage' => 'decimal:2',
         'disbursed_at' => 'datetime',
@@ -208,6 +210,11 @@ class LoanAccount extends Model
     public function emis()
     {
         return $this->hasMany(Emi::class, 'loan_account_id', 'id');
+    }
+
+    public function topups()
+    {
+        return $this->hasMany(\App\Models\LoanTopup::class, 'loan_account_id', 'id');
     }
 
     public function clientLoanDocuments()

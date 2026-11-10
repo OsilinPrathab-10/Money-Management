@@ -39,9 +39,7 @@
 'resources/assets/js/client-view-account.js',
 'resources/assets/custom-js/app-kyc-verification.js',
 'resources/assets/custom-js/loan-applications.js',
-'resources/assets/custom-js/fd-applications.js',
-'resources/assets/custom-js/chit-applications.js',
-'resources/assets/custom-js/chit-need-month.js'
+'resources/assets/custom-js/fd-applications.js'
 ])
 @endsection
 
@@ -54,8 +52,10 @@
       @if(auth()->user()->hasRole('Admin') || auth()->user()->hasRole('Staff'))
       <li class="nav-item"><a class="nav-link" href="{{ url('/clients/view/kyc/'.$client->id) }}"><i class="icon-base ri ri-shield-check-line me-1_5"></i>KYC</a></li>
       @endif
+      @if(auth()->user()->hasAnyRole(['Admin', 'CreditVerifier']))
+      <li class="nav-item"><a class="nav-link" href="{{ route('client-view-cibil', $client->id) }}"><i class="icon-base ri ri-bar-chart-box-line me-1_5"></i>CIBIL</a></li>
+      @endif
       <li class="nav-item"><a class="nav-link" href="{{ url('/client/view/loans/'.$client->id) }}"><i class="icon-base ri ri-file-list-3-line me-1_5"></i>Loans</a></li>
-      <li class="nav-item"><a class="nav-link" href="{{ url('/client/view/chits/'.$client->id) }}"><i class="icon-base ri ri-group-2-line me-1_5"></i>Chits</a></li>
       <li class="nav-item"><a class="nav-link" href="{{ url('/clients/view/ledger/'.$client->id) }}"><i class="icon-base ri ri-wallet-3-line me-1_5"></i>Ledger</a></li>
       <li class="nav-item"><a class="nav-link" href="{{ url('/clients/view/notifications/'.$client->id) }}"><i class="icon-base ri ri-notification-3-line me-1_5"></i>Notifications</a></li>
     </ul>
@@ -157,21 +157,6 @@
                 <div>
                   <h5 class="mb-0">{{ $stats['loans'] ?? 0 }}</h5>
                   <span class="small">Total Loans</span>
-                </div>
-              </div>
-            </a>
-          </div>
-          <div class="col-6">
-            <a href="{{ route('client-view-chits', $client->id) }}" class="text-heading text-decoration-none">
-              <div class="d-flex align-items-center gap-3">
-                <div class="avatar">
-                  <div class="avatar-initial bg-label-warning rounded-3">
-                    <i class="icon-base ri ri-group-line icon-24px"></i>
-                  </div>
-                </div>
-                <div>
-                  <h5 class="mb-0">{{ $stats['chits'] ?? 0 }}</h5>
-                  <span class="small">Total Chits</span>
                 </div>
               </div>
             </a>
@@ -349,9 +334,6 @@
             <button type="button" class="btn btn-sm btn-outline-primary py-1 px-3" data-bs-toggle="modal" data-bs-target="#modalApplyFd">
               <i class="icon-base ri ri-safe-2-line me-1"></i> Apply for FD
             </button>
-            <button type="button" class="btn btn-sm btn-outline-primary py-1 px-3" data-bs-toggle="modal" data-bs-target="#modalApplyChit">
-              <i class="icon-base ri ri-hand-coin-line me-1"></i> Apply for Chit
-            </button>
             @endif
             <button type="button" class="btn btn-sm btn-icon btn-outline-primary btn-pill " id="enableAccountEditBtn" title="Edit Account Details" aria-label="Edit Account Details">
               <i class="icon-base ri ri-pencil-fill"></i>
@@ -365,11 +347,8 @@
             <button type="button" class="btn btn-sm btn-outline-primary py-1 px-3" data-bs-toggle="modal" data-bs-target="#modalApplyFd">
               <i class="icon-base ri ri-safe-2-line me-1"></i> Apply for FD
             </button>
-            <button type="button" class="btn btn-sm btn-outline-primary py-1 px-3" data-bs-toggle="modal" data-bs-target="#modalApplyChit">
-              <i class="icon-base ri ri-group-line me-1"></i> Apply for Chit
-            </button>
             @else
-            <span class="badge bg-label-warning py-2 px-3">KYC not yet approved — cannot apply for loan/FD/chit</span>
+            <span class="badge bg-label-warning py-2 px-3">KYC not yet approved — cannot apply for loan/FD</span>
             @endif
           @endif
           <div class="alert-container" data-success="{{ session('success') }}" data-error="{{ session('error') }}" data-warning="" data-info=""></div>
@@ -937,5 +916,4 @@ document.addEventListener('DOMContentLoaded', function () {
 
 @include('admin.clients.modals.modal-apply-loan')
 @include('admin.clients.modals.modal-apply-fd')
-@include('admin.clients.modals.modal-apply-chit')
 @endsection

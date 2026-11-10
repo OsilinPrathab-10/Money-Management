@@ -11,7 +11,7 @@ use Illuminate\Support\Facades\Auth;
 use App\Models\LoanApplication;
 use App\Models\Payment;
 use App\Services\Account\AccountingTags;
-use App\Services\Account\ChitAccountingService;
+use App\Services\Account\SocietyBankAccountingService;
 use App\Services\FixedDeposit\WalletService;
 use Carbon\Carbon;
 use Illuminate\Validation\ValidationException;
@@ -524,8 +524,8 @@ class LoanPaymentService
         DB::beginTransaction();
         try {
             $now = now();
-            $chitAccounting = app(ChitAccountingService::class);
-            $resolvedBankId = $chitAccounting->resolveCollectionBankAccountId($paymentMethod, $requestedBankId);
+            $bankAccounting = app(SocietyBankAccountingService::class);
+            $resolvedBankId = $bankAccounting->resolveCollectionBankAccountId($paymentMethod, $requestedBankId);
 
             $chargesPosted = round($foreclosureCharges + $extraChargeAmount);
 
@@ -771,7 +771,7 @@ class LoanPaymentService
         // Wallet stays outside the company cashbook.
         if ($method !== 'wallet') {
             try {
-                $bankAccountId = app(\App\Services\Account\ChitAccountingService::class)
+                $bankAccountId = app(\App\Services\Account\SocietyBankAccountingService::class)
                     ->resolveCollectionBankAccountId((string) $method, (int) ($bankAccountId ?? 0));
             } catch (\Illuminate\Validation\ValidationException $e) {
                 return [
@@ -1404,7 +1404,7 @@ class LoanPaymentService
 
         if ($paymentMethod !== 'wallet') {
             try {
-                $bankAccountId = app(\App\Services\Account\ChitAccountingService::class)
+                $bankAccountId = app(\App\Services\Account\SocietyBankAccountingService::class)
                     ->resolveCollectionBankAccountId((string) $paymentMethod, (int) ($bankAccountId ?? 0));
             } catch (\Illuminate\Validation\ValidationException $e) {
                 return [
@@ -1963,7 +1963,7 @@ class LoanPaymentService
 
         if ($paymentMethod !== 'wallet') {
             try {
-                $bankAccountId = app(\App\Services\Account\ChitAccountingService::class)
+                $bankAccountId = app(\App\Services\Account\SocietyBankAccountingService::class)
                     ->resolveCollectionBankAccountId((string) $paymentMethod, (int) ($bankAccountId ?? 0));
             } catch (\Illuminate\Validation\ValidationException $e) {
                 return [
@@ -2355,10 +2355,10 @@ class LoanPaymentService
             if ($cashbookCollections->isNotEmpty()) {
                 try {
                     $bankTxService = app(\App\Services\Account\BankTransactionsService::class);
-                    $chitAccounting = app(\App\Services\Account\ChitAccountingService::class);
+                    $bankAccounting = app(\App\Services\Account\SocietyBankAccountingService::class);
 
                     $primary = $cashbookCollections->sortByDesc('id')->first();
-                    $bankAccountId = $chitAccounting->resolveBankAccountIdForCollectionUndo(
+                    $bankAccountId = $bankAccounting->resolveBankAccountIdForCollectionUndo(
                         (string) ($primary->payment_method ?? $emi->payment_method ?? 'cash'),
                         (int) ($primary->bank_account_id
                             ?: ($cashbookCollections->first(fn ($c) => (int) ($c->bank_account_id ?? 0) > 0)?->bank_account_id ?? 0))
@@ -2594,8 +2594,8 @@ class LoanPaymentService
                 $method = strtolower((string) ($collection->payment_method ?? $emi->payment_method ?? 'cash'));
                 if ($method !== 'wallet' && (float) $collection->amount > 0.009) {
                     $bankTxService = app(\App\Services\Account\BankTransactionsService::class);
-                    $chitAccounting = app(\App\Services\Account\ChitAccountingService::class);
-                    $bankAccountId = $chitAccounting->resolveBankAccountIdForCollectionUndo(
+                    $bankAccounting = app(\App\Services\Account\SocietyBankAccountingService::class);
+                    $bankAccountId = $bankAccounting->resolveBankAccountIdForCollectionUndo(
                         $method,
                         (int) ($collection->bank_account_id ?: 0)
                     );
@@ -2793,7 +2793,7 @@ class LoanPaymentService
         }
 
         try {
-            $resolvedId = app(\App\Services\Account\ChitAccountingService::class)
+            $resolvedId = app(\App\Services\Account\SocietyBankAccountingService::class)
                 ->resolveCollectionBankAccountId($method, (int) ($bankAccountId ?? 0));
 
             if (! $resolvedId) {
@@ -2835,7 +2835,7 @@ class LoanPaymentService
         string $accountNumber,
         string $clientName
     ): void {
-        $chitAccounting = app(ChitAccountingService::class);
+        $bankAccounting = app(SocietyBankAccountingService::class);
         $lines = [
             [
                 'amount' => round(max(0, $interestAmount), 2),
@@ -2860,7 +2860,7 @@ class LoanPaymentService
                 continue;
             }
 
-            $chitAccounting->postExternalRevenue(
+            $bankAccounting->postExternalRevenue(
                 $line['name'],
                 $line['code'],
                 $line['amount'],

@@ -29,7 +29,6 @@
     'maturity_overdue' => 'ri-time-line',
     'transactions' => 'ri-exchange-line',
     'wallet_credits' => 'ri-wallet-3-line',
-    'chit_adjustments' => 'ri-pages-line',
     'financial_summary' => 'ri-pie-chart-line',
   ];
 @endphp

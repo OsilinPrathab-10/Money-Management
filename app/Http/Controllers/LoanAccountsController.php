@@ -776,4 +776,105 @@ class LoanAccountsController extends Controller
             ], 500);
         }
     }
+
+    /**
+     * Get loan top-up eligibility, breakdown, and calculation preview.
+     */
+    public function topupInfo(Request $request, $id)
+    {
+        $decodedId = \App\Support\HashId::decode($id) ?? $id;
+        $loanAccount = LoanAccount::findOrFail($decodedId);
+
+        $topupAmount = $request->filled('amount') ? (float)$request->amount : null;
+        $interestRate = $request->filled('interest_rate') ? (float)$request->interest_rate : null;
+
+        $tenureOptions = [
+            'tenure_mode' => $request->input('tenure_mode', 'add'),
+            'additional_tenure' => $request->filled('additional_tenure') ? (int)$request->additional_tenure : 0,
+            'new_remaining_tenure' => $request->filled('new_remaining_tenure') ? (int)$request->new_remaining_tenure : null,
+            'frequency' => $request->input('frequency'),
+            'emi_day' => $request->input('emi_day'),
+            'first_due_date' => $request->input('first_due_date'),
+        ];
+
+        $topupService = app(\App\Services\LoanTopupService::class);
+        $data = $topupService->getTopupInfo($loanAccount, $topupAmount, $tenureOptions, $interestRate);
+
+        return response()->json([
+            'success' => true,
+            'data' => $data,
+        ]);
+    }
+
+    /**
+     * Process Top-Up Loan, regenerate future EMIs, deduct bank funds and notify customer.
+     */
+    public function processTopup(Request $request, $id)
+    {
+        $decodedId = \App\Support\HashId::decode($id) ?? $id;
+        $validated = $request->validate([
+            'topup_amount' => 'required|numeric|min:1',
+            'tenure_mode' => 'nullable|string|in:add,set,keep',
+            'additional_tenure' => 'nullable|integer|min:0',
+            'new_remaining_tenure' => 'nullable|integer|min:1',
+            'frequency' => 'nullable|string|in:daily,weekly,monthly',
+            'emi_day' => 'nullable|integer|min:1|max:31',
+            'first_due_date' => 'nullable|date',
+            'interest_rate' => 'nullable|numeric|min:0',
+            'processing_fee' => 'nullable|numeric|min:0',
+            'payment_method' => 'required|string',
+            'internal_bank_account_id' => 'nullable|exists:bank_accounts,id',
+            'utr_number' => 'nullable|string|max:255',
+            'disbursed_at' => 'nullable|date',
+            'remarks' => 'nullable|string|max:1000',
+        ]);
+
+        try {
+            $topupService = app(\App\Services\LoanTopupService::class);
+            $result = $topupService->processTopup($decodedId, $validated, auth()->id());
+
+            if ($result['success']) {
+                $loanAccount = LoanAccount::with(['client'])->find($decodedId);
+                $client = $loanAccount->client;
+                $mobileNo = $client->phone_number ?? $client->mobile_no ?? $client->client_phone ?? '';
+
+                $smsData = [
+                    'client_name' => $client->client_name ?? 'Client',
+                    'mobile_no' => $mobileNo,
+                    'account_no' => $loanAccount->customer_loan_account_number ?? $loanAccount->account_number,
+                    'topup_amount' => $result['data']['topup_amount'],
+                    'new_emi_amount' => $result['data']['new_emi_amount'],
+                    'next_due_date' => $result['data']['next_due_date'],
+                    'remaining_balance' => $result['data']['new_outstanding'],
+                    'frequency' => $result['data']['frequency'],
+                    'application_number' => $loanAccount->application_number,
+                ];
+
+                $msgData = \App\Helpers\NotificationTemplateHelper::getTopupMessages($smsData);
+
+                return response()->json([
+                    'success' => true,
+                    'message' => $result['message'],
+                    'data' => $result['data'],
+                    'notification_data' => $msgData,
+                ]);
+            }
+
+            return response()->json([
+                'success' => false,
+                'message' => $result['message'],
+            ], 400);
+
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error('Top-Up processing failed: ' . $e->getMessage(), [
+                'loan_account_id' => $id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to process loan top-up: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
 }

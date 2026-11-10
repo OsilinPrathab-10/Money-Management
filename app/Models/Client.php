@@ -16,13 +16,9 @@ use App\Models\SupportTicket;
 use App\Models\Nominee;
 use App\Models\Emi;
 use App\Models\EmiCollection;
-use App\Models\GroupMember;
-use App\Models\Installment;
-use App\Models\ChitCollection;
 use App\Models\FixedDeposit;
 use App\Models\KycDetail;
 use App\Models\EmployeeInformation;
-use App\Models\Payout;
 use Illuminate\Support\Facades\Storage;
 use App\Models\Concerns\HasObfuscatedRouteKey;
 use Illuminate\Support\Facades\Schema;
@@ -304,41 +300,12 @@ class Client extends Model
         return $this->hasMany(Guarantor::class);
     }
 
-    public function groupMembers()
-    {
-        return $this->hasMany(GroupMember::class, 'client_id');
-    }
-
-    public function chitMembershipShares()
-    {
-        return $this->hasMany(GroupMemberShare::class, 'client_id');
-    }
-
-    /**
-     * Primary + shared memberships involving this client.
-     */
-    public function allChitMemberships()
-    {
-        return GroupMember::with(['group.scheme', 'shares.client', 'installments'])
-            ->involvingClient((int) $this->id)
-            ->orderByDesc('created_at');
-    }
-
-    public function chitGroups()
-    {
-        return $this->hasManyThrough(ChitGroup::class, GroupMember::class, 'client_id', 'id', 'id', 'group_id');
-    }
-
-    /**
-     * Check if client has any loan, chit, or fixed deposit account or application.
-     */
     public function hasAnyFinancialAccount(): bool
     {
         $hasLoans = $this->loanAccounts()->exists() || $this->loanApplications()->exists();
-        $hasChits = $this->groupMembers()->exists();
         $hasFd = $this->fixedDeposits()->exists() || $this->fdApplications()->exists();
 
-        return $hasLoans || $hasChits || $hasFd;
+        return $hasLoans || $hasFd;
     }
 
     /**
@@ -351,22 +318,21 @@ class Client extends Model
     public function getPublicScheduleDetails(): array
     {
         $hasLoans = $this->loanAccounts()->exists() || $this->loanApplications()->exists();
-        $hasChits = $this->groupMembers()->exists();
         $hasFd   = $this->fixedDeposits()->exists() || $this->fdApplications()->exists();
 
-        $hasAccount = $hasLoans || $hasChits || $hasFd;
+        $hasAccount = $hasLoans || $hasFd;
 
         if (! $hasAccount) {
             return [
                 'has_account'      => false,
                 'public_url'       => null,
                 'view_schedule_url'=> null,
-                'message'          => "You don't have an active loan, chit, or fixed deposit account.",
+                'message'          => "You don't have an active loan or fixed deposit account.",
             ];
         }
 
         // Use the client's own globally-unique customer_id as the identifier.
-        // Do NOT use loan/chit/member numbers — they are sequential per-group
+        // Do NOT use loan/member numbers — they are sequential
         // integers (e.g. 1, 2, 3) and are not unique across clients.
         $identifier = $this->customer_id ?: sprintf('CLIENT-%06d', $this->id);
 
@@ -393,51 +359,17 @@ class Client extends Model
     }
 
     /**
-     * Whether this client is still enrolled in an active chit group
-     * (primary owner or share holder), and the seat is not closed/exited.
-     */
-    public function hasActiveChits(): bool
-    {
-        return GroupMember::query()
-            ->involvingClient((int) $this->id)
-            ->whereIn('status', ['active', 'approved', 'pending'])
-            ->whereHas('group', fn ($q) => $q->whereIn('status', ['forming', 'active']))
-            ->exists();
-    }
-
-    /**
      * Human-readable reason when client delete must be blocked.
      */
     public function deletionBlockReason(): ?string
     {
-        $hasActiveLoans = $this->hasActiveLoans();
-        $hasActiveChits = $this->hasActiveChits();
-
-        if (! $hasActiveLoans && ! $hasActiveChits) {
+        if (! $this->hasActiveLoans()) {
             return null;
         }
 
-        $parts = [];
-        if ($hasActiveLoans) {
-            $parts[] = 'active loan(s)';
-        }
-        if ($hasActiveChits) {
-            $parts[] = 'active chit membership(s)';
-        }
-
         return 'Cannot delete "' . ($this->client_name ?? 'this client')
-            . '" because they have ' . implode(' and ', $parts) . '.'
-            . ' Close or complete those accounts first, then try again.';
-    }
-
-    public function chitFamilyMember()
-    {
-        return $this->hasOne(ChitFamilyMember::class, 'client_id');
-    }
-
-    public function chitFamily()
-    {
-        return $this->hasOneThrough(ChitFamily::class, ChitFamilyMember::class, 'client_id', 'id', 'id', 'family_id');
+            . '" because they have active loan(s).'
+            . ' Close those accounts first, then try again.';
     }
 
     public function wallet()
@@ -471,13 +403,6 @@ class Client extends Model
                     $emi->delete();
                 });
                 $account->delete();
-            });
-
-            $this->groupMembers()->get()->each(function ($member) {
-                ChitCollection::where('member_id', $member->id)->get()->each->delete();
-                Payout::where('winner_member_id', $member->id)->delete();
-                $member->installments()->get()->each->delete();
-                $member->delete();
             });
 
             $this->fixedDeposits()->get()->each->delete();
@@ -515,11 +440,6 @@ class Client extends Model
             $inWindow(Emi::query()->whereIn('loan_account_id', $accountIds))->restore();
             $inWindow(LoanAccount::query()->where('client_id', $this->id))->restore();
 
-            $memberIds = GroupMember::withTrashed()->where('client_id', $this->id)->pluck('id');
-            $inWindow(ChitCollection::query()->whereIn('member_id', $memberIds))->restore();
-            $inWindow(Installment::query()->whereIn('member_id', $memberIds))->restore();
-            $inWindow(GroupMember::query()->where('client_id', $this->id))->restore();
-
             $inWindow(FixedDeposit::query()->where('client_id', $this->id))->restore();
             $inWindow(KycDetail::query()->where('client_id', $this->id)->whereNull('archived_at'))->restore();
             $inWindow(EmployeeInformation::query()->where('client_id', $this->id))->restore();
@@ -539,7 +459,6 @@ class Client extends Model
         return [
             'loan_accounts' => LoanAccount::onlyTrashed()->where('client_id', $this->id)->count(),
             'loan_applications' => LoanApplication::onlyTrashed()->where('client_id', $this->id)->count(),
-            'chit_memberships' => GroupMember::onlyTrashed()->where('client_id', $this->id)->count(),
             'fixed_deposits' => FixedDeposit::onlyTrashed()->where('client_id', $this->id)->count(),
         ];
     }
@@ -648,12 +567,6 @@ class Client extends Model
                         $emi->forceDelete();
                     });
                     $acc->forceDelete();
-                });
-
-                $client->groupMembers()->withTrashed()->each(function ($member) {
-                    \App\Models\ChitCollection::withTrashed()->where('member_id', $member->id)->forceDelete();
-                    $member->installments()->withTrashed()->forceDelete();
-                    $member->forceDelete();
                 });
 
                 $client->fixedDeposits()->withTrashed()->forceDelete();

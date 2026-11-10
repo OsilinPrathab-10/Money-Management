@@ -520,7 +520,6 @@
                                     @php
                                         $payoutIcon = match($deposit->payout_option) {
                                             'wallet' => 'ri-wallet-3-line',
-                                            'chit' => 'ri-group-line',
                                             'bank_transfer' => 'ri-bank-line',
                                             default => 'ri-money-rupee-circle-line',
                                         };
@@ -741,29 +740,6 @@
         </div>
         @endif
 
-        @if($deposit->chitAllocations->count())
-        <div class="card mb-3">
-            <div class="card-header"><h5 class="mb-0">Chit Allocations</h5></div>
-            <div class="card-body p-0">
-                <div class="table-responsive">
-                    <table class="table table-sm mb-0">
-                        <thead class="table-light">
-                            <tr><th>Group</th><th>Type</th><th class="text-end">Amount</th></tr>
-                        </thead>
-                        <tbody>
-                            @foreach($deposit->chitAllocations as $alloc)
-                            <tr>
-                                <td>{{ $alloc->chitGroup->group_code ?? '—' }}</td>
-                                <td>{{ $alloc->allocation_type }}</td>
-                                <td class="text-end">₹{{ number_format((float) $alloc->amount, 2) }}</td>
-                            </tr>
-                            @endforeach
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        </div>
-        @endif
     </div>
 </div>
 
@@ -785,7 +761,6 @@
                         <label class="form-label fw-semibold">Payout Option <span class="text-danger">*</span></label>
                         <select name="payout_option" id="maturity_payout" class="form-select" required>
                             <option value="wallet">Wallet</option>
-                            <option value="chit">Chit Allocation</option>
                             <option value="cash">Cash</option>
                             <option value="bank_transfer">Bank Transfer</option>
                         </select>
@@ -874,31 +849,6 @@
                         <small class="text-muted">Upload cash voucher, receipt photo, or bank transfer screenshot.</small>
                     </div>
 
-                    <div class="col-md-6 maturity-chit">
-                        <label class="form-label fw-semibold">Chit Group</label>
-                        <select name="chit_group_id" class="form-select">
-                            <option value="">Select group…</option>
-                            @foreach($chitGroups as $group)
-                                <option value="{{ $group->id }}">{{ $group->group_code ?? ('Group #'.$group->id) }}</option>
-                            @endforeach
-                        </select>
-                    </div>
-                    <div class="col-md-6 maturity-chit">
-                        <label class="form-label fw-semibold">Allocation Type</label>
-                        <select name="allocation_type" class="form-select">
-                            <option value="pending_installment">Pending Installment</option>
-                            <option value="advance">Advance</option>
-                            <option value="settlement">Settlement</option>
-                            <option value="join_new">Join New</option>
-                            <option value="chit_wallet">Chit Wallet</option>
-                        </select>
-                    </div>
-                    <div class="col-md-6 maturity-chit">
-                        <label class="form-label fw-semibold">Allocation Amount</label>
-                        <input type="number" name="allocation_amount" class="form-control" step="0.01" min="0"
-                               value="{{ $deposit->maturity_amount }}">
-                    </div>
-
                     <div class="col-12 border rounded p-3 my-2" style="background: #f8fafc;">
                         <h6 class="fw-bold mb-3 text-uppercase small text-muted">Settlement Charges (like loan disbursement)</h6>
                         <div class="row g-3">
@@ -961,7 +911,6 @@
                         <label class="form-label fw-semibold">Payout Option <span class="text-danger">*</span></label>
                         <select name="payout_option" id="premature_payout" class="form-select" required>
                             <option value="wallet">Wallet</option>
-                            <option value="chit">Chit Allocation</option>
                             <option value="cash">Cash</option>
                             <option value="bank_transfer">Bank Transfer</option>
                         </select>
@@ -1044,30 +993,6 @@
                         <label class="form-label fw-semibold">Payment Proof / Photo Upload</label>
                         <input type="file" name="payment_proof" class="form-control" accept="image/*,.pdf">
                         <small class="text-muted">Upload cash voucher, receipt photo, or bank transfer screenshot.</small>
-                    </div>
-
-                    <div class="col-md-6 premature-chit">
-                        <label class="form-label fw-semibold">Chit Group</label>
-                        <select name="chit_group_id" class="form-select">
-                            <option value="">Select group…</option>
-                            @foreach($chitGroups as $group)
-                                <option value="{{ $group->id }}">{{ $group->group_code }}</option>
-                            @endforeach
-                        </select>
-                    </div>
-                    <div class="col-md-6 premature-chit">
-                        <label class="form-label fw-semibold">Allocation Type</label>
-                        <select name="allocation_type" class="form-select">
-                            <option value="pending_installment">Pending Installment</option>
-                            <option value="advance">Advance</option>
-                            <option value="settlement">Settlement</option>
-                            <option value="join_new">Join New</option>
-                            <option value="chit_wallet">Chit Wallet</option>
-                        </select>
-                    </div>
-                    <div class="col-md-6 premature-chit">
-                        <label class="form-label fw-semibold">Allocation Amount</label>
-                        <input type="number" name="allocation_amount" class="form-control" step="0.01" min="0">
                     </div>
 
                     <div class="col-12 border rounded p-3 my-2" style="background: #f8fafc;">
@@ -1453,13 +1378,12 @@ document.addEventListener('DOMContentLoaded', function () {
 @section('page-script')
 <script>
 document.addEventListener('DOMContentLoaded', function () {
-    function togglePayout(selectId, bankCls, chitCls, cashCls, proofCls, bankSelectId) {
+    function togglePayout(selectId, bankCls, cashCls, proofCls, bankSelectId) {
         const sel = document.getElementById(selectId);
         if (!sel) return;
         const sync = () => {
             const v = sel.value;
             document.querySelectorAll('.' + bankCls).forEach(el => el.style.display = (v === 'bank_transfer') ? '' : 'none');
-            document.querySelectorAll('.' + chitCls).forEach(el => el.style.display = (v === 'chit') ? '' : 'none');
             if (cashCls) {
                 document.querySelectorAll('.' + cashCls).forEach(el => el.style.display = (v === 'cash') ? '' : 'none');
             }
@@ -1474,8 +1398,8 @@ document.addEventListener('DOMContentLoaded', function () {
         sel.addEventListener('change', sync);
         sync();
     }
-    togglePayout('maturity_payout', 'maturity-bank', 'maturity-chit', 'maturity-cash', 'maturity-proof', 'maturity_internal_bank_account_id');
-    togglePayout('premature_payout', 'premature-bank', 'premature-chit', 'premature-cash', 'premature-proof', 'premature_internal_bank_account_id');
+    togglePayout('maturity_payout', 'maturity-bank', 'maturity-cash', 'maturity-proof', 'maturity_internal_bank_account_id');
+    togglePayout('premature_payout', 'premature-bank', 'premature-cash', 'premature-proof', 'premature_internal_bank_account_id');
 
     // Customer Bank Account Picker Handler
     document.querySelectorAll('.fd-customer-bank-picker').forEach(function(picker) {

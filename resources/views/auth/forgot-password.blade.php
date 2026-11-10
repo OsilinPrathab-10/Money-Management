@@ -16,6 +16,7 @@
             <x-input-error :messages="$errors->get('email')" class="mt-2" />
         </div>
 
+        
         <div class="flex items-center justify-end mt-4">
             <x-primary-button>
                 {{ __('Email Password Reset Link') }}
@@ -23,3 +24,7 @@
         </div>
     </form>
 </x-guest-layout>
+
+
+
+

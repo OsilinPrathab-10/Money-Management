@@ -67,35 +67,8 @@ class DashboardControllerApi extends Controller
             ];
         })->values()->all();
 
-        // 2. Chits Array & Totals
-        $chitQuery = \App\Models\GroupMember::with(['group.scheme', 'installments']);
-        if (method_exists(\App\Models\GroupMember::class, 'scopeInvolvingClient')) {
-            $chitQuery->involvingClient($client->id);
-        } else {
-            $chitQuery->where('client_id', $client->id);
-        }
-        $chitMemberships = $chitQuery->latest()->get();
-
-        $formattedChits = $chitMemberships->map(function ($member) use ($client) {
-            $group = $member->group;
-            return [
-                'id' => $member->id,
-                'member_number' => $member->member_number ?? $member->ticket_number,
-                'ticket_number' => $member->ticket_number ?? $member->member_number,
-                'group_id' => $member->group_id,
-                'group_name' => optional($group)->group_name ?? optional(optional($group)->scheme)->name ?? 'Chit Group',
-                'group_code' => optional($group)->group_code,
-                'scheme_name' => optional(optional($group)->scheme)->name,
-                'chit_amount' => (float) (optional($group)->chit_value ?? optional($group)->total_amount ?? optional(optional($group)->scheme)->chit_value ?? 0),
-                'monthly_installment' => (float) $member->apiInstallmentAmountForClient((int) $client->id, $group),
-                'total_months' => (int) (optional($group)->total_months ?? 0),
-                'paid_amount' => (float) ($member->installments ? $member->installments->sum('paid_amount') : ($member->total_paid_amount ?? 0)),
-                'pending_amount' => (float) ($member->installments ? $member->installments->whereNotIn('status', ['paid', 'waived'])->sum('balance') : ($member->pending_amount ?? 0)),
-                'status' => $member->persistCustomerFacingStatus(),
-                'status_label' => $member->customerFacingStatusLabel(),
-                'joined_at' => optional($member->joined_at ?? $member->created_at)?->format('Y-m-d'),
-            ];
-        })->values()->all();
+        // 2. Chits Array & Totals (Removed)
+        $formattedChits = [];
 
         // 3. Fixed Deposits Array & Totals
         $fdAccounts = \App\Models\FixedDeposit::with('scheme')
@@ -144,12 +117,10 @@ class DashboardControllerApi extends Controller
         $totalLoanOutstanding = (float) $loanAccounts->sum('outstanding_amount');
         $totalLoanPaid = (float) $loanAccounts->sum('paid_amount');
 
-        $chitsCount = count($formattedChits);
-        $activeChitsCount = $chitMemberships->filter(function ($m) {
-            return in_array($m->customerFacingStatus(), ['active', 'approved'], true);
-        })->count();
-        $totalChitAmount = (float) $chitMemberships->sum(fn ($m) => optional($m->group)->chit_value ?? optional($m->group)->total_amount ?? optional(optional($m->group)->scheme)->chit_value ?? 0);
-        $totalChitPaid = (float) $chitMemberships->sum(fn ($m) => $m->installments ? $m->installments->sum('paid_amount') : ($m->total_paid_amount ?? 0));
+        $chitsCount = 0;
+        $activeChitsCount = 0;
+        $totalChitAmount = 0.0;
+        $totalChitPaid = 0.0;
 
         $fdsCount = count($formattedFds);
         $activeFdsCount = $fdAccounts->where('status', 'active')->count();

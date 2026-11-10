@@ -18,13 +18,7 @@
             @csrf
             <input type="hidden" name="client_id" id="apply_client_id_hidden" value="{{ $client->id }}">
             
-            <!-- Chit Fund Details Panel (auto-loaded for this client) -->
-            <div class="col-12" id="chitDetailsPanel" style="display: none;">
-              <div class="alert alert-info border d-flex align-items-start gap-2 mb-0 py-2 px-3">
-                <i class="ri-hand-coin-line ri-20px mt-1"></i>
-                <div id="chitSummaryText"></div>
-              </div>
-            </div>
+
 
             <!-- Loan Mode Toggle -->
             <div class="col-12" id="loan_mode_container">
@@ -42,6 +36,8 @@
                 </div>
               </div>
             </div>
+
+            @include('admin.clients.modals.partials.open-loan-interest-source')
             
             @php
               $modalLoanTypes = collect();
@@ -113,6 +109,8 @@
                 <option value="daily">Daily (Everyday Collection)</option>
               </select>
             </div>
+
+            @include('admin.clients.modals.partials.open-loan-manual-interest-field')
 
             <!-- Amount Configuration -->
             <div class="col-md-8">

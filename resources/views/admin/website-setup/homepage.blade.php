@@ -457,6 +457,79 @@
             </div>
           </div>
 
+          <!-- Footer Content Section -->
+          <div class="row g-4 mb-4">
+            <div class="col-12">
+              <h6 class="text-primary mb-0"><i class="ri-layout-bottom-line me-2"></i>Footer Content & Branding</h6>
+              <hr class="mt-2 mb-4">
+            </div>
+
+            <!-- Footer Text / Copyright Prefix -->
+            <div class="col-md-6">
+              <label class="form-label" for="footerText">Footer Copyright / Prefix Text</label>
+              <input type="text" class="form-control @error('footer_text') is-invalid @enderror" 
+                     id="footerText" name="footer_text" 
+                     placeholder="e.g. &copy; {year}"
+                     value="{{ old('footer_text', $appearance->footer_text ?? ($companyDetail->footer_text ?? '')) }}">
+              @error('footer_text')
+                <div class="invalid-feedback">{{ $message }}</div>
+              @enderror
+              <small class="text-muted">Supports <code>{year}</code> for current year. Leave blank for default (&#169; current year).</small>
+            </div>
+
+            <!-- Footer Link Text -->
+            <div class="col-md-6">
+              <label class="form-label" for="footerLinkText">Footer Link Text / Company Name</label>
+              <input type="text" class="form-control @error('footer_link_text') is-invalid @enderror" 
+                     id="footerLinkText" name="footer_link_text" 
+                     placeholder="e.g. {{ $companyDetail->company_name ?? 'Codepluse Gen pvt Ltd' }}"
+                     value="{{ old('footer_link_text', $appearance->footer_link_text ?? ($companyDetail->footer_link_text ?? '')) }}">
+              @error('footer_link_text')
+                <div class="invalid-feedback">{{ $message }}</div>
+              @enderror
+              <small class="text-muted">Company or brand name displayed as the footer link.</small>
+            </div>
+
+            <!-- Footer Link URL -->
+            <div class="col-md-6">
+              <label class="form-label" for="footerLinkUrl">Footer Link URL</label>
+              <input type="url" class="form-control @error('footer_link_url') is-invalid @enderror" 
+                     id="footerLinkUrl" name="footer_link_url" 
+                     placeholder="https://example.com"
+                     value="{{ old('footer_link_url', $appearance->footer_link_url ?? ($companyDetail->footer_link_url ?? '')) }}">
+              @error('footer_link_url')
+                <div class="invalid-feedback">{{ $message }}</div>
+              @enderror
+              <small class="text-muted">Target URL when clicking the footer link (e.g. company website).</small>
+            </div>
+
+            <!-- Footer Custom Note -->
+            <div class="col-md-6">
+              <label class="form-label" for="footerCustomNote">Footer Note / Suffix</label>
+              <input type="text" class="form-control @error('footer_custom_note') is-invalid @enderror" 
+                     id="footerCustomNote" name="footer_custom_note" 
+                     placeholder="e.g. - All rights reserved."
+                     value="{{ old('footer_custom_note', $appearance->footer_custom_note ?? ($companyDetail->footer_custom_note ?? '')) }}">
+              @error('footer_custom_note')
+                <div class="invalid-feedback">{{ $message }}</div>
+              @enderror
+              <small class="text-muted">Appended after the link (e.g. "- All rights reserved.").</small>
+            </div>
+
+            <!-- Live Footer Preview -->
+            <div class="col-md-12">
+              <label class="form-label small fw-medium text-muted">Footer Live Preview</label>
+              <div class="card bg-label-secondary border-0 shadow-none">
+                <div class="card-body py-3 d-flex align-items-center justify-content-between flex-wrap gap-2">
+                  <div id="footerPreviewText" class="text-body fw-normal">
+                    {{-- Dynamically populated via JS --}}
+                  </div>
+                  <span class="badge bg-label-primary rounded-pill">Admin Footer Preview</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <!-- Submit Buttons -->
           <div class="row">
             <div class="col-12">
@@ -560,6 +633,44 @@ document.addEventListener('DOMContentLoaded', function() {
   document.getElementById('favicon')?.addEventListener('change', function() {
     previewImage(this, 'faviconPreview', 'faviconPlaceholder');
   });
+
+  // Footer preview handler
+  const footerInput = document.getElementById('footerText');
+  const footerLinkTextInput = document.getElementById('footerLinkText');
+  const footerLinkUrlInput = document.getElementById('footerLinkUrl');
+  const footerCustomNoteInput = document.getElementById('footerCustomNote');
+  const footerPreview = document.getElementById('footerPreviewText');
+  const currentYear = new Date().getFullYear();
+  const defaultFooter = `&#169; ${currentYear} <a href="https://codepluse.com/" target="_blank" class="footer-link fw-medium">Codepluse Gen pvt Ltd</a> <span> - All rights reserved.</span>`;
+
+  function updateFooterPreview() {
+    if (!footerPreview) return;
+    const textVal = footerInput ? footerInput.value.trim() : '';
+    const linkTextVal = footerLinkTextInput ? footerLinkTextInput.value.trim() : '';
+    const linkUrlVal = footerLinkUrlInput ? footerLinkUrlInput.value.trim() : '';
+    const noteVal = footerCustomNoteInput ? footerCustomNoteInput.value.trim() : '';
+
+    if (textVal || linkTextVal || noteVal) {
+      let html = '';
+      const prefix = textVal ? textVal.replace(/\{year\}|\{\{year\}\}/gi, currentYear) : `&#169; ${currentYear}`;
+      html += `<span>${prefix}</span>`;
+      if (linkTextVal) {
+        const href = linkUrlVal || 'javascript:void(0);';
+        html += ` <a href="${href}" target="_blank" class="footer-link fw-medium">${linkTextVal}</a>`;
+      }
+      if (noteVal) {
+        html += ` <span>${noteVal.replace(/\{year\}|\{\{year\}\}/gi, currentYear)}</span>`;
+      }
+      footerPreview.innerHTML = html;
+    } else {
+      footerPreview.innerHTML = defaultFooter;
+    }
+  }
+
+  [footerInput, footerLinkTextInput, footerLinkUrlInput, footerCustomNoteInput].forEach(el => {
+    el?.addEventListener('input', updateFooterPreview);
+  });
+  updateFooterPreview();
 
   // Mobile number validation
   const mobileInputs = ['companyMobile', 'alternateMobile', 'supportMobile', 'agentContactMobile'];
