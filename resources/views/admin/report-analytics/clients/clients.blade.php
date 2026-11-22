@@ -11,16 +11,7 @@
 @endsection
 
 @section('content')
-<div class="row mb-6">
-  <div class="col-12">
-    <div class="d-flex justify-content-between align-items-center">
-      <div>
-        <h4 class="mb-1">Clients Report & Analytics</h4>
-        <p class="text-muted mb-0">Comprehensive overview of client statistics and trends</p>
-      </div>
-    </div>
-  </div>
-</div>
+@include('admin.report-analytics.partials.loan-report-tabs', ['activeTab' => $activeTab ?? 'clients'])
 
 <div id="reportsAnalyticsContent">
 <!-- Charts Row -->
@@ -148,7 +139,8 @@
         </div>
       </div>
       <div class="card-body">
-        <form method="GET" class="row g-3 align-items-end mb-4" id="clientsFilterForm">
+        <form method="GET" action="{{ route('reports-loan', ['tab' => 'clients']) }}" class="row g-3 align-items-end mb-4" id="clientsFilterForm">
+          <input type="hidden" name="tab" value="clients">
           <div class="col-md-2">
             <label class="form-label">Status</label>
             <select name="status" class="form-select" data-auto-submit="true">
@@ -193,7 +185,7 @@
             ])
           </div>
           <div class="col-md-auto d-flex align-items-end">
-            <a href="{{ route('reports-clients') }}" class="btn btn-outline-secondary" id="resetFiltersBtn"><i class="ri-refresh-line me-1"></i>Reset</a>
+            <a href="{{ route('reports-loan', ['tab' => 'clients']) }}" class="btn btn-outline-secondary" id="resetFiltersBtn"><i class="ri-refresh-line me-1"></i>Reset</a>
           </div>
         </form>
 

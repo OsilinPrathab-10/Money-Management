@@ -82,15 +82,43 @@
         {
             "name": "EMI Collections",
             "icon": "menu-icon icon-base ri ri-calendar-check-line",
-            "url": "client-collections",
+            "url": "emi/repayments",
             "roles": [
                 "Admin",
                 "Staff",
                 "Agent"
             ],
             "slug": [
-                "client-collections",
-                "client-collections.data"
+                "emi-repayments",
+                "emi-repayments-data",
+                "emi-repayments-all-ids",
+                "emi-repayments-bulk-assign",
+                "emi-repayments-show",
+                "emi-repayments-history",
+                "emi-details",
+                "client-loan-emi-details",
+                "emi-repayments-bulk-pay",
+                "emi-repayments-bulk-undo"
+            ]
+        },
+        {
+            "url": "admin/website/enquiries",
+            "name": "Website Enquiries",
+            "icon": "menu-icon icon-base ri ri-mail-unread-line",
+            "roles": [
+                "Admin",
+                "Staff",
+                "Super Admin"
+            ],
+            "slug": [
+                "admin.website.enquiries.index",
+                "admin.website.enquiries.show",
+                "admin.website.enquiries.update",
+                "admin.website.enquiries.convert-client",
+                "admin.website.leads.index",
+                "admin.website.leads.show",
+                "admin.website.leads.update",
+                "admin.website.leads.convert-client"
             ]
         },
         {
@@ -112,7 +140,7 @@
         {
             "menuHeader": "Business Modules"
         },
-          {
+        {
             "url": "cibil-report",
             "icon": "menu-icon icon-base ri ri-bar-chart-box-line",
             "name": "CIBIL Report",
@@ -126,129 +154,7 @@
                 "CreditVerifier"
             ]
         },
-      
-        {
-            "name": "Accounting",
-            "icon": "menu-icon icon-base ri ri-book-2-line",
-            "slug": [
-                "account.index",
-                "account.bank-accounts",
-                "account.bank-transfers",
-                "account.bank-transactions",
-                "account.loan-accounts",
-                "account.fd-accounts",
-                "account.emis",
-                "account.revenues",
-                "account.expenses",
-                "account.reports",
-                "account.day-book",
-                "account.ledger",
-                "account.profit-loss",
-                "account.revenue-categories",
-                "account.expense-categories"
-            ],
-            "roles": [
-                "Admin"
-            ],
-            "submenu": [
-                {
-                    "url": "account",
-                    "name": "Dashboard",
-                    "slug": "account.index",
-                    "roles": [
-                        "Admin"
-                    ]
-                },
-                {
-                    "url": "account/bank-accounts",
-                    "name": "Bank Accounts",
-                    "slug": "account.bank-accounts",
-                    "roles": [
-                        "Admin"
-                    ]
-                },
-                {
-                    "url": "account/bank-transfers",
-                    "name": "Bank Transfers",
-                    "slug": "account.bank-transfers",
-                    "roles": [
-                        "Admin"
-                    ]
-                },
-                {
-                    "url": "account/bank-transactions",
-                    "name": "Bank Transactions",
-                    "slug": "account.bank-transactions",
-                    "roles": [
-                        "Admin"
-                    ]
-                },
-                {
-                    "url": "account/revenues",
-                    "name": "Revenues",
-                    "slug": "account.revenues",
-                    "roles": [
-                        "Admin"
-                    ]
-                },
-                {
-                    "url": "account/expenses",
-                    "name": "Expenses",
-                    "slug": "account.expenses",
-                    "roles": [
-                        "Admin"
-                    ]
-                },
-                {
-                    "url": "account/day-book",
-                    "name": "Day Book",
-                    "slug": "account.day-book",
-                    "roles": [
-                        "Admin"
-                    ]
-                },
-                {
-                    "url": "account/ledger",
-                    "name": "Ledger",
-                    "slug": "account.ledger",
-                    "roles": [
-                        "Admin"
-                    ]
-                },
-                {
-                    "url": "account/profit-loss",
-                    "name": "Profit & Loss",
-                    "slug": "account.profit-loss",
-                    "roles": [
-                        "Admin"
-                    ]
-                },
-                {
-                    "url": "account/revenue-categories",
-                    "name": "Revenue categories",
-                    "slug": "account.revenue-categories",
-                    "roles": [
-                        "Admin"
-                    ]
-                },
-                {
-                    "url": "account/expense-categories",
-                    "name": "Expense categories",
-                    "slug": "account.expense-categories",
-                    "roles": [
-                        "Admin"
-                    ]
-                },
-                {
-                    "url": "account/reports",
-                    "name": "Reports",
-                    "slug": "account.reports",
-                    "roles": [
-                        "Admin"
-                    ]
-                }
-            ]
-        },
+   
         {
             "name": "Loan Management",
             "icon": "menu-icon icon-base ri ri-bank-line",
@@ -266,14 +172,12 @@
                 "loan-product-view",
                 "loan-types",
                 "loan-configuration",
-                "emi-repayments",
-                "emi-details",
-                "client-loan-emi-details",
                 "pending-emis",
                 "create-receipt",
                 "view-receipt",
                 "print-receipt",
                 "emi-calculator",
+                "reports-loan",
                 "reports-clients",
                 "reports-applications",
                 "reports-loans",
@@ -320,20 +224,6 @@
                     ]
                 },
                 {
-                    "url": "emi/repayments",
-                    "name": "EMI Repayments",
-                    "slug": [
-                        "emi-repayments",
-                        "emi-details",
-                        "client-loan-emi-details"
-                    ],
-                    "roles": [
-                        "Admin",
-                        "Staff",
-                        "Agent"
-                    ]
-                },
-                {
                     "url": "emi/emi-calculator",
                     "name": "EMI Calculator",
                     "slug": "emi-calculator",
@@ -344,33 +234,15 @@
                     ]
                 },
                 {
-                    "url": "reports/clients",
-                    "name": "Client Reports",
-                    "slug": "reports-clients",
-                    "roles": [
-                        "Admin"
-                    ]
-                },
-                {
-                    "url": "reports/applications",
-                    "name": "Application Reports",
-                    "slug": "reports-applications",
-                    "roles": [
-                        "Admin"
-                    ]
-                },
-                {
-                    "url": "reports/loans",
-                    "name": "Loan Reports",
-                    "slug": "reports-loans",
-                    "roles": [
-                        "Admin"
-                    ]
-                },
-                {
-                    "url": "reports/emi",
-                    "name": "EMI Reports",
-                    "slug": "reports-emi",
+                    "url": "reports/loan",
+                    "name": "Reports",
+                    "slug": [
+                        "reports-loan",
+                        "reports-clients",
+                        "reports-applications",
+                        "reports-loans",
+                        "reports-emi"
+                    ],
                     "roles": [
                         "Admin"
                     ]
@@ -493,73 +365,12 @@
                 "Admin"
             ]
         },
-        {
-            "name": "Agent Collections",
-            "icon": "menu-icon icon-base ri ri-wallet-line",
-            "url": "app/agents/agent-collections",
-            "roles": [
-                "Admin"
-            ],
-            "slug": [
-                "agent-collections",
-                "agent-collections.list",
-                "agent-collections.show"
-            ]
-        },
+       
         {
             "menuHeader": "Managements"
         },
-        {
-            "url": "user-management",
-            "icon": "menu-icon icon-base ri ri-user-settings-line",
-            "name": "Staff Management",
-            "slug": "user-management",
-            "roles": [
-                "Admin"
-            ]
-        },
-        {
-            "name": "HRM Management",
-            "icon": "menu-icon icon-base ri ri-team-line",
-            "roles": [
-                "Admin"
-            ],
-            "slug": [
-                "admin.staff.index",
-                "agent-management",
-                "agent-management.index",
-                "agent-management.data",
-                "agent-management.view-account",
-                "agent-management.view-work",
-                "agent-management.view-visits",
-                "agent-management.view-assigned-client",
-                "agent-management.visit-details",
-                "agent-management.attendance",
-                "agent-collections"
-            ],
-            "submenu": [
-                {
-                    "url": "staff",
-                    "name": "Staff Management",
-                    "slug": "admin.staff.index"
-                },
-                {
-                    "url": "app/agents",
-                    "name": "Agent Management",
-                    "slug": [
-                        "agent-management.index",
-                        "agent-management.data",
-                        "agent-management.view",
-                        "agent-management.view-account",
-                        "agent-management.view-work",
-                        "agent-management.view-visits",
-                        "agent-management.view-assigned-client",
-                        "agent-management.visit-details"
-                    ]
-                }
-            ]
-        },
       
+     
         {
             "name": "API Hits & Usage",
             "icon": "menu-icon icon-base ri ri-bar-chart-2-line",
@@ -572,19 +383,7 @@
                 "api-wallet.export"
             ]
         },
-        {
-            "name": "My Collections",
-            "icon": "menu-icon icon-base ri ri-wallet-line",
-            "url": "app/agents/agent-collections",
-            "roles": [
-                "Agent"
-            ],
-            "slug": [
-                "agent-collections",
-                "agent-collections.list",
-                "agent-collections.show"
-            ]
-        },
+       
         {
             "name": "Location Management",
             "icon": "menu-icon icon-base ri ri-map-pin-line",
@@ -594,40 +393,8 @@
                 "Admin"
             ]
         },
-        {
-            "name": "Roles & Permissions",
-            "icon": "menu-icon icon-base ri ri-key-2-line",
-            "slug": "role",
-            "roles": [
-                "Admin"
-            ],
-            "submenu": [
-                {
-                    "url": "roles",
-                    "name": "Staff Roles",
-                    "slug": "role-users"
-                },
-                {
-                    "url": "roles/menus",
-                    "name": "Menu Access",
-                    "slug": "roles.menus"
-                },
-                {
-                    "url": "permission",
-                    "name": "Role Permissions",
-                    "slug": "role-permissions"
-                }
-            ]
-        },
-        {
-            "name": "Notifications",
-            "url": "notifications",
-            "icon": "menu-icon icon-base ri ri-notification-line",
-            "slug": "notifications",
-            "roles": [
-                "Admin"
-            ]
-        },
+       
+        
         {
             "url": "admin/account-deletion",
             "icon": "menu-icon icon-base ri ri-user-unfollow-line",
@@ -707,7 +474,7 @@
             "submenu": [
                 {
                     "url": "admin/homepage-setup",
-                    "name": "Homepage Setup",
+                    "name": "Website Setup",
                     "slug": "website-homepage"
                 },
                 {
@@ -717,30 +484,7 @@
                 }
             ]
         },
-        {
-            "name": "Mobile Apps",
-            "icon": "menu-icon icon-base ri ri-smartphone-line",
-            "slug": [
-                "mobile-apps",
-                "customer-app-settings",
-                "agent-app-settings"
-            ],
-            "roles": [
-                "Admin"
-            ],
-            "submenu": [
-                {
-                    "url": "admin/mobile-apps/customer-app",
-                    "name": "Customer App",
-                    "slug": "customer-app-settings"
-                },
-                {
-                    "url": "admin/mobile-apps/agent-app",
-                    "name": "Agent App",
-                    "slug": "agent-app-settings"
-                }
-            ]
-        },
+    
         {
             "name": "Setup & Configuration",
             "icon": "menu-icon icon-base ri ri-settings-5-line",

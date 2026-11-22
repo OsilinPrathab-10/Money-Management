@@ -38,7 +38,10 @@ class ClientCollectionsController extends Controller
         }
 
         $status = $request->input('status', 'all');
-        if (! in_array($status, ['overdue', 'pending', 'upcoming', 'partial', 'paid', 'all'], true)) {
+        if (! in_array($status, ['overdue', 'pending', 'upcoming', 'partial', 'paid', 'all', 'unpaid'], true)) {
+            $status = 'all';
+        }
+        if ($status === 'unpaid') {
             $status = 'all';
         }
 
@@ -690,11 +693,18 @@ class ClientCollectionsController extends Controller
     protected function queryMatchingAccounts(string $module, string $status, Carbon $today, ?int $agentId, string $search, ?string $fromDate, ?string $toDate): Collection
     {
         $loanQ = DB::table('loan_accounts')
-            ->join('clients', 'clients.id', '=', 'loan_accounts.client_id')
+            ->leftJoin('loan_applications', 'loan_applications.id', '=', 'loan_accounts.loan_application_id')
+            ->join('clients', function ($join) {
+                $join->on('clients.id', '=', 'loan_accounts.client_id')
+                    ->orOn('clients.id', '=', 'loan_applications.client_id');
+            })
             ->leftJoin('agents', 'agents.id', '=', 'clients.assigned_to')
             ->leftJoin('locations', 'locations.id', '=', 'clients.location_id')
             ->whereNull('loan_accounts.deleted_at')
-            ->where('loan_accounts.status', '!=', 'closed');
+            ->where(function ($q) {
+                $q->whereNull('loan_accounts.status')
+                    ->orWhereRaw("LOWER(TRIM(loan_accounts.status)) NOT IN ('closed', 'foreclosed', 'completed')");
+            });
 
         if ($agentId) {
             $loanQ->where(function ($q) use ($agentId) {
@@ -730,7 +740,7 @@ class ClientCollectionsController extends Controller
                 ->where(function ($emiCond) use ($status, $today, $fromDate, $toDate) {
                     $emiCond->where(function ($subQ) use ($status, $today, $fromDate, $toDate) {
                         $this->applyLoanStatus($subQ, $status, $today);
-                        $this->applyDateRange($subQ, 'emis.due_date', $fromDate, $toDate);
+                        $this->applyEmiDueDateRange($subQ, $status, $fromDate, $toDate, 'emis.due_date');
                     });
                     if ($fromDate || $toDate) {
                         $emiCond->orWhereExists(function ($noteSub) use ($fromDate, $toDate) {
@@ -747,11 +757,20 @@ class ClientCollectionsController extends Controller
         $loanAccounts = $loanQ->select([
             DB::raw("'loan' as record_type"),
             'loan_accounts.id as record_id',
-            'loan_accounts.client_id',
+            DB::raw('COALESCE(loan_accounts.client_id, loan_applications.client_id) as client_id'),
             'clients.client_name',
             'clients.nickname as client_nickname',
             'loan_accounts.account_number as identifier',
-        ])->get();
+        ])
+            ->groupBy(
+                'loan_accounts.id',
+                'loan_accounts.client_id',
+                'loan_applications.client_id',
+                'clients.client_name',
+                'clients.nickname',
+                'loan_accounts.account_number'
+            )
+            ->get();
 
         return $loanAccounts->sortBy(function ($item) {
             return strtolower(trim($item->client_name)) . '_' . $item->record_type . '_' . $item->identifier;
@@ -771,7 +790,7 @@ class ClientCollectionsController extends Controller
             $query->where(function ($q) use ($status, $today, $fromDate, $toDate) {
                 $q->where(function ($sub) use ($status, $today, $fromDate, $toDate) {
                     $this->applyLoanStatus($sub, $status, $today);
-                    $this->applyDateRange($sub, 'emis.due_date', $fromDate, $toDate);
+                    $this->applyEmiDueDateRange($sub, $status, $fromDate, $toDate, 'emis.due_date');
                 })->orWhereHas('collectionNotes', function ($noteSub) use ($fromDate, $toDate) {
                     $noteSub->where('is_completed', false);
                     $this->applyDateRange($noteSub, 'reminder_date', $fromDate, $toDate);
@@ -900,7 +919,10 @@ class ClientCollectionsController extends Controller
 
     protected function applyLoanStatus($query, string $status, Carbon $today): void
     {
-        if ($status === 'all') {
+        if ($status === 'all' || $status === 'unpaid') {
+            $query->whereIn('emis.status', ['pending', 'overdue', 'partial'])
+                ->where('emis.pending_amount', '>', 0);
+
             return;
         }
 
@@ -939,11 +961,6 @@ class ClientCollectionsController extends Controller
         }
         if ($status === 'paid') {
             $query->where('emis.status', 'paid');
-            return;
-        }
-        if ($status === 'unpaid') {
-            $query->whereIn('emis.status', ['pending', 'overdue', 'partial'])
-                ->where('emis.pending_amount', '>', 0);
         }
     }
 
@@ -958,14 +975,60 @@ class ClientCollectionsController extends Controller
         }
     }
 
+    /**
+     * Upcoming EMIs fall after the current month; do not apply a "this month" to_date on that tab.
+     */
+    protected function applyEmiDueDateRange($query, string $status, ?string $fromDate, ?string $toDate, string $column = 'emis.due_date'): void
+    {
+        $prefix = str_contains($column, '.') ? explode('.', $column)[0] . '.' : '';
+        $statusCol = $prefix . 'status';
+        $pendingCol = $prefix . 'pending_amount';
+
+        if (in_array($status, ['upcoming', 'all', 'unpaid'], true)) {
+            if ($fromDate) {
+                $query->whereDate($column, '>=', $fromDate);
+            }
+
+            return;
+        }
+
+        if ($fromDate) {
+            $query->whereDate($column, '>=', $fromDate);
+        }
+
+        if (! $toDate) {
+            return;
+        }
+
+        $monthEnd = Carbon::today()->endOfMonth()->toDateString();
+
+        if ($status === 'all' && $toDate <= $monthEnd) {
+            $query->where(function ($q) use ($column, $fromDate, $toDate, $statusCol, $pendingCol) {
+                $q->where(function ($inner) use ($column, $fromDate, $toDate) {
+                    if ($fromDate) {
+                        $inner->whereDate($column, '>=', $fromDate);
+                    }
+                    $inner->whereDate($column, '<=', $toDate);
+                })->orWhere(function ($future) use ($column, $toDate, $statusCol, $pendingCol) {
+                    $future->whereDate($column, '>', $toDate)
+                        ->whereIn($statusCol, ['pending', 'overdue', 'partial'])
+                        ->where($pendingCol, '>', 0);
+                });
+            });
+
+            return;
+        }
+
+        $query->whereDate($column, '<=', $toDate);
+    }
+
     protected function computeStats(string $module, Carbon $today, ?int $agentId, string $search, ?string $fromDate, ?string $toDate): array
     {
         $loan = ['overdue' => 0, 'pending' => 0, 'upcoming' => 0, 'partial' => 0, 'paid' => 0, 'collected' => 0.0, 'pending_amount' => 0.0];
 
-        $base = $this->loanBaseQuery($agentId, $search);
-        $this->applyDateRange($base, 'emis.due_date', $fromDate, $toDate);
         foreach (['overdue', 'pending', 'upcoming', 'partial', 'paid'] as $bucket) {
-            $q = clone $base;
+            $q = clone $this->loanBaseQuery($agentId, $search);
+            $this->applyEmiDueDateRange($q, $bucket, $fromDate, $toDate, 'emis.due_date');
             $this->applyLoanStatus($q, $bucket, $today);
             $loan[$bucket] = (int) (clone $q)->distinct()->count('loan_accounts.id');
             if ($bucket === 'paid') {
@@ -981,8 +1044,14 @@ class ClientCollectionsController extends Controller
         $partial = $loan['partial'];
         $paid = $loan['paid'];
 
+        $collectibleQuery = clone $this->loanBaseQuery($agentId, $search);
+        $this->applyLoanStatus($collectibleQuery, 'unpaid', $today);
+        $collectibleAccounts = (int) (clone $collectibleQuery)->distinct()->count('loan_accounts.id');
+
         return [
             'total' => $overdue + $pending + $upcoming + $partial + $paid,
+            'collectible' => $collectibleAccounts,
+            'unpaid_accounts' => $collectibleAccounts,
             'overdue' => $overdue,
             'pending' => $pending,
             'upcoming' => $upcoming,

@@ -1,21 +1,22 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ $page->name }} - {{ config('variables.templateName') }}</title>
-    
+
     <!-- Favicon -->
     <link rel="icon" type="image/x-icon" href="{{ asset('assets/img/favicon/favicon.ico') }}" />
-    
+
     <!-- Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    
+
     <!-- Remix Icons -->
     <link href="https://cdn.jsdelivr.net/npm/remixicon@3.5.0/fonts/remixicon.css" rel="stylesheet">
-    
+
     <style>
         * {
             margin: 0;
@@ -82,7 +83,7 @@
             margin-bottom: 1rem;
         }
 
-        .public-page-content ul, 
+        .public-page-content ul,
         .public-page-content ol {
             margin-bottom: 1rem;
             padding-left: 2rem;
@@ -128,34 +129,38 @@
             .public-page-header h1 {
                 font-size: 1.75rem;
             }
-            
+
             .public-page-content {
                 padding: 2rem 1.5rem;
             }
         }
     </style>
 </head>
+
 <body>
     <div class="public-page-container">
         <div class="public-page-card">
             <div class="public-page-header">
                 <h1>{{ $page->name }}</h1>
             </div>
-            
+
             <div class="public-page-content">
                 {!! $page->content !!}
             </div>
-            
+
             <div class="public-page-footer">
                 <a href="{{ route('login') }}" class="back-to-login">
                     <i class="ri-arrow-left-line"></i>
                     Back to Login
                 </a>
                 <div class="footer-text">
-                    &copy; {{ date('Y') }} <a href="https://codepluse.com/" target="_blank" style="color: #667eea; text-decoration: none; font-weight: 500;">Codepluse Gen pvt Ltd</a> - All rights reserved.
+                    &copy; {{ date('Y') }} <a href="https://osilinprathab.com/" target="_blank"
+                        style="color: #667eea; text-decoration: none; font-weight: 500;">osilinprathab Gen pvt Ltd</a> -
+                    All rights reserved.
                 </div>
             </div>
         </div>
     </div>
 </body>
+
 </html>

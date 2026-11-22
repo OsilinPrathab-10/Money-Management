@@ -1,6 +1,6 @@
 @extends('layouts/layoutMaster')
 
-@section('title', 'EMI/Interest Loan Repayments')
+@section('title', 'EMI Repayment')
 
 @section('vendor-style')
 @vite([
@@ -66,6 +66,18 @@
   }
   tr.shown td.details-control i {
     transform: rotate(90deg);
+  }
+  .datatables-repayments .dropdown-menu {
+    z-index: 1080;
+    min-width: 15rem;
+  }
+  .datatables-repayments .dropdown-header .avatar-initial {
+    width: 2rem;
+    height: 2rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1rem;
   }
 
   /* Premium Tabs Custom Styling */
@@ -234,35 +246,42 @@
     <div class="nav-align-top">
       <ul class="nav nav-tabs nav-fill" role="tablist" id="repaymentsTabs">
         <li class="nav-item">
-          <button type="button" class="nav-link active" role="tab" data-status="overdue" data-bs-toggle="tab">
+          <button type="button" class="nav-link active" role="tab" data-status="all">
+            <i class="icon-base ri ri-wallet-3-line me-1_5 text-primary"></i>
+            All
+            <span class="badge rounded-pill bg-primary ms-1" id="tab-count-all">{{ number_format($stats['unpaid_accounts'] ?? 0) }}</span>
+          </button>
+        </li>
+        <li class="nav-item">
+          <button type="button" class="nav-link" role="tab" data-status="overdue">
             <i class="icon-base ri ri-alarm-warning-line me-1_5 text-danger"></i>
             Overdue
             <span class="badge rounded-pill bg-danger ms-1" id="tab-count-overdue">{{ number_format($stats['overdue_emis']) }}</span>
           </button>
         </li>
         <li class="nav-item">
-          <button type="button" class="nav-link" role="tab" data-status="pending" data-bs-toggle="tab">
+          <button type="button" class="nav-link" role="tab" data-status="pending">
             <i class="icon-base ri ri-time-line me-1_5 text-warning"></i>
             Pending
             <span class="badge rounded-pill bg-warning ms-1 text-dark" id="tab-count-pending">{{ number_format($stats['pending_emis']) }}</span>
           </button>
         </li>
         <li class="nav-item">
-          <button type="button" class="nav-link" role="tab" data-status="upcoming" data-bs-toggle="tab">
+          <button type="button" class="nav-link" role="tab" data-status="upcoming">
             <i class="icon-base ri ri-calendar-schedule-line me-1_5 text-secondary"></i>
             Upcoming
             <span class="badge rounded-pill bg-secondary ms-1" id="tab-count-upcoming">{{ number_format($stats['upcoming_emis'] ?? 0) }}</span>
           </button>
         </li>
         <li class="nav-item">
-          <button type="button" class="nav-link" role="tab" data-status="partial" data-bs-toggle="tab">
+          <button type="button" class="nav-link" role="tab" data-status="partial">
             <i class="icon-base ri ri-pie-chart-line me-1_5 text-info"></i>
             Partial Paid
             <span class="badge rounded-pill bg-info ms-1" id="tab-count-partial">{{ number_format($stats['partial_emis']) }}</span>
           </button>
         </li>
         <li class="nav-item">
-          <button type="button" class="nav-link" role="tab" data-status="paid" data-bs-toggle="tab">
+          <button type="button" class="nav-link" role="tab" data-status="paid">
             <i class="icon-base ri ri-checkbox-circle-line me-1_5 text-success"></i>
             Paid
             <span class="badge rounded-pill bg-success ms-1" id="tab-count-paid">{{ number_format($stats['paid_emis']) }}</span>
@@ -275,10 +294,10 @@
   <!-- Filters row -->
   <div class="card-body border-bottom py-3">
     <div class="d-flex flex-column flex-md-row justify-content-between align-items-start align-items-md-center gap-3">
-      <h5 class="mb-0 fw-semibold text-primary" id="tableTitle">Overdue Clients</h5>
+      <h5 class="mb-0 fw-semibold text-primary" id="tableTitle">All Clients (EMIs To Collect)</h5>
       <div class="d-flex flex-wrap align-items-center gap-3">
         <!-- Hidden Status Filter for backward compatibility with repayments.js -->
-        <input type="hidden" id="statusFilter" value="overdue" />
+        <input type="hidden" id="statusFilter" value="all" />
         <input type="hidden" id="termUnitFilter" value="" />
 
         <!-- Loan Mode Filter -->
@@ -325,6 +344,9 @@
           'fromId' => 'fromDateFilter',
           'toId' => 'toDateFilter',
           'presetId' => 'repaymentsDatePreset',
+          'presetValue' => 'all',
+          'fromValue' => '',
+          'toValue' => '',
         ])
 
         <button type="button" id="resetFilters" class="btn btn-sm btn-outline-secondary">

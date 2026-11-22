@@ -3,10 +3,9 @@
 @endisset
 
 @php
+  $customizerHidden = 'customizer-hide';
   $configData = Helper::appClasses();
-
-  /* Display elements */
-  $customizerHidden = $customizerHidden ?? '';
+  $configData['hasCustomizer'] = false;
 @endphp
 
 @extends('layouts/commonMaster')

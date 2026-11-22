@@ -17,6 +17,15 @@ $adminTitle = SettingsHelper::get('admin_title', config('variables.templateName'
 @section('page-style')
 @vite(['resources/assets/vendor/scss/pages/page-auth.scss'])
 <style>
+  #template-customizer,
+  .template-customizer-open-btn,
+  .template-customizer-theme {
+    display: none !important;
+    visibility: hidden !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
+  }
+
   /* ── Premium rich-look fintech background ── */
   .authentication-wrapper {
     min-height: 100vh !important;
@@ -475,6 +484,27 @@ $adminTitle = SettingsHelper::get('admin_title', config('variables.templateName'
         @if(session('warning'))
           <div class="alert alert-warning alert-dismissible fade show rounded-3 mb-3 py-2" role="alert">
             <i class="ri-error-warning-line me-1"></i>{{ session('warning') }}
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+          </div>
+        @endif
+        @if(session('error'))
+          <div class="alert alert-danger alert-dismissible fade show rounded-3 mb-3 py-2" role="alert">
+            <i class="ri-error-warning-line me-1"></i>{{ session('error') }}
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+          </div>
+        @endif
+        @if($errors->any())
+          <div class="alert alert-danger alert-dismissible fade show rounded-3 mb-3 py-2" role="alert">
+            <i class="ri-error-warning-line me-1"></i>
+            @if($errors->count() === 1)
+              {{ $errors->first() }}
+            @else
+              <ul class="mb-0 ps-3 text-start">
+                @foreach($errors->all() as $err)
+                  <li>{{ $err }}</li>
+                @endforeach
+              </ul>
+            @endif
             <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
           </div>
         @endif

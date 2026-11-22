@@ -1,31 +1,56 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Premature Closure Receipt — {{ $deposit->fd_number }}</title>
-    
+
     @php
         use App\Helpers\SettingsHelper;
 
         if (!function_exists('numberToIndianWords')) {
-            function numberToIndianWords($number) {
+            function numberToIndianWords($number)
+            {
                 $number = round((float) $number, 2);
-                if ($number <= 0) return 'Zero Rupees Only';
+                if ($number <= 0)
+                    return 'Zero Rupees Only';
 
                 $decimal = round(($number - floor($number)) * 100);
                 $num = (int) floor($number);
 
                 $words = [
-                    0 => '', 1 => 'One', 2 => 'Two', 3 => 'Three', 4 => 'Four', 5 => 'Five',
-                    6 => 'Six', 7 => 'Seven', 8 => 'Eight', 9 => 'Nine', 10 => 'Ten',
-                    11 => 'Eleven', 12 => 'Twelve', 13 => 'Thirteen', 14 => 'Fourteen', 15 => 'Fifteen',
-                    16 => 'Sixteen', 17 => 'Seventeen', 18 => 'Eighteen', 19 => 'Nineteen',
-                    20 => 'Twenty', 30 => 'Thirty', 40 => 'Forty', 50 => 'Fifty',
-                    60 => 'Sixty', 70 => 'Seventy', 80 => 'Eighty', 90 => 'Ninety'
+                    0 => '',
+                    1 => 'One',
+                    2 => 'Two',
+                    3 => 'Three',
+                    4 => 'Four',
+                    5 => 'Five',
+                    6 => 'Six',
+                    7 => 'Seven',
+                    8 => 'Eight',
+                    9 => 'Nine',
+                    10 => 'Ten',
+                    11 => 'Eleven',
+                    12 => 'Twelve',
+                    13 => 'Thirteen',
+                    14 => 'Fourteen',
+                    15 => 'Fifteen',
+                    16 => 'Sixteen',
+                    17 => 'Seventeen',
+                    18 => 'Eighteen',
+                    19 => 'Nineteen',
+                    20 => 'Twenty',
+                    30 => 'Thirty',
+                    40 => 'Forty',
+                    50 => 'Fifty',
+                    60 => 'Sixty',
+                    70 => 'Seventy',
+                    80 => 'Eighty',
+                    90 => 'Ninety'
                 ];
 
-                $convertBelowThousand = function($n) use ($words) {
+                $convertBelowThousand = function ($n) use ($words) {
                     $str = '';
                     if ($n >= 100) {
                         $str .= $words[(int) ($n / 100)] . ' Hundred ';
@@ -89,7 +114,7 @@
             $brandLogo = asset('assets/img/branding/logo.png');
         }
 
-        $brandTitle = SettingsHelper::get('admin_title') ?: config('variables.templateName', 'Codepluse');
+        $brandTitle = SettingsHelper::get('admin_title') ?: config('variables.templateName', 'osilinprathab');
         $brandSubtitle = SettingsHelper::get('admin_subtitle') ?: config('variables.templateSuffix', 'Society & Finance');
         $footerText = SettingsHelper::get('footer_text') ?: 'Thank you for your business.';
 
@@ -97,7 +122,7 @@
         $closureDate = optional($deposit->closure_date)->format('d-m-Y') ?? optional($txn->created_at ?? null)->format('d-m-Y') ?? now()->format('d-m-Y');
         $closureTime = optional($txn->created_at ?? null)->format('h:i A') ?? now()->format('h:i A');
     @endphp
-    
+
     @if($adminFavicon)
         <link rel="icon" type="image/x-icon" href="{{ asset('storage/' . $adminFavicon) }}" />
     @else
@@ -140,7 +165,9 @@
 
         .top-accent-bar {
             height: 6px;
-            background: {{ $primaryColor }};
+            background:
+                {{ $primaryColor }}
+            ;
             width: 100%;
         }
 
@@ -166,7 +193,9 @@
         .company-name {
             font-size: 18px;
             font-weight: 800;
-            color: {{ $primaryColor }};
+            color:
+                {{ $primaryColor }}
+            ;
             letter-spacing: -0.3px;
             line-height: 1.2;
         }
@@ -312,7 +341,9 @@
             background-color: #f8fafc;
         }
 
-        .text-right { text-align: right; }
+        .text-right {
+            text-align: right;
+        }
 
         .amount-cell {
             text-align: right;
@@ -395,7 +426,9 @@
         }
 
         .seal-verified-text {
-            color: {{ $primaryColor }};
+            color:
+                {{ $primaryColor }}
+            ;
             font-weight: 800;
             text-transform: uppercase;
             letter-spacing: 0.5px;
@@ -426,7 +459,7 @@
                 border: 1px solid #e2e8f0;
                 border-radius: 8px;
                 padding: 10px 16px;
-                box-shadow: 0 2px 6px rgba(0,0,0,0.05);
+                box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
             }
 
             .toolbar-inner {
@@ -476,7 +509,9 @@
             }
 
             .btn-print {
-                background: {{ $primaryColor }};
+                background:
+                    {{ $primaryColor }}
+                ;
                 color: #ffffff;
             }
 
@@ -491,12 +526,24 @@
         }
 
         @media print {
-            body { padding: 0 !important; background: #ffffff !important; }
-            .screen-toolbar { display: none !important; }
-            .receipt-container { border: 1px solid #94a3b8 !important; box-shadow: none !important; border-radius: 0 !important; }
+            body {
+                padding: 0 !important;
+                background: #ffffff !important;
+            }
+
+            .screen-toolbar {
+                display: none !important;
+            }
+
+            .receipt-container {
+                border: 1px solid #94a3b8 !important;
+                box-shadow: none !important;
+                border-radius: 0 !important;
+            }
         }
     </style>
 </head>
+
 <body>
 
     <!-- Screen Preview Toolbar -->
@@ -528,9 +575,10 @@
                     <table style="border-collapse: collapse; border: none;">
                         <tr>
                             @if(!empty($brandLogo))
-                            <td style="padding: 0 12px 0 0; vertical-align: middle;">
-                                <img src="{{ $brandLogo }}" alt="{{ $brandTitle }}" class="logo-img" onerror="this.style.display='none'">
-                            </td>
+                                <td style="padding: 0 12px 0 0; vertical-align: middle;">
+                                    <img src="{{ $brandLogo }}" alt="{{ $brandTitle }}" class="logo-img"
+                                        onerror="this.style.display='none'">
+                                </td>
                             @endif
                             <td style="padding: 0; vertical-align: middle;">
                                 <div class="company-name">{{ $brandTitle }}</div>
@@ -564,10 +612,10 @@
                                 <td class="meta-value">{{ $deposit->client->client_name ?? '—' }}</td>
                             </tr>
                             @if(!empty($deposit->client->client_phone))
-                            <tr>
-                                <td class="meta-label">Contact No:</td>
-                                <td class="meta-value">{{ $deposit->client->client_phone }}</td>
-                            </tr>
+                                <tr>
+                                    <td class="meta-label">Contact No:</td>
+                                    <td class="meta-value">{{ $deposit->client->client_phone }}</td>
+                                </tr>
                             @endif
                             <tr>
                                 <td class="meta-label">Scheme / Plan:</td>
@@ -588,7 +636,8 @@
                             </tr>
                             <tr>
                                 <td class="meta-label">Payment Mode:</td>
-                                <td class="meta-value" style="text-transform: uppercase;">{{ $deposit->closure_payment_mode ?: '—' }}</td>
+                                <td class="meta-value" style="text-transform: uppercase;">
+                                    {{ $deposit->closure_payment_mode ?: '—' }}</td>
                             </tr>
                             <tr>
                                 <td class="meta-label">Payout Option:</td>
@@ -596,12 +645,14 @@
                             </tr>
                             <tr>
                                 <td class="meta-label">Reference ID:</td>
-                                <td class="meta-value">{{ $deposit->closure_transaction_ref ?: ($txn->description ?? '—') }}</td>
+                                <td class="meta-value">
+                                    {{ $deposit->closure_transaction_ref ?: ($txn->description ?? '—') }}</td>
                             </tr>
                             <tr>
                                 <td class="meta-label">Status:</td>
                                 <td class="meta-value">
-                                    <span style="display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 9px; font-weight: 800; background: #fee2e2; color: #b91c1c; border: 1px solid #fca5a5;">
+                                    <span
+                                        style="display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 9px; font-weight: 800; background: #fee2e2; color: #b91c1c; border: 1px solid #fca5a5;">
                                         {{ $deposit->status_label }}
                                     </span>
                                 </td>
@@ -632,25 +683,29 @@
                         <td>Principal</td>
                         <td class="amount-cell">₹{{ number_format((float) $deposit->deposit_amount, 2) }}</td>
                     </tr>
-                    @if(!empty($txn->interest_amount) && (float)$txn->interest_amount > 0)
-                    <tr>
-                        <td>
-                            <div style="font-weight: 700;">Premature Interest Accrued / Payable</div>
-                            <div style="font-size: 9.5px; color: #64748b;">Interest earned till early withdrawal date</div>
-                        </td>
-                        <td>Interest</td>
-                        <td class="amount-cell" style="color: #15803d;">+ ₹{{ number_format((float) $txn->interest_amount, 2) }}</td>
-                    </tr>
+                    @if(!empty($txn->interest_amount) && (float) $txn->interest_amount > 0)
+                        <tr>
+                            <td>
+                                <div style="font-weight: 700;">Premature Interest Accrued / Payable</div>
+                                <div style="font-size: 9.5px; color: #64748b;">Interest earned till early withdrawal date
+                                </div>
+                            </td>
+                            <td>Interest</td>
+                            <td class="amount-cell" style="color: #15803d;">+
+                                ₹{{ number_format((float) $txn->interest_amount, 2) }}</td>
+                        </tr>
                     @endif
-                    @if(!empty($txn->penalty_amount) && (float)$txn->penalty_amount > 0)
-                    <tr>
-                        <td style="color: #b91c1c;">
-                            <div style="font-weight: 700;">Premature Withdrawal Penalty / Fee</div>
-                            <div style="font-size: 9.5px; color: #b91c1c;">Penalty deducted for breaking deposit before tenure</div>
-                        </td>
-                        <td style="color: #b91c1c;">Penalty</td>
-                        <td class="amount-cell" style="color: #b91c1c;">- ₹{{ number_format((float) $txn->penalty_amount, 2) }}</td>
-                    </tr>
+                    @if(!empty($txn->penalty_amount) && (float) $txn->penalty_amount > 0)
+                        <tr>
+                            <td style="color: #b91c1c;">
+                                <div style="font-weight: 700;">Premature Withdrawal Penalty / Fee</div>
+                                <div style="font-size: 9.5px; color: #b91c1c;">Penalty deducted for breaking deposit before
+                                    tenure</div>
+                            </td>
+                            <td style="color: #b91c1c;">Penalty</td>
+                            <td class="amount-cell" style="color: #b91c1c;">-
+                                ₹{{ number_format((float) $txn->penalty_amount, 2) }}</td>
+                        </tr>
                     @endif
                     <tr class="grand-total-row">
                         <td colspan="2" class="text-right grand-total-label">Net Payable / Paid Amount</td>
@@ -683,7 +738,9 @@
                     <td style="width: 42%; text-align: right;">
                         <div class="digital-seal-box">
                             <span class="seal-verified-text">&#10004; Digitally Verified</span>
-                            <span style="font-size: 9px; color: #64748b; font-family: monospace;">{{ now()->format('d-m-Y h:i A') }} IST</span>
+                            <span
+                                style="font-size: 9px; color: #64748b; font-family: monospace;">{{ now()->format('d-m-Y h:i A') }}
+                                IST</span>
                         </div>
                     </td>
                 </tr>
@@ -695,4 +752,5 @@
         </div>
     </div>
 </body>
+
 </html>

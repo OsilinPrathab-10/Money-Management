@@ -50,19 +50,25 @@ return [
     |--------------------------------------------------------------------------
     */
     'apihub' => [
-        'base_url' => rtrim(env('APIHUB_BASE_URL', 'http://apihub.services'), '/'),
-        'client_id' => env('APIHUB_CLIENT_API_ID', env('APIHUB_API_KEY', env('API_KEY'))),
-        'client_secret' => env('APIHUB_CLIENT_API_SECRET', env('APIHUB_API_SECRET', env('SECRET_KEY'))),
+        'base_url' => rtrim(env('APIHUB_BASE_URL', 'https://apihub.services'), '/'),
+        'client_id' => env('APIHUB_CLIENT_API_ID', env('APIHUB_API_KEY', 'CAPI-FVWAMDFLWAZJJIE9')),
+        'client_secret' => env('APIHUB_CLIENT_API_SECRET', env('APIHUB_API_SECRET', '3wDOBhdy4jU1d4CIs9VAODY7bZaqPhwB0whHfmyg')),
         'mode' => env('APIHUB_API_MODE', env('MODE', 'production')),
         'use_sandbox' => filter_var(env('APIHUB_USE_SANDBOX', false), FILTER_VALIDATE_BOOLEAN),
-        'aadhaar_send' => env('APIHUB_AADHAAR_SEND_PATH', 'v5/okyc/inititate'),
-        'aadhaar_verify' => env('APIHUB_AADHAAR_VERIFY_PATH', 'v5/okyc/verify'),
-        'pan_path' => env('APIHUB_PAN_PATH', 'v1/pan'),
-        'bank_path' => env('APIHUB_BANK_PATH', 'v4/bank-hybrid'),
+        'aadhaar_send' => 'v5/okyc/inititate',
+        'aadhaar_verify' => 'v5/okyc/verify',
+        'pan_path' => 'v5/pan-verify',
+        'bank_path' => 'v4/bank-hybrid',
         'cibil_path' => env('APIHUB_CIBIL_PATH', 'v3/cibil'),
         'cibil_mock' => filter_var(env('APIHUB_CIBIL_MOCK', false), FILTER_VALIDATE_BOOLEAN),
         'cibil_mock_file' => env('APIHUB_CIBIL_MOCK_FILE', 'resources/cibil/sample-response.json'),
         'cibil_link_ttl' => (int) env('APIHUB_CIBIL_LINK_TTL', 600),
+        'pricing' => [
+            'cibil' => (float) env('APIHUB_CIBIL_PRICE', 118),
+            'aadhaar' => (float) env('APIHUB_AADHAAR_PRICE', 5),
+            'pan' => (float) env('APIHUB_PAN_PRICE', 4),
+            'bank' => (float) env('APIHUB_BANK_PRICE', 5),
+        ],
     ],
 
     /*

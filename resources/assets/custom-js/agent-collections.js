@@ -403,10 +403,56 @@ document.addEventListener('DOMContentLoaded', function (e) {
             applyPartialRulesToCollectionForm(window.partialPaymentGlobal);
         }
 
+        const renderCollectionLoanDetails = (loan) => {
+            const box = document.getElementById('collectionLoanDetails');
+            if (!box) {
+                return;
+            }
+            if (!loan || (!loan.account_number && !loan.client_name)) {
+                box.classList.add('d-none');
+                box.innerHTML = '';
+                return;
+            }
+            box.classList.remove('d-none');
+            box.innerHTML = `
+              <div class="fw-semibold text-uppercase text-muted mb-2" style="font-size:0.68rem;letter-spacing:0.4px;">Loan details</div>
+              <div class="row g-2">
+                <div class="col-sm-6"><span class="text-muted">Account:</span> <strong>${loan.account_number || '—'}</strong></div>
+                <div class="col-sm-6"><span class="text-muted">Client:</span> <strong>${loan.client_name || '—'}</strong></div>
+                <div class="col-sm-6"><span class="text-muted">Product:</span> <strong>${loan.product || '—'}</strong></div>
+                <div class="col-sm-6"><span class="text-muted">Loan amount:</span> <strong>${loan.loan_amount ? '₹' + loan.loan_amount : '—'}</strong></div>
+              </div>`;
+        };
+
+        const loadCollectionLoanDetails = (emiId, preloadedLoan) => {
+            if (preloadedLoan) {
+                renderCollectionLoanDetails(preloadedLoan);
+                return;
+            }
+            if (!emiId) {
+                renderCollectionLoanDetails(null);
+                return;
+            }
+            $.get(baseUrl + 'app/agents/agent-collections/get-emi-info/' + emiId, function (response) {
+                if (response.success && response.data?.loan) {
+                    renderCollectionLoanDetails(response.data.loan);
+                } else {
+                    renderCollectionLoanDetails(null);
+                }
+            }).fail(function () {
+                renderCollectionLoanDetails(null);
+            });
+        };
+
+        $('#emiSearchSelect').on('select2:clear', function () {
+            renderCollectionLoanDetails(null);
+        });
+
         // Handle EMI selection to update amount
         $('#emiSearchSelect').on('select2:select', function (e) {
             const data = e.params.data;
             const emiId = data.id;
+            loadCollectionLoanDetails(emiId, data.loan);
 
             fetchPartialRules(emiId).then(rules => {
                 if (data.amount !== undefined) {
@@ -499,6 +545,7 @@ document.addEventListener('DOMContentLoaded', function (e) {
                     const paymentType = $('.payment-type-radio:checked').val();
                     applyPartialRulesToCollectionForm(data.partial_payment || null);
                     applyCollectionAmountLimits(maxAmount, paymentType, data.partial_payment || null);
+                    loadCollectionLoanDetails(data.id, data.loan);
 
                     // Open the modal
                     $('#addCollectionModal').modal('show');
@@ -531,6 +578,7 @@ document.addEventListener('DOMContentLoaded', function (e) {
         fetchPartialRules(emiId).then(rules => {
             applyCollectionAmountLimits(amount, 'full', rules);
         });
+        loadCollectionLoanDetails(emiId);
 
         // Open the Add Collection modal
         const modal = new bootstrap.Modal(document.getElementById('addCollectionModal'));
@@ -1571,7 +1619,7 @@ document.addEventListener('DOMContentLoaded', function (e) {
                             let msgText = d.sms_message || '';
                             let waMsgText = d.whatsapp_message || '';
 
-                            const companySlogan = d.company_slogan || 'Codepluse Gen PVT Ltd';
+                            const companySlogan = d.company_slogan || 'osilinprathab Gen PVT Ltd';
 
                             if (!msgText || !waMsgText) {
                                 let fallbackMsgText = '';

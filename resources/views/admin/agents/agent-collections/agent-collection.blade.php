@@ -428,6 +428,7 @@
               <option value="">Start typing to search...</option>
             </select>
           </div>
+          <div id="collectionLoanDetails" class="d-none border rounded-3 bg-label-secondary p-3 mb-3 small"></div>
           <div class="mb-3">
             <label class="form-label fw-medium text-dark small mb-1">Payment Type <span class="text-danger">*</span></label>
             <div class="d-flex gap-3 mt-1">

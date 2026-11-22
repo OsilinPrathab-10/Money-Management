@@ -16,11 +16,11 @@ class AdminSettingSeeder extends Seeder
             // Homepage Settings
             ['key' => 'admin_title', 'value' => 'Finova', 'type' => 'text'],
             ['key' => 'admin_subtitle', 'value' => 'Loan Management System', 'type' => 'text'],
-            
+
             // Footer Settings
-            ['key' => 'footer_company_name', 'value' => 'Codepluse Gen pvt Ltd', 'type' => 'text'],
+            ['key' => 'footer_company_name', 'value' => 'osilinprathab Gen pvt Ltd', 'type' => 'text'],
             ['key' => 'footer_copyright', 'value' => '© 2025 All rights reserved.', 'type' => 'text'],
-            
+
             // Appearance Settings
             ['key' => 'primary_color', 'value' => '#5f61e6', 'type' => 'color'],
             ['key' => 'theme_mode', 'value' => 'light', 'type' => 'text'],

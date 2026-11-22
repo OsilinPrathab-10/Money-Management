@@ -707,22 +707,100 @@ class KycVerificationController extends Controller
             ], 422);
         }
 
-        $kyc->update([
-            'pan_number' => $pan,
-            'pan_verified' => true
-        ]);
+        $result = $curlService->verifyPan($pan);
 
-        // Check if all are verified to auto approve
-        $this->checkAndAutoApproveKyc($client);
+        if (isset($result['status']) && $result['status'] === true) {
+            $panData = $result['data'] ?? [];
+            $verifiedName = $panData['full_name'] ?? $kyc->pan_name ?? $client->client_name;
+
+            // Format date of birth like Aadhaar
+            $dobFormatted = null;
+            if (!empty($panData['dob'])) {
+                try {
+                    $dobRaw = trim($panData['dob']);
+                    if (preg_match('/^\d{2}\/\d{2}\/\d{4}$/', $dobRaw)) {
+                        $dobFormatted = \Carbon\Carbon::createFromFormat('d/m/Y', $dobRaw)->format('Y-m-d');
+                    } elseif (preg_match('/^\d{2}-\d{2}-\d{4}$/', $dobRaw)) {
+                        $dobFormatted = \Carbon\Carbon::createFromFormat('d-m-Y', $dobRaw)->format('Y-m-d');
+                    } else {
+                        $dobFormatted = \Carbon\Carbon::parse($dobRaw)->format('Y-m-d');
+                    }
+                } catch (\Throwable $e) {}
+            }
+
+            // Extract address details like Aadhaar
+            $addr = $panData['address_details'] ?? ($panData['addressDetails'] ?? []);
+            $fullAddress = null;
+            $city = null;
+            $state = null;
+            $pincode = null;
+            if (is_array($addr) && !empty($addr)) {
+                $parts = array_filter([
+                    $addr['building_name'] ?? null,
+                    $addr['street_name'] ?? null,
+                    $addr['locality'] ?? null,
+                ]);
+                if (!empty($parts)) {
+                    $fullAddress = implode(', ', $parts);
+                }
+                $city = $addr['city'] ?? null;
+                $state = $addr['state'] ?? null;
+                $pincode = $addr['pincode'] ?? null;
+            }
+
+            \Illuminate\Support\Facades\DB::transaction(function () use ($client, $kyc, $pan, $verifiedName, $panData, $dobFormatted, $fullAddress, $city, $state, $pincode) {
+                $clientUpdates = [];
+                if (!empty($panData['gender']) && (empty($client->gender) || $client->gender === 'unknown')) {
+                    $clientUpdates['gender'] = strtolower($panData['gender']);
+                }
+                if ($dobFormatted && empty($client->date_of_birth)) {
+                    $clientUpdates['date_of_birth'] = $dobFormatted;
+                }
+                if ($fullAddress && empty($client->address)) {
+                    $clientUpdates['address'] = $fullAddress;
+                }
+                if ($city && empty($client->city)) {
+                    $clientUpdates['city'] = $city;
+                }
+                if ($state && empty($client->state)) {
+                    $clientUpdates['state'] = $state;
+                }
+                if ($pincode && empty($client->pincode)) {
+                    $clientUpdates['pincode'] = $pincode;
+                }
+                if (!empty($clientUpdates)) {
+                    $client->update($clientUpdates);
+                }
+
+                $kyc->update([
+                    'pan_number' => $pan,
+                    'pan_name' => $verifiedName,
+                    'pan_verified' => true
+                ]);
+            });
+
+            // Check if all are verified to auto approve (like Aadhaar & Bank)
+            $this->checkAndAutoApproveKyc($client);
+
+            return response()->json([
+                'status' => true,
+                'message' => $result['message'] ?? 'PAN verified successfully.',
+                'data' => [
+                    'full_name' => $verifiedName,
+                    'pan_number' => $pan,
+                    'gender' => $panData['gender'] ?? null,
+                    'dob' => $dobFormatted ?? ($panData['dob'] ?? null),
+                    'aadhaar_linked' => $panData['aadhaar_linked'] ?? null,
+                    'details' => $panData
+                ]
+            ]);
+        }
 
         return response()->json([
-            'status' => true,
-            'message' => 'PAN format verified successfully.',
-            'data' => [
-                'full_name' => $kyc->pan_name ?? $client->client_name,
-                'pan_number' => $pan
-            ]
-        ]);
+            'status' => false,
+            'message' => $result['message'] ?? 'PAN verification failed.',
+            'data' => $result
+        ], 422);
     }
 
     /**

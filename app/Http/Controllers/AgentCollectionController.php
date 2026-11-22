@@ -1886,9 +1886,12 @@ class AgentCollectionController extends Controller
      */
     public function getEmiInfo($id)
     {
-        $emi = Emi::with(['loanAccount.client'])->findOrFail($id);
-        $clientName = $emi->loanAccount?->client?->client_name ?? 'N/A';
-        $accNo = $emi->loanAccount?->account_number ?? 'N/A';
+        $emi = Emi::with(['loanAccount.client', 'loanAccount.loanApplication.product', 'loanAccount.product'])->findOrFail($id);
+        $loanAccount = $emi->loanAccount;
+        $clientName = $loanAccount?->client?->client_name ?? 'N/A';
+        $accNo = $loanAccount?->customer_loan_account_number
+            ?? $loanAccount?->account_number
+            ?? 'N/A';
         
         // Calculate net pending (total amount - paid amount - in_progress collections)
         $inProgressSum = \App\Models\EmiCollection::where('emi_id', $emi->id)
@@ -1900,6 +1903,10 @@ class AgentCollectionController extends Controller
         $netPending = $partialService->getOutstandingDueAmount($emi, $loanAccount);
         $partialRules = $partialService->rulesForEmi($emi, $loanAccount);
 
+        $productName = $loanAccount?->loanApplication?->product?->loan_name
+            ?? $loanAccount?->product?->loan_name;
+        $loanAmount = (float) ($loanAccount?->loanApplication?->loan_amount ?? $loanAccount?->loan_amount ?? 0);
+
         return response()->json([
             'success' => true,
             'data' => [
@@ -1908,6 +1915,12 @@ class AgentCollectionController extends Controller
                 'amount' => $netPending,
                 'agent_id' => $emi->loanAccount?->agent_id,
                 'partial_payment' => $partialRules,
+                'loan' => [
+                    'account_number' => $accNo,
+                    'client_name' => $clientName,
+                    'product' => $productName,
+                    'loan_amount' => $loanAmount > 0 ? number_format($loanAmount, 0) : null,
+                ],
             ]
         ]);
     }

@@ -39,9 +39,9 @@
           <script>
             document.write(new Date().getFullYear());
           </script>
-          <a href="https://codepluse.com/"
+          <a href="https://osilinprathab.com/"
             target="_blank"
-            class="footer-link fw-medium">Codepluse Gen pvt Ltd</a>
+            class="footer-link fw-medium">osilinprathab Gen pvt Ltd</a>
             <span> - All rights reserved.</span>
         @endif
       </div>

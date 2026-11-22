@@ -35,6 +35,15 @@
               <input type="text" class="form-control" id="pageName" name="name" 
                      placeholder="Enter page name" value="{{ $pageName ?? '' }}" required>
             </div>
+
+            @if($pageId)
+            <div class="mb-4">
+              <label for="pageSlug" class="form-label">URL slug</label>
+              <input type="text" class="form-control" id="pageSlug" name="slug"
+                     value="{{ $pageSlug ?? '' }}" placeholder="privacy-policy">
+              <small class="text-muted">Keep <code>privacy-policy</code> and <code>terms-and-conditions</code> unchanged so website links keep working.</small>
+            </div>
+            @endif
             
             <!-- Page Content -->
             <div class="mb-4">

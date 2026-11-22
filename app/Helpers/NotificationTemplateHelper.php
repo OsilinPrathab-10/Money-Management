@@ -18,16 +18,16 @@ class NotificationTemplateHelper
         $clientName = $data['client_name'] ?? 'Client';
         $mobileNo = $data['mobile_no'] ?? '';
         $accountNo = $data['account_no'] ?? '';
-        
+
         $amountPaidVal = floatval($data['amount_paid'] ?? 0);
         $amountPaid = number_format($amountPaidVal, 2, '.', ',');
-        
+
         $remainingBalanceVal = floatval($data['remaining_balance'] ?? 0);
         $remainingBalance = number_format($remainingBalanceVal, 2, '.', ',');
-        
+
         $emiBalanceVal = floatval($data['emi_balance'] ?? 0);
         $emiBalance = number_format($emiBalanceVal, 2, '.', ',');
-        
+
         $loanMode = $data['loan_mode'] ?? '';
         $paymentType = $data['payment_type'] ?? '';
         $isPartial = filter_var($data['is_partial'] ?? false, FILTER_VALIDATE_BOOLEAN);
@@ -40,7 +40,7 @@ class NotificationTemplateHelper
             $publicLink = url("/view-schedule/{$publicToken}");
         }
 
-        $companySlogan = \App\Models\CompanyDetail::first()->company_slogan ?? \App\Models\CompanyDetail::first()->company_name ?? 'Codepluse Gen PVT Ltd';
+        $companySlogan = \App\Models\CompanyDetail::first()->company_slogan ?? \App\Models\CompanyDetail::first()->company_name ?? 'osilinprathab Gen PVT Ltd';
 
         // 1. Build Fallback Messages (the previous templates)
         $fallbackSms = '';
@@ -81,7 +81,7 @@ class NotificationTemplateHelper
             'payment_type' => $paymentType === 'principal' ? 'Principal' : ($paymentType === 'interest' ? 'Interest' : 'EMI'),
             'public_link' => $publicLink,
             'company_slogan' => $companySlogan,
-            'company_name' => \App\Models\CompanyDetail::first()->company_name ?? 'Codepluse Gen PVT Ltd',
+            'company_name' => \App\Models\CompanyDetail::first()->company_name ?? 'osilinprathab Gen PVT Ltd',
         ];
 
         $smsMessage = $smsTemplate ? $smsTemplate->sms_body : $fallbackSms;
@@ -119,7 +119,7 @@ class NotificationTemplateHelper
             $publicLink = url("/view-schedule/{$publicToken}");
         }
 
-        $companySlogan = \App\Models\CompanyDetail::first()->company_slogan ?? \App\Models\CompanyDetail::first()->company_name ?? 'Codepluse Gen PVT Ltd';
+        $companySlogan = \App\Models\CompanyDetail::first()->company_slogan ?? \App\Models\CompanyDetail::first()->company_name ?? 'osilinprathab Gen PVT Ltd';
 
         $fallbackSms = "Dear {$clientName},\nYour Loan Account {$accountNo} has been topped up with ₹{$topupAmount} successfully.\nRevised {$frequency} EMI: ₹{$newEmiAmount}\nNext EMI Due Date: {$nextDueDate}\nOutstanding Balance: ₹{$remainingBalance}.\nThank you!\n- {$companySlogan}";
 
@@ -141,7 +141,7 @@ class NotificationTemplateHelper
             'frequency' => $frequency,
             'public_link' => $publicLink,
             'company_slogan' => $companySlogan,
-            'company_name' => \App\Models\CompanyDetail::first()->company_name ?? 'Codepluse Gen PVT Ltd',
+            'company_name' => \App\Models\CompanyDetail::first()->company_name ?? 'osilinprathab Gen PVT Ltd',
         ];
 
         $smsMessage = $smsTemplate ? $smsTemplate->sms_body : $fallbackSms;
@@ -182,7 +182,7 @@ class NotificationTemplateHelper
         $amountDue = number_format($amountDueVal, 2, '.', ',');
         $dueDate = $data['due_date'] ?? '';
 
-        $companyName = \App\Models\CompanyDetail::first()->company_name ?? 'Codepluse Gen';
+        $companyName = \App\Models\CompanyDetail::first()->company_name ?? 'osilinprathab Gen';
         $companySlogan = \App\Models\CompanyDetail::first()->company_slogan ?? $companyName;
         $companyPhone = \App\Models\CompanyDetail::first()->company_mobile ?? '';
 
@@ -234,7 +234,7 @@ class NotificationTemplateHelper
         $amountDue = number_format($amountDueVal, 2, '.', ',');
         $dueDate = $data['due_date'] ?? '';
 
-        $companyName = \App\Models\CompanyDetail::first()->company_name ?? 'Codepluse Gen';
+        $companyName = \App\Models\CompanyDetail::first()->company_name ?? 'osilinprathab Gen';
         $companySlogan = \App\Models\CompanyDetail::first()->company_slogan ?? $companyName;
         $companyPhone = \App\Models\CompanyDetail::first()->company_mobile ?? '';
 

@@ -36,6 +36,7 @@ class User extends Authenticatable
         'status',
         'use_custom_menus',
         'fcm_token',
+        'must_change_password',
     ];
 
     /**
@@ -59,6 +60,7 @@ class User extends Authenticatable
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
             'use_custom_menus' => 'boolean',
+            'must_change_password' => 'boolean',
         ];
     }
 

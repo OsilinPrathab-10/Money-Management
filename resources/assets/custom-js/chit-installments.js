@@ -817,7 +817,7 @@ function initChitInstallments() {
         cleanPhone = '91' + cleanPhone;
       }
 
-      const companySlogan = inst?.company_slogan || clientRow?.company_slogan || 'Codepluse Gen PVT Ltd';
+      const companySlogan = inst?.company_slogan || clientRow?.company_slogan || 'osilinprathab Gen PVT Ltd';
       const companyPhone = inst?.company_phone || clientRow?.company_phone || '';
       const groupCode = inst?.group_code || clientRow?.group_code || '';
       const period = inst?.period_label || ('Month ' + (inst?.month_number || ''));

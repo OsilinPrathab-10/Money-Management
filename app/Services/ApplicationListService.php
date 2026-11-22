@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\FixedDepositApplication;
 use App\Models\LoanApplication;
 use App\Support\DateRangePreset;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Carbon;
@@ -137,7 +138,7 @@ class ApplicationListService
     protected function loanRows(Request $request): array
     {
         $query = LoanApplication::query()->with(['client.location', 'product']);
-        $this->applyAgentScope($query, 'loan');
+        $this->applyAgentScope($query, $request, 'loan');
         $this->applyClientZoneFilters($query, $request, 'client');
         $this->applyDateFilter($query, $request, 'created_at');
         $this->applyStatusFilter($query, $request, 'loan');
@@ -169,7 +170,7 @@ class ApplicationListService
     protected function fdRows(Request $request): array
     {
         $query = FixedDepositApplication::query()->with(['client.location', 'scheme']);
-        $this->applyAgentScope($query, 'fd');
+        $this->applyAgentScope($query, $request, 'fd');
         $this->applyClientZoneFilters($query, $request, 'client');
         $this->applyDateFilter($query, $request, 'created_at');
         $this->applyStatusFilter($query, $request, 'fd');
@@ -207,5 +208,134 @@ class ApplicationListService
 
             return $row;
         })->all();
+    }
+
+    protected function applyAgentScope(Builder $query, Request $request, string $module): void
+    {
+        $user = auth()->user();
+        $agentId = null;
+
+        if ($user && $user->hasRole('Agent')) {
+            $agentId = optional($user->agent)->id;
+        } elseif ($request->filled('agent_id')) {
+            $agentId = $request->input('agent_id');
+        }
+
+        if (! $agentId) {
+            return;
+        }
+
+        $relation = $module === 'fd' ? 'client' : 'client';
+
+        $query->whereHas($relation, function ($q) use ($agentId) {
+            $q->where('assigned_to', $agentId)->orWhere('added_by', $agentId);
+        });
+    }
+
+    protected function applyClientZoneFilters(Builder $query, Request $request, string $relation): void
+    {
+        $clientName = trim((string) $request->input('client_name', ''));
+        $locationId = $request->input('location_id');
+
+        if ($clientName !== '') {
+            $query->whereHas($relation, function ($q) use ($clientName) {
+                $q->where('client_name', 'like', '%' . $clientName . '%');
+            });
+        }
+
+        if ($locationId !== null && $locationId !== '') {
+            $query->whereHas($relation, function ($q) use ($locationId) {
+                $q->where('location_id', $locationId);
+            });
+        }
+    }
+
+    protected function applyDateFilter(Builder $query, Request $request, string $column): void
+    {
+        [$from, $to] = DateRangePreset::resolve($request);
+
+        if ($from) {
+            $query->whereDate($column, '>=', $from);
+        }
+        if ($to) {
+            $query->whereDate($column, '<=', $to);
+        }
+    }
+
+    protected function applyStatusFilter(Builder $query, Request $request, string $module): void
+    {
+        $status = strtolower(trim((string) $request->input('status', '')));
+        if ($status === '' || $status === 'all') {
+            return;
+        }
+
+        if ($status === 'pending') {
+            $query->whereIn('status', ['pending', 'applied', 'requested']);
+
+            return;
+        }
+
+        if ($status === 'rejected') {
+            $query->whereIn('status', ['rejected', 'cancelled', 'failed']);
+
+            return;
+        }
+
+        if ($status === 'approved') {
+            $query->whereNotIn('status', ['pending', 'applied', 'requested', 'rejected', 'cancelled', 'failed']);
+
+            return;
+        }
+
+        if ($module === 'loan' && $status === 'active') {
+            $query->whereIn('status', ['active', 'disbursed', 'approved', 'process', 'in_progress']);
+
+            return;
+        }
+
+        $query->where('status', $status);
+    }
+
+    /**
+     * @param  array<string, mixed>  $row
+     * @return array<string, mixed>
+     */
+    protected function listRow(array $row): array
+    {
+        $amount = (float) ($row['amount'] ?? 0);
+        $rawApplied = $row['applied_at'] ?? null;
+        $tz = 'Asia/Kolkata';
+
+        $carbon = null;
+        if ($rawApplied instanceof Carbon || $rawApplied instanceof \DateTimeInterface) {
+            $carbon = Carbon::parse($rawApplied)->timezone($tz);
+        } elseif (! empty($rawApplied) && $rawApplied !== 'N/A') {
+            try {
+                $carbon = Carbon::parse((string) $rawApplied)->timezone($tz);
+            } catch (\Throwable) {
+            }
+        }
+
+        if ($carbon) {
+            $row['applied_sort'] = $carbon->format('Y-m-d H:i:s');
+            $row['applied_at'] = $carbon->format('d-m-Y h:i A');
+        } else {
+            $row['applied_sort'] = '';
+            $row['applied_at'] = 'N/A';
+        }
+
+        $module = $row['module'] ?? 'loan';
+        $row['amount'] = $amount;
+        $row['amount_formatted'] = '₹' . number_format($amount, 2);
+        $row['module'] = $module;
+        $row['module_label'] = match ($module) {
+            'fd' => 'FD',
+            default => 'Loan',
+        };
+        $row['status_label'] = $row['status_label'] ?? ucfirst((string) ($row['status'] ?? 'N/A'));
+        $row['status_color'] = $row['status_color'] ?? 'secondary';
+        $row['source'] = $row['source'] ?? 'admin';
+
+        return $row;
     }
 }

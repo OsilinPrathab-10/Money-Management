@@ -90,14 +90,14 @@ class SystemController extends Controller
     {
         // Get list of existing backups
         $backupPath = storage_path('app/backups');
-        
+
         if (!File::exists($backupPath)) {
             File::makeDirectory($backupPath, 0755, true);
         }
 
         $backups = [];
         $files = File::files($backupPath);
-        
+
         foreach ($files as $file) {
             if (pathinfo($file, PATHINFO_EXTENSION) === 'sql') {
                 $backups[] = [
@@ -110,7 +110,7 @@ class SystemController extends Controller
         }
 
         // Sort by timestamp descending
-        usort($backups, function($a, $b) {
+        usort($backups, function ($a, $b) {
             return $b['timestamp'] - $a['timestamp'];
         });
 
@@ -124,7 +124,7 @@ class SystemController extends Controller
     {
         try {
             $backupPath = storage_path('app/backups');
-            
+
             if (!File::exists($backupPath)) {
                 File::makeDirectory($backupPath, 0755, true);
             }
@@ -147,7 +147,7 @@ class SystemController extends Controller
                     'C:\\Program Files\\MySQL\\MySQL Server 5.7\\bin\\mysqldump.exe',
                     'mysqldump' // Fallback to PATH
                 ];
-                
+
                 $mysqldumpPath = 'mysqldump';
                 foreach ($possiblePaths as $path) {
                     if (file_exists($path)) {
@@ -177,7 +177,7 @@ class SystemController extends Controller
                 );
             }
 
-            $hasExec = is_callable('exec') && false === stripos((string)ini_get('disable_functions'), 'exec');
+            $hasExec = is_callable('exec') && false === stripos((string) ini_get('disable_functions'), 'exec');
             $backupSuccess = false;
 
             if ($hasExec) {
@@ -209,7 +209,7 @@ class SystemController extends Controller
                 if (File::exists($filepath)) {
                     File::delete($filepath);
                 }
-                
+
                 return response()->json([
                     'success' => false,
                     'message' => 'Failed to create database backup. The backup file is empty.'
@@ -304,7 +304,7 @@ class SystemController extends Controller
             throw new \Exception('Cannot open file for writing: ' . $filepath);
         }
 
-        $companyName = \App\Models\CompanyDetail::first()->company_name ?? 'Codepluse Gen PVT Ltd';
+        $companyName = \App\Models\CompanyDetail::first()->company_name ?? 'osilinprathab Gen PVT Ltd';
         fwrite($handle, "-- {$companyName} Database Backup\n");
         fwrite($handle, "-- Generated: " . date('Y-m-d H:i:s') . "\n\n");
         fwrite($handle, "SET NAMES utf8mb4;\n");
@@ -313,7 +313,7 @@ class SystemController extends Controller
         foreach ($tables as $tableName) {
             $stmt = $pdo->query('SHOW CREATE TABLE `' . $tableName . '`');
             $createTable = $stmt->fetch(\PDO::FETCH_ASSOC);
-            
+
             if ($createTable) {
                 fwrite($handle, "DROP TABLE IF EXISTS `" . $tableName . "`;\n");
                 $createSql = $createTable['Create Table'] ?? $createTable['Create View'] ?? '';
@@ -325,12 +325,12 @@ class SystemController extends Controller
             }
 
             $stmt = $pdo->query('SELECT * FROM `' . $tableName . '`');
-            
+
             while ($row = $stmt->fetch(\PDO::FETCH_ASSOC)) {
                 $keys = array_keys($row);
                 $values = array_values($row);
-                
-                $escapedValues = array_map(function($value) use ($pdo) {
+
+                $escapedValues = array_map(function ($value) use ($pdo) {
                     if ($value === null) {
                         return 'NULL';
                     }
@@ -353,12 +353,12 @@ class SystemController extends Controller
     public function loginLog(Request $request)
     {
         $search = trim((string) $request->input('search'));
-        
+
         $logs = LoginLog::where('created_at', '>=', now()->subDays(30))
-            ->when($search !== '', function($query) use ($search) {
-                $query->where(function($q) use ($search) {
+            ->when($search !== '', function ($query) use ($search) {
+                $query->where(function ($q) use ($search) {
                     $q->where('user_name', 'like', "%{$search}%")
-                      ->orWhere('ip_address', 'like', "%{$search}%");
+                        ->orWhere('ip_address', 'like', "%{$search}%");
                 });
             })
             ->orderBy('id', 'desc')
@@ -392,10 +392,10 @@ class SystemController extends Controller
 
             // Reconstruct missing EmiCollection records for paid/partial EMIs in the last 30 days
             try {
-                $emisWithMissingCollections = \App\Models\Emi::where(function($q) use ($thirtyDaysAgo) {
-                        $q->where('paid_date', '>=', $thirtyDaysAgo)
-                          ->orWhere('updated_at', '>=', $thirtyDaysAgo);
-                    })
+                $emisWithMissingCollections = \App\Models\Emi::where(function ($q) use ($thirtyDaysAgo) {
+                    $q->where('paid_date', '>=', $thirtyDaysAgo)
+                        ->orWhere('updated_at', '>=', $thirtyDaysAgo);
+                })
                     ->where('paid_amount', '>', 0)
                     ->whereIn('status', ['paid', 'partial'])
                     ->get();
@@ -406,11 +406,11 @@ class SystemController extends Controller
                         $auditLog = DB::table('payment_audit_logs')
                             ->where('emi_id', $emi->id)
                             ->first();
-                        
+
                         $method = $auditLog->payment_mode ?? 'upi';
                         $amount = $emi->paid_amount;
                         $ref = $auditLog->receipt_number ?? null;
-                        
+
                         \App\Models\EmiCollection::create([
                             'emi_id' => $emi->id,
                             'amount' => $amount,
@@ -452,8 +452,8 @@ class SystemController extends Controller
 
                 // Match existing log within a 5-second window of EmiCollection's created_at time
                 $existingLog = CollectionLog::where('loan_number', $loanNumber)
-                    ->where('emi_number', (string)$emiNumber)
-                    ->where(function($q) use ($createdAtFormatted) {
+                    ->where('emi_number', (string) $emiNumber)
+                    ->where(function ($q) use ($createdAtFormatted) {
                         if ($createdAtFormatted) {
                             $q->whereRaw("ABS(TIMESTAMPDIFF(SECOND, created_at, ?)) <= 5", [$createdAtFormatted]);
                         }
@@ -462,11 +462,13 @@ class SystemController extends Controller
 
                 if ($existingLog) {
                     $needsUpdate = false;
-                    if ($existingLog->collected_at != $collectedAt ||
-                        (float)$existingLog->collected_amount != (float)$amount ||
+                    if (
+                        $existingLog->collected_at != $collectedAt ||
+                        (float) $existingLog->collected_amount != (float) $amount ||
                         $existingLog->payment_mode != $paymentMode ||
                         $existingLog->collected_by_name != $collectedBy ||
-                        $existingLog->client_name != $clientName) {
+                        $existingLog->client_name != $clientName
+                    ) {
                         $needsUpdate = true;
                     }
 
@@ -507,14 +509,14 @@ class SystemController extends Controller
         $search = trim((string) $request->input('search'));
 
         $logs = CollectionLog::where('created_at', '>=', now()->subDays(30))
-            ->when($search !== '', function($query) use ($search) {
-                $query->where(function($q) use ($search) {
+            ->when($search !== '', function ($query) use ($search) {
+                $query->where(function ($q) use ($search) {
                     $q->where('client_name', 'like', "%{$search}%")
-                      ->orWhere('loan_number', 'like', "%{$search}%")
-                      ->orWhere('emi_number', 'like', "%{$search}%")
-                      ->orWhere('collected_by_name', 'like', "%{$search}%")
-                      ->orWhere('payment_mode', 'like', "%{$search}%")
-                      ->orWhere('ip_address', 'like', "%{$search}%");
+                        ->orWhere('loan_number', 'like', "%{$search}%")
+                        ->orWhere('emi_number', 'like', "%{$search}%")
+                        ->orWhere('collected_by_name', 'like', "%{$search}%")
+                        ->orWhere('payment_mode', 'like', "%{$search}%")
+                        ->orWhere('ip_address', 'like', "%{$search}%");
                 });
             })
             ->orderBy('id', 'desc')
@@ -548,14 +550,14 @@ class SystemController extends Controller
         $search = trim((string) $request->input('search'));
 
         $logs = CollectionLog::where('created_at', '>=', now()->subDays(30))
-            ->when($search !== '', function($query) use ($search) {
-                $query->where(function($q) use ($search) {
+            ->when($search !== '', function ($query) use ($search) {
+                $query->where(function ($q) use ($search) {
                     $q->where('client_name', 'like', "%{$search}%")
-                      ->orWhere('loan_number', 'like', "%{$search}%")
-                      ->orWhere('emi_number', 'like', "%{$search}%")
-                      ->orWhere('collected_by_name', 'like', "%{$search}%")
-                      ->orWhere('payment_mode', 'like', "%{$search}%")
-                      ->orWhere('ip_address', 'like', "%{$search}%");
+                        ->orWhere('loan_number', 'like', "%{$search}%")
+                        ->orWhere('emi_number', 'like', "%{$search}%")
+                        ->orWhere('collected_by_name', 'like', "%{$search}%")
+                        ->orWhere('payment_mode', 'like', "%{$search}%")
+                        ->orWhere('ip_address', 'like', "%{$search}%");
                 });
             })
             ->orderBy('id', 'desc')
@@ -564,11 +566,11 @@ class SystemController extends Controller
         $fileName = "collection_logs_" . now()->format('Y-m-d_His') . ".csv";
 
         $headers = [
-            "Content-type"        => "text/csv",
+            "Content-type" => "text/csv",
             "Content-Disposition" => "attachment; filename=$fileName",
-            "Pragma"              => "no-cache",
-            "Cache-Control"       => "must-revalidate, post-check=0, pre-check=0",
-            "Expires"             => "0"
+            "Pragma" => "no-cache",
+            "Cache-Control" => "must-revalidate, post-check=0, pre-check=0",
+            "Expires" => "0"
         ];
 
         $columns = [
@@ -582,7 +584,7 @@ class SystemController extends Controller
             'IP Address'
         ];
 
-        $callback = function() use ($logs, $columns) {
+        $callback = function () use ($logs, $columns) {
             $file = fopen('php://output', 'w');
             fputcsv($file, $columns);
 

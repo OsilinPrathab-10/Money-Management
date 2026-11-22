@@ -1,12 +1,15 @@
-@php
-  $isMenu = false;
-  $navbarFull = true;
-@endphp
-@extends('layouts/layoutMaster')
+@extends('client.layouts.portal')
 
 @section('title', 'My Dashboard')
 
 @section('content')
+@if(auth()->user()->must_change_password)
+<div class="alert alert-warning border-0 shadow-sm mb-4">
+  <i class="ri-information-line me-1"></i>
+  {{ __('Please change your default password (your mobile number) from') }}
+  <a href="{{ route('client.profile') }}" class="alert-link">{{ __('Profile') }}</a>.
+</div>
+@endif
 <div class="row g-6">
     <!-- Welcome Card -->
     <div class="col-12">
@@ -180,5 +183,28 @@
             </div>
         </div>
     </div>
+
+    @if(isset($webApplications) && $webApplications->isNotEmpty())
+    <div class="col-12">
+        <div class="card shadow-sm border-0">
+            <div class="card-header border-bottom"><h5 class="mb-0">Website applications</h5></div>
+            <div class="table-responsive">
+                <table class="table table-hover mb-0">
+                    <thead><tr><th>Reference</th><th>Product</th><th>Status</th><th>Submitted</th></tr></thead>
+                    <tbody>
+                        @foreach($webApplications as $wa)
+                        <tr>
+                            <td>{{ $wa->application_ref }}</td>
+                            <td>{{ $wa->product?->loan_name ?? '—' }}</td>
+                            <td><span class="badge bg-label-primary">{{ $wa->status }}</span></td>
+                            <td>{{ $wa->created_at->format('d-m-Y') }}</td>
+                        </tr>
+                        @endforeach
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    @endif
 </div>
 @endsection

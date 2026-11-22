@@ -1,7 +1,7 @@
 @php
   $isKandhuvatti = ($loanAccount->loan_mode ?? 'emi') === 'interest_only';
 @endphp
-@extends('layouts/layoutMaster')
+@extends('client.layouts.portal')
 
 @section('title', 'Loan Schedule')
 

@@ -100,6 +100,9 @@ Route::middleware(['auth', 'admin'])->group(function () {
     //website setup
     Route::get('/admin/homepage-setup', [\App\Http\Controllers\WebsiteSetupController::class, 'homepage'])->name('website-homepage');
     Route::post('/admin/homepage-setup/update', [\App\Http\Controllers\WebsiteSetupController::class, 'updateHomepage'])->name('website-homepage-update');
+    Route::post('/admin/homepage-setup/legal-pages', [\App\Http\Controllers\WebsiteSetupController::class, 'storeLegalPage'])->name('website-legal-pages.store');
+    Route::put('/admin/homepage-setup/legal-pages/{id}', [\App\Http\Controllers\WebsiteSetupController::class, 'updateLegalPage'])->name('website-legal-pages.update');
+    Route::delete('/admin/homepage-setup/legal-pages/{id}', [\App\Http\Controllers\WebsiteSetupController::class, 'destroyLegalPage'])->name('website-legal-pages.destroy');
     Route::get('/admin/appearance', [\App\Http\Controllers\WebsiteSetupController::class, 'appearance'])->name('website-appearance');
     Route::post('/admin/appearance/update', [\App\Http\Controllers\WebsiteSetupController::class, 'updateAppearance'])->name('website-appearance-update');
 
@@ -147,6 +150,7 @@ Route::middleware(['auth', 'admin'])->group(function () {
     Route::post('/admin/notification/send', [\App\Http\Controllers\AdminBroadCastController::class, 'send']);
 
     //reports & analytics
+    Route::get('/reports/loan', [\App\Http\Controllers\ReportsAnalyticsController::class, 'index'])->name('reports-loan');
     Route::get('/reports/clients', [\App\Http\Controllers\ReportsAnalyticsController::class, 'clients'])->name('reports-clients');
     Route::get('/reports/clients/export', [\App\Http\Controllers\ReportsAnalyticsController::class, 'exportClients'])->name('reports-clients-export');
     Route::get('/reports/loans', [\App\Http\Controllers\ReportsAnalyticsController::class, 'loans'])->name('reports-loans');
@@ -242,6 +246,7 @@ Route::middleware(['auth', 'admin'])->group(function () {
     // API Usage — SMS OTP logs + Aadhaar / PAN / Bank hit counts
     Route::get('/management/api-wallet', [\App\Http\Controllers\VerificationApiWalletController::class, 'index'])->name('api-wallet.index');
     Route::get('/management/api-wallet/export', [\App\Http\Controllers\VerificationApiWalletController::class, 'export'])->name('api-wallet.export');
+    Route::post('/management/api-wallet/pricing', [\App\Http\Controllers\VerificationApiWalletController::class, 'updatePricing'])->name('api-wallet.pricing.update');
 
     // Cache clear
     Route::get('/system/cache/clear', [SetupConfigurationController::class, 'fileSystemCache'])->name('system-cache-clear');
@@ -512,8 +517,7 @@ Route::middleware(['auth', 'adminStaffOrAgent'])->group(function () {
         ->defaults('module', 'fd')
         ->name('applications.fd');
 
-    Route::get('/client-collections', [\App\Http\Controllers\ClientCollectionsController::class, 'index'])
-        ->name('client-collections');
+    Route::redirect('/client-collections', '/emi/repayments', 301)->name('client-collections');
     Route::get('/client-collections/data', [\App\Http\Controllers\ClientCollectionsController::class, 'data'])
         ->name('client-collections.data');
     Route::post('/client-collections/pay', [\App\Http\Controllers\ClientCollectionsController::class, 'pay'])
@@ -783,6 +787,24 @@ Route::post('system/database-backup/auto-config/save', function (Illuminate\Http
     }
 })->name('system-backup-auto-config-save');
 
+// Star Finance public website
+require __DIR__ . '/website.php';
+
+Route::redirect('/portal', '/login', 301);
+Route::redirect('/portal/{any}', '/login', 301)->where('any', '.*');
+
+// Admin — website leads & enquiries
+Route::middleware(['auth', 'admin'])->prefix('admin/website')->name('admin.website.')->group(function () {
+    Route::get('/leads', fn () => redirect()->route('admin.website.enquiries.index', ['type' => 'application']))->name('leads.index');
+    Route::get('/leads/{id}', [\App\Http\Controllers\Admin\WebsiteLeadController::class, 'show'])->name('leads.show');
+    Route::put('/leads/{id}', [\App\Http\Controllers\Admin\WebsiteLeadController::class, 'update'])->name('leads.update');
+    Route::post('/leads/{id}/convert-client', [\App\Http\Controllers\Admin\WebsiteLeadController::class, 'convertToClient'])->name('leads.convert-client');
+    Route::get('/enquiries', [\App\Http\Controllers\Admin\WebsiteSubmissionController::class, 'index'])->name('enquiries.index');
+    Route::get('/enquiries/{id}', [\App\Http\Controllers\Admin\WebsiteEnquiryController::class, 'show'])->name('enquiries.show');
+    Route::put('/enquiries/{id}', [\App\Http\Controllers\Admin\WebsiteEnquiryController::class, 'update'])->name('enquiries.update');
+    Route::post('/enquiries/{id}/convert-client', [\App\Http\Controllers\Admin\WebsiteEnquiryController::class, 'convertToClient'])->name('enquiries.convert-client');
+});
+
 // Public Policy Pages (accessible without authentication)
 Route::get('/privacy-policy', [PageConfigurationController::class, 'show'])->defaults('slug', 'privacy-policy')->name('public.privacy-policy');
 Route::get('/terms-and-conditions', [PageConfigurationController::class, 'show'])->defaults('slug', 'terms-and-conditions')->name('public.terms-and-conditions');
@@ -806,16 +828,19 @@ Route::post('/account-deletion', [\App\Http\Controllers\PublicAccountDeletionCon
 // CLIENT PORTAL ROUTES
 Route::prefix('client')->name('client.')->group(function () {
     // Public OTP Routes (Moved out of guest to allow testing while logged in as admin)
-    Route::get('/login', [App\Http\Controllers\Auth\ClientAuthController::class, 'showLoginForm'])->name('login');
+    Route::get('/login', fn () => redirect()->route('login'))->name('login');
     Route::post('/login', [App\Http\Controllers\Auth\ClientAuthController::class, 'login'])->name('login.post');
+    Route::get('/register', [App\Http\Controllers\Auth\ClientAuthController::class, 'showRegisterForm'])->name('register');
+    Route::post('/register', [App\Http\Controllers\Auth\ClientAuthController::class, 'register'])->name('register.post');
     Route::post('/send-otp', [App\Http\Controllers\Auth\ClientAuthController::class, 'sendOtp'])->name('send-otp');
     Route::post('/verify-otp', [App\Http\Controllers\Auth\ClientAuthController::class, 'verifyOtp'])->name('verify-otp');
 
     // Authenticated Client Routes
-    Route::middleware(['auth'])->group(function () {
+    Route::middleware(['auth', 'client_portal'])->group(function () {
         Route::get('/dashboard', [App\Http\Controllers\ClientDashboardController::class, 'index'])->name('dashboard');
         Route::get('/loan/{id}', [App\Http\Controllers\ClientDashboardController::class, 'loanView'])->name('loan-view');
         Route::get('/profile', [App\Http\Controllers\ClientDashboardController::class, 'profile'])->name('profile');
+        Route::post('/password', [App\Http\Controllers\Auth\ClientAuthController::class, 'updatePassword'])->name('password.update');
         Route::post('/logout', [App\Http\Controllers\Auth\ClientAuthController::class, 'logout'])->name('logout');
     });
 });

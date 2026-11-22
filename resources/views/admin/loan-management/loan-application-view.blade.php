@@ -713,10 +713,6 @@ if (in_array($displayUnitVal, ['week', 'weeks', 'weekly'], true)) {
                               <td class="ps-3 py-2 text-danger small">Other Deductions (-)</td>
                               <td class="pe-3 py-2 text-end text-danger small" id="summary_other_charges">₹{{ number_format($appliedOtherCharges, 2) }}</td>
                           </tr>
-                          <tr>
-                              <td class="ps-3 py-2 text-muted small">Bank Transfer Charges (company)</td>
-                              <td class="pe-3 py-2 text-end text-muted small" id="summary_banking_charges">₹{{ number_format($appliedBankingCharges, 2) }}</td>
-                          </tr>
                           <tr class="border-top border-success bg-label-success">
                               <td class="ps-3 py-3 fw-bold text-success fs-6">NET PAYOUT (HANDOVER)</td>
                               <td class="pe-3 py-3 text-end fw-bold text-success fs-5" id="summary_net_payout">₹{{ number_format($netDisbursedAmount, 2) }}</td>
@@ -814,25 +810,6 @@ if (in_array($displayUnitVal, ['week', 'weeks', 'weekly'], true)) {
         </div>
     </div>
 
-    <!-- Internal Bank Account Selection for Disbursement -->
-    <div class="row g-4 mb-4">
-        <div class="col-md-12">
-            <label for="internal_bank_account_id" class="form-label fw-bold">Disburse From (Internal Bank Account) <span class="text-danger">*</span></label>
-            <div class="input-group input-group-lg">
-                <span class="input-group-text bg-label-info border-info text-info"><i class="ri-bank-line"></i></span>
-                <select id="internal_bank_account_id" class="form-select border-info" required>
-                    <option value="">-- Select Internal Bank Account --</option>
-                    @foreach(\App\Models\Account\BankAccount::where('is_active', true)->get() as $ba)
-                        <option value="{{ $ba->id }}">
-                            {{ $ba->bank_name }} - {{ $ba->account_name }} ({{ $ba->account_number }}) - Bal: ₹{{ number_format($ba->current_balance, 2) }}
-                        </option>
-                    @endforeach
-                </select>
-            </div>
-            <small class="text-muted">Select the bank account to disburse this loan from. Available balance will be verified.</small>
-        </div>
-    </div>
-
     <div class="row g-4 mb-4">
         <div class="col-md-12" id="transactionDetailsContainer" style="{{ $application->payment_method == 'manual' ? 'display: none;' : '' }}">
             <label class="form-label fw-bold">Processing Reference / Transaction ID <span class="text-danger">*</span></label>
@@ -858,7 +835,7 @@ if (in_array($displayUnitVal, ['week', 'weeks', 'weekly'], true)) {
         </button>
     </div>
     <div class="row g-4 mb-5 p-4 bg-label-secondary rounded-3 border">
-        <div class="col-md-3">
+        <div class="col-md-4">
             <label class="form-label small fw-bold">Processing Fee (₹)</label>
             <div class="input-group">
                 <span class="input-group-text bg-white border-primary border-end-0 text-primary">₹</span>
@@ -866,27 +843,19 @@ if (in_array($displayUnitVal, ['week', 'weeks', 'weekly'], true)) {
 
             </div>
         </div>
-        <div class="col-md-3">
+        <div class="col-md-4">
             <label class="form-label small fw-bold">Doc Charges (₹)</label>
             <div class="input-group">
                 <span class="input-group-text bg-white border-primary border-end-0 text-primary">₹</span>
                 <input type="number" id="input_document_charges" class="form-control charge-input border-primary border-start-0 ps-0" value="{{ number_format($appliedDocumentCharges, 2, '.', '') }}" step="0.01" data-default="{{ $appliedDocumentCharges }}" placeholder="0.00">
             </div>
         </div>
-        <div class="col-md-3">
+        <div class="col-md-4">
             <label class="form-label small fw-bold">Other Charges (₹)</label>
             <div class="input-group">
                 <span class="input-group-text bg-white border-primary border-end-0 text-primary">₹</span>
                 <input type="number" id="input_other_charges" class="form-control charge-input border-primary border-start-0 ps-0" value="{{ number_format($appliedOtherCharges, 2, '.', '') }}" step="0.01" data-default="{{ $appliedOtherCharges }}" placeholder="0.00">
             </div>
-        </div>
-        <div class="col-md-3">
-            <label class="form-label small fw-bold">Bank Transfer Charges (₹)</label>
-            <div class="input-group">
-                <span class="input-group-text bg-white border-primary border-end-0 text-primary">₹</span>
-                <input type="number" id="input_banking_charges" class="form-control charge-input border-primary border-start-0 ps-0" value="{{ number_format($appliedBankingCharges, 2, '.', '') }}" step="0.01" data-default="{{ $appliedBankingCharges }}" placeholder="0.00">
-            </div>
-            <small class="text-muted">Company bank debit only — not deducted from client.</small>
         </div>
     </div>
 
@@ -1051,10 +1020,6 @@ if (in_array($displayUnitVal, ['week', 'weeks', 'weekly'], true)) {
               <tr>
                 <td class="ps-4">Other Charges</td>
                 <td class="text-end pe-4 text-danger">- ₹<span id="breakdown_other_charges">{{ number_format($appliedOtherCharges, 2) }}</span></td>
-              </tr>
-              <tr>
-                <td class="ps-4 border-bottom-0 text-muted">Bank Transfer Charges (company)</td>
-                <td class="text-end pe-4 text-muted border-bottom-0">₹<span id="breakdown_banking_charges">{{ number_format($appliedBankingCharges, 2) }}</span></td>
               </tr>
               <tr class="table-success fw-bold">
                 <td class="ps-4">Net Disbursed Amount</td>
@@ -1523,8 +1488,6 @@ if (in_array($displayUnitVal, ['week', 'weeks', 'weekly'], true)) {
                 const processingFee = parseFloat(document.getElementById('input_processing_fee').value) || 0;
                 const documentCharges = parseFloat(document.getElementById('input_document_charges').value) || 0;
                 const otherCharges = parseFloat(document.getElementById('input_other_charges').value) || 0;
-                const bankingCharges = parseFloat(document.getElementById('input_banking_charges')?.value) || 0;
-                // Banking charges are company bank cost — not deducted from client handover.
                 const totalCharges = processingFee + documentCharges + otherCharges;
                 const netAmount = Math.max(loanAmount - totalCharges, 0);
                 
@@ -1540,26 +1503,22 @@ if (in_array($displayUnitVal, ['week', 'weeks', 'weekly'], true)) {
                 const sumProcessing = document.getElementById('summary_processing_fee');
                 const sumDocument = document.getElementById('summary_document_charges');
                 const sumOther = document.getElementById('summary_other_charges');
-                const sumBanking = document.getElementById('summary_banking_charges');
                 const sumNet = document.getElementById('summary_net_payout');
                 
                 if (sumProcessing) sumProcessing.textContent = '₹' + processingFee.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
                 if (sumDocument) sumDocument.textContent = '₹' + documentCharges.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
                 if (sumOther) sumOther.textContent = '₹' + otherCharges.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-                if (sumBanking) sumBanking.textContent = '₹' + bankingCharges.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
                 if (sumNet) sumNet.textContent = '₹' + netAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
                 
                 // Update Breakdown Modal (if exists)
                 const bdProcessing = document.getElementById('breakdown_processing_fee');
                 const bdDocument = document.getElementById('breakdown_document_charges');
                 const bdOther = document.getElementById('breakdown_other_charges');
-                const bdBanking = document.getElementById('breakdown_banking_charges');
                 const bdNet = document.getElementById('breakdown_net_amount');
                 
                 if (bdProcessing) bdProcessing.textContent = processingFee.toLocaleString('en-IN', { minimumFractionDigits: 2 });
                 if (bdDocument) bdDocument.textContent = documentCharges.toLocaleString('en-IN', { minimumFractionDigits: 2 });
                 if (bdOther) bdOther.textContent = otherCharges.toLocaleString('en-IN', { minimumFractionDigits: 2 });
-                if (bdBanking) bdBanking.textContent = bankingCharges.toLocaleString('en-IN', { minimumFractionDigits: 2 });
                 if (bdNet) bdNet.textContent = netAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 });
             };
 
@@ -1609,19 +1568,12 @@ if (in_array($displayUnitVal, ['week', 'weeks', 'weekly'], true)) {
                     disburseBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span> Disbursing...';
 
                     try {
-                        const internalBankAccId = document.getElementById('internal_bank_account_id')?.value;
-                        if (!internalBankAccId) {
-                            throw new Error('Please select an internal bank account for disbursement.');
-                        }
-
                         const paymentMethod = "{{ $application->payment_method }}";
                         const formData = new FormData();
-                        formData.append('internal_bank_account_id', internalBankAccId);
                         formData.append('disbursement_reference', document.getElementById('disbursementReference')?.value || '');
                         formData.append('processing_fee', document.getElementById('input_processing_fee')?.value || 0);
                         formData.append('document_charges', document.getElementById('input_document_charges')?.value || 0);
                         formData.append('other_charges', document.getElementById('input_other_charges')?.value || 0);
-                        formData.append('banking_charges', document.getElementById('input_banking_charges')?.value || 0);
                         formData.append('bank_name', document.getElementById('bankName')?.value || '');
                         formData.append('account_number', document.getElementById('accountNumber')?.value || '');
                         formData.append('holder_name', document.getElementById('holderName')?.value || '');

@@ -231,7 +231,7 @@
                         let msgText = sd.sms_message || '';
                         let waMsgText = sd.whatsapp_message || '';
 
-                        const companySlogan = sd.company_slogan || 'Codepluse Gen PVT Ltd';
+                        const companySlogan = sd.company_slogan || 'osilinprathab Gen PVT Ltd';
 
                         if (!msgText || !waMsgText) {
                             const fallbackMsgText = `Dear ${clientName},\nYour Prepayment (Principal payment) of ₹${amountPaid} towards ${companySlogan} Loan Account ${accountNo} has been received successfully.\nOutstanding Principal Balance: ₹${remainingBalance}.\nThank you!`;

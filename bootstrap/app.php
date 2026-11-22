@@ -22,6 +22,7 @@ use App\Http\Middleware\AdminStaffOrAgent;
 use App\Http\Middleware\EnsureUserIsValid;
 use App\Http\Middleware\EnsureAgentAuthenticated;
 use App\Http\Middleware\EnsureAgentCheckedIn;
+use App\Http\Middleware\EnsureClientPortal;
 use App\Http\Middleware\ForceJsonResponse;
 use App\Http\Middleware\RecoverApiToken;
 use Illuminate\Auth\AuthenticationException;
@@ -58,6 +59,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'check.active.application' => \App\Http\Middleware\CheckApplication::class,
             'user.valid' => EnsureUserIsValid::class,
             'agent' => EnsureAgentAuthenticated::class,
+            'client_portal' => EnsureClientPortal::class,
             // 'agent.checked_in' => EnsureAgentCheckedIn::class, // DISABLED: Not using for now
         ]);
         $middleware->web(LocaleMiddleware::class);

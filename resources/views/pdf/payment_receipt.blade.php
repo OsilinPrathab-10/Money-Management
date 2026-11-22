@@ -1,31 +1,56 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ $receiptData['receipt_title'] ?? 'Payment Receipt' }} - {{ $receiptData['receipt_number'] }}</title>
-    
+
     @php
         use App\Helpers\SettingsHelper;
 
         if (!function_exists('numberToIndianWords')) {
-            function numberToIndianWords($number) {
+            function numberToIndianWords($number)
+            {
                 $number = round((float) $number, 2);
-                if ($number <= 0) return 'Zero Rupees Only';
+                if ($number <= 0)
+                    return 'Zero Rupees Only';
 
                 $decimal = round(($number - floor($number)) * 100);
                 $num = (int) floor($number);
 
                 $words = [
-                    0 => '', 1 => 'One', 2 => 'Two', 3 => 'Three', 4 => 'Four', 5 => 'Five',
-                    6 => 'Six', 7 => 'Seven', 8 => 'Eight', 9 => 'Nine', 10 => 'Ten',
-                    11 => 'Eleven', 12 => 'Twelve', 13 => 'Thirteen', 14 => 'Fourteen', 15 => 'Fifteen',
-                    16 => 'Sixteen', 17 => 'Seventeen', 18 => 'Eighteen', 19 => 'Nineteen',
-                    20 => 'Twenty', 30 => 'Thirty', 40 => 'Forty', 50 => 'Fifty',
-                    60 => 'Sixty', 70 => 'Seventy', 80 => 'Eighty', 90 => 'Ninety'
+                    0 => '',
+                    1 => 'One',
+                    2 => 'Two',
+                    3 => 'Three',
+                    4 => 'Four',
+                    5 => 'Five',
+                    6 => 'Six',
+                    7 => 'Seven',
+                    8 => 'Eight',
+                    9 => 'Nine',
+                    10 => 'Ten',
+                    11 => 'Eleven',
+                    12 => 'Twelve',
+                    13 => 'Thirteen',
+                    14 => 'Fourteen',
+                    15 => 'Fifteen',
+                    16 => 'Sixteen',
+                    17 => 'Seventeen',
+                    18 => 'Eighteen',
+                    19 => 'Nineteen',
+                    20 => 'Twenty',
+                    30 => 'Thirty',
+                    40 => 'Forty',
+                    50 => 'Fifty',
+                    60 => 'Sixty',
+                    70 => 'Seventy',
+                    80 => 'Eighty',
+                    90 => 'Ninety'
                 ];
 
-                $convertBelowThousand = function($n) use ($words) {
+                $convertBelowThousand = function ($n) use ($words) {
                     $str = '';
                     if ($n >= 100) {
                         $str .= $words[(int) ($n / 100)] . ' Hundred ';
@@ -89,7 +114,7 @@
             $brandLogo = asset('assets/img/branding/logo.png');
         }
 
-        $brandTitle = SettingsHelper::get('admin_title') ?: config('variables.templateName', 'Codepluse');
+        $brandTitle = SettingsHelper::get('admin_title') ?: config('variables.templateName', 'osilinprathab');
         $brandSubtitle = SettingsHelper::get('admin_subtitle') ?: config('variables.templateSuffix', 'Co-operative Society Bank');
         $footerText = SettingsHelper::get('footer_text') ?: 'Thank you for your payment.';
 
@@ -106,7 +131,7 @@
 
         $rawReceiptTitle = $receiptData['receipt_title'] ?? null;
         if (!$rawReceiptTitle) {
-            $rawReceiptTitle = match($module) {
+            $rawReceiptTitle = match ($module) {
                 'fd' => 'FIXED DEPOSIT RECEIPT',
                 default => (!empty($receiptData['is_partial']) ? 'LOAN PARTIAL PAYMENT RECEIPT' : 'LOAN PAYMENT RECEIPT'),
             };
@@ -132,7 +157,7 @@
         $isPartial = !empty($receiptData['is_partial']) || $remainingDue > 0.01;
         $totalPaid = $currentPayment;
     @endphp
-    
+
     @if($adminFavicon)
         <link rel="icon" type="image/x-icon" href="{{ asset('storage/' . $adminFavicon) }}" />
     @else
@@ -146,7 +171,9 @@
         }
 
         :root {
-            --primary-color: {{ $primaryColor }};
+            --primary-color:
+                {{ $primaryColor }}
+            ;
         }
 
         * {
@@ -180,7 +207,9 @@
         /* Top Accent Header */
         .top-accent-bar {
             height: 6px;
-            background: {{ $primaryColor }};
+            background:
+                {{ $primaryColor }}
+            ;
             width: 100%;
         }
 
@@ -207,7 +236,9 @@
         .company-name {
             font-size: 18px;
             font-weight: 800;
-            color: {{ $primaryColor }};
+            color:
+                {{ $primaryColor }}
+            ;
             letter-spacing: -0.3px;
             line-height: 1.2;
         }
@@ -228,7 +259,9 @@
 
         .receipt-title-badge {
             display: inline-block;
-            background: {{ $primaryColor }};
+            background:
+                {{ $primaryColor }}
+            ;
             color: #ffffff;
             font-size: 11px;
             font-weight: 700;
@@ -320,7 +353,10 @@
             letter-spacing: 0.5px;
         }
 
-        .status-paid, .status-verified, .status-approved, .status-successful {
+        .status-paid,
+        .status-verified,
+        .status-approved,
+        .status-successful {
             background-color: #dcfce7;
             color: #15803d;
             border: 1px solid #86efac;
@@ -332,13 +368,15 @@
             border: 1px solid #d8b4fe;
         }
 
-        .status-pending, .status-in_progress {
+        .status-pending,
+        .status-in_progress {
             background-color: #fef3c7;
             color: #b45309;
             border: 1px solid #fcd34d;
         }
 
-        .status-overdue, .status-rejected {
+        .status-overdue,
+        .status-rejected {
             background-color: #fee2e2;
             color: #b91c1c;
             border: 1px solid #fca5a5;
@@ -354,8 +392,17 @@
             letter-spacing: 0.4px;
         }
 
-        .module-tag-loan { background: #e0f2fe; color: #0284c7; border: 1px solid #bae6fd; }
-        .module-tag-fd { background: #fef3c7; color: #d97706; border: 1px solid #fde68a; }
+        .module-tag-loan {
+            background: #e0f2fe;
+            color: #0284c7;
+            border: 1px solid #bae6fd;
+        }
+
+        .module-tag-fd {
+            background: #fef3c7;
+            color: #d97706;
+            border: 1px solid #fde68a;
+        }
 
         /* Financial Summary Strip */
         .summary-kpi-wrapper {
@@ -386,8 +433,12 @@
 
         .summary-kpi-table td.kpi-cell-active {
             background: #f5f3ff !important;
-            border-top: 2px solid {{ $primaryColor }};
-            border-bottom: 2px solid {{ $primaryColor }};
+            border-top: 2px solid
+                {{ $primaryColor }}
+            ;
+            border-bottom: 2px solid
+                {{ $primaryColor }}
+            ;
         }
 
         .kpi-label {
@@ -416,7 +467,9 @@
         .kpi-label-active {
             font-size: 8.5px;
             font-weight: 800;
-            color: {{ $primaryColor }};
+            color:
+                {{ $primaryColor }}
+            ;
             text-transform: uppercase;
             letter-spacing: 0.5px;
             margin-bottom: 3px;
@@ -425,13 +478,17 @@
         .kpi-value-active {
             font-size: 14.5px;
             font-weight: 900;
-            color: {{ $primaryColor }};
+            color:
+                {{ $primaryColor }}
+            ;
             font-family: 'DejaVu Sans Mono', monospace, Arial;
         }
 
         .kpi-sub-active {
             font-size: 8px;
-            color: {{ $primaryColor }};
+            color:
+                {{ $primaryColor }}
+            ;
             margin-top: 2px;
             font-weight: 700;
         }
@@ -490,9 +547,17 @@
             background-color: #f8fafc;
         }
 
-        .text-center { text-align: center; }
-        .text-right { text-align: right; }
-        .text-left { text-align: left; }
+        .text-center {
+            text-align: center;
+        }
+
+        .text-right {
+            text-align: right;
+        }
+
+        .text-left {
+            text-align: left;
+        }
 
         .amount-cell {
             text-align: right;
@@ -510,20 +575,26 @@
 
         .grand-total-row td {
             background-color: #f8fafc !important;
-            border-top: 2px solid {{ $primaryColor }} !important;
+            border-top: 2px solid
+                {{ $primaryColor }}
+                !important;
             font-size: 12px;
             font-weight: 800;
         }
 
         .grand-total-label {
-            color: {{ $primaryColor }};
+            color:
+                {{ $primaryColor }}
+            ;
             font-size: 11.5px;
             text-transform: uppercase;
             letter-spacing: 0.5px;
         }
 
         .grand-total-amount {
-            color: {{ $primaryColor }};
+            color:
+                {{ $primaryColor }}
+            ;
             font-size: 13px;
             font-weight: 800;
         }
@@ -564,7 +635,9 @@
         .words-value {
             font-size: 11px;
             font-weight: 700;
-            color: {{ $primaryColor }};
+            color:
+                {{ $primaryColor }}
+            ;
             font-style: italic;
         }
 
@@ -598,7 +671,9 @@
         }
 
         .seal-verified-text {
-            color: {{ $primaryColor }};
+            color:
+                {{ $primaryColor }}
+            ;
             font-weight: 800;
             text-transform: uppercase;
             letter-spacing: 0.5px;
@@ -650,7 +725,7 @@
                 border: 1px solid #e2e8f0;
                 border-radius: 8px;
                 padding: 10px 16px;
-                box-shadow: 0 2px 6px rgba(0,0,0,0.05);
+                box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
             }
 
             .toolbar-inner {
@@ -705,7 +780,9 @@
             }
 
             .btn-print {
-                background: {{ $primaryColor }};
+                background:
+                    {{ $primaryColor }}
+                ;
                 color: #ffffff;
             }
 
@@ -734,9 +811,12 @@
                 padding: 0 !important;
                 background: #ffffff !important;
             }
-            .no-print, .screen-toolbar {
+
+            .no-print,
+            .screen-toolbar {
                 display: none !important;
             }
+
             .receipt-container {
                 border: 1px solid #94a3b8 !important;
                 box-shadow: none !important;
@@ -746,6 +826,7 @@
         }
     </style>
 </head>
+
 <body>
 
     <!-- Screen Preview Toolbar (Hidden in Print and in Iframe Modal) -->
@@ -757,7 +838,12 @@
             </div>
             <div class="toolbar-right">
                 <button type="button" onclick="window.print()" class="btn-action btn-print">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                        stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="6 9 6 2 18 2 18 9"></polyline>
+                        <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path>
+                        <rect x="6" y="14" width="12" height="8"></rect>
+                    </svg>
                     Print Receipt
                 </button>
                 <button type="button" onclick="window.close()" class="btn-action btn-close-win">
@@ -779,9 +865,10 @@
                     <table style="border-collapse: collapse; border: none;">
                         <tr>
                             @if(!empty($brandLogo))
-                            <td style="padding: 0 12px 0 0; vertical-align: middle;">
-                                <img src="{{ $brandLogo }}" alt="{{ $brandTitle }}" class="logo-img" onerror="this.style.display='none'">
-                            </td>
+                                <td style="padding: 0 12px 0 0; vertical-align: middle;">
+                                    <img src="{{ $brandLogo }}" alt="{{ $brandTitle }}" class="logo-img"
+                                        onerror="this.style.display='none'">
+                                </td>
                             @endif
                             <td style="padding: 0; vertical-align: middle;">
                                 <div class="company-name">{{ $brandTitle }}</div>
@@ -816,29 +903,31 @@
                                 <td class="meta-value">{{ $receiptData['client_name'] ?? 'N/A' }}</td>
                             </tr>
                             @if(!empty($receiptData['customer_id']))
-                            <tr>
-                                <td class="meta-label">Customer ID:</td>
-                                <td class="meta-value">{{ $receiptData['customer_id'] }}</td>
-                            </tr>
+                                <tr>
+                                    <td class="meta-label">Customer ID:</td>
+                                    <td class="meta-value">{{ $receiptData['customer_id'] }}</td>
+                                </tr>
                             @endif
                             @if(!empty($receiptData['client_phone']))
-                            <tr>
-                                <td class="meta-label">Contact No:</td>
-                                <td class="meta-value">{{ $receiptData['client_phone'] }}</td>
-                            </tr>
+                                <tr>
+                                    <td class="meta-label">Contact No:</td>
+                                    <td class="meta-value">{{ $receiptData['client_phone'] }}</td>
+                                </tr>
                             @endif
                             <tr>
                                 <td class="meta-label">Payment Date:</td>
                                 <td class="meta-value">{{ $paidDateOnly }}</td>
                             </tr>
                             @if(!empty($displayTime))
-                            <tr>
-                                <td class="meta-label">Payment Time:</td>
-                                <td class="meta-value">
-                                    <span style="font-family: 'DejaVu Sans Mono', monospace; font-size: 11px;">{{ $displayTime }}</span>
-                                    <span style="font-size: 8px; font-weight: 700; color: #64748b; background: #e2e8f0; padding: 1px 4px; border-radius: 3px; margin-left: 2px;">IST</span>
-                                </td>
-                            </tr>
+                                <tr>
+                                    <td class="meta-label">Payment Time:</td>
+                                    <td class="meta-value">
+                                        <span
+                                            style="font-family: 'DejaVu Sans Mono', monospace; font-size: 11px;">{{ $displayTime }}</span>
+                                        <span
+                                            style="font-size: 8px; font-weight: 700; color: #64748b; background: #e2e8f0; padding: 1px 4px; border-radius: 3px; margin-left: 2px;">IST</span>
+                                    </td>
+                                </tr>
                             @endif
                             <tr>
                                 <td class="meta-label">Transaction Ref:</td>
@@ -846,7 +935,8 @@
                             </tr>
                             <tr>
                                 <td class="meta-label">Payment Mode:</td>
-                                <td class="meta-value" style="text-transform: uppercase;">{{ $receiptData['payment_method'] ?? 'CASH' }}</td>
+                                <td class="meta-value" style="text-transform: uppercase;">
+                                    {{ $receiptData['payment_method'] ?? 'CASH' }}</td>
                             </tr>
                         </table>
                     </td>
@@ -866,38 +956,46 @@
                                 </td>
                             </tr>
                             @if(!empty($receiptData['loan_product']) && $receiptData['loan_product'] !== 'N/A')
-                            <tr>
-                                <td class="meta-label">{{ $module === 'fd' ? 'Scheme Plan:' : 'Loan Product:' }}</td>
-                                <td class="meta-value">{{ $receiptData['loan_product'] }}</td>
-                            </tr>
+                                <tr>
+                                    <td class="meta-label">{{ $module === 'fd' ? 'Scheme Plan:' : 'Loan Product:' }}</td>
+                                    <td class="meta-value">{{ $receiptData['loan_product'] }}</td>
+                                </tr>
                             @endif
                             <tr>
-                                <td class="meta-label">{{ $receiptData['account_label'] ?? ($module === 'fd' ? 'FD Number' : 'Loan ID') }}:</td>
-                                <td class="meta-value">{{ $receiptData['account_number'] ?? $receiptData['application_number'] ?? 'N/A' }}</td>
+                                <td class="meta-label">
+                                    {{ $receiptData['account_label'] ?? ($module === 'fd' ? 'FD Number' : 'Loan ID') }}:
+                                </td>
+                                <td class="meta-value">
+                                    {{ $receiptData['account_number'] ?? $receiptData['application_number'] ?? 'N/A' }}
+                                </td>
                             </tr>
                             @if(!empty($receiptData['application_number']) && !empty($receiptData['account_number']) && $receiptData['application_number'] !== $receiptData['account_number'])
-                            <tr>
-                                <td class="meta-label">Application Ref:</td>
-                                <td class="meta-value">{{ $receiptData['application_number'] }}</td>
-                            </tr>
+                                <tr>
+                                    <td class="meta-label">Application Ref:</td>
+                                    <td class="meta-value">{{ $receiptData['application_number'] }}</td>
+                                </tr>
                             @endif
                             @if(!empty($receiptData['instalment_label']) && $receiptData['instalment_label'] !== 'N/A')
-                            <tr>
-                                <td class="meta-label">{{ $receiptData['split_item_label'] ?? ($module === 'fd' ? 'Txn Type' : 'EMI') }}:</td>
-                                <td class="meta-value">{{ $receiptData['instalment_label'] }}</td>
-                            </tr>
+                                <tr>
+                                    <td class="meta-label">
+                                        {{ $receiptData['split_item_label'] ?? ($module === 'fd' ? 'Txn Type' : 'EMI') }}:
+                                    </td>
+                                    <td class="meta-value">{{ $receiptData['instalment_label'] }}</td>
+                                </tr>
                             @endif
                             @if(!empty($receiptData['disbursed_date']) && $receiptData['disbursed_date'] !== 'N/A')
-                            <tr>
-                                <td class="meta-label">{{ $receiptData['start_date_label'] ?? ($module === 'fd' ? 'Deposit Date' : 'Disbursed Date') }}:</td>
-                                <td class="meta-value">{{ $receiptData['disbursed_date'] }}</td>
-                            </tr>
+                                <tr>
+                                    <td class="meta-label">
+                                        {{ $receiptData['start_date_label'] ?? ($module === 'fd' ? 'Deposit Date' : 'Disbursed Date') }}:
+                                    </td>
+                                    <td class="meta-value">{{ $receiptData['disbursed_date'] }}</td>
+                                </tr>
                             @endif
                             @if(!empty($receiptData['collector_name']))
-                            <tr>
-                                <td class="meta-label">Collected By:</td>
-                                <td class="meta-value">{{ $receiptData['collector_name'] }}</td>
-                            </tr>
+                                <tr>
+                                    <td class="meta-label">Collected By:</td>
+                                    <td class="meta-value">{{ $receiptData['collector_name'] }}</td>
+                                </tr>
                             @endif
                             <tr>
                                 <td class="meta-label">Payment Status:</td>
@@ -948,13 +1046,17 @@
             </table>
             @if($todayPayment > 0 && abs($todayPayment - $currentPayment) > 0.01)
                 <div class="kpi-today-note" style="display: table; width: 100%;">
-                    <div style="display: table-cell; text-align: left;">&#9432; <strong>Today's Total Collections Reference:</strong> ₹{{ number_format($todayPayment, 2) }} across today's receipts.</div>
-                    <div style="display: table-cell; text-align: right;"><strong>Current Payment:</strong> ₹{{ number_format($currentPayment, 2) }}</div>
+                    <div style="display: table-cell; text-align: left;">&#9432; <strong>Today's Total Collections
+                            Reference:</strong> ₹{{ number_format($todayPayment, 2) }} across today's receipts.</div>
+                    <div style="display: table-cell; text-align: right;"><strong>Current Payment:</strong>
+                        ₹{{ number_format($currentPayment, 2) }}</div>
                 </div>
             @elseif($todayPayment > 0)
                 <div class="kpi-today-note" style="display: table; width: 100%;">
-                    <div style="display: table-cell; text-align: left;">&#10003; <strong>Today's Payment Reference:</strong> ₹{{ number_format($todayPayment, 2) }}</div>
-                    <div style="display: table-cell; text-align: right;"><strong>Payment Status:</strong> {{ $receiptData['status_label'] ?? ucfirst($statusKey) }}</div>
+                    <div style="display: table-cell; text-align: left;">&#10003; <strong>Today's Payment Reference:</strong>
+                        ₹{{ number_format($todayPayment, 2) }}</div>
+                    <div style="display: table-cell; text-align: right;"><strong>Payment Status:</strong>
+                        {{ $receiptData['status_label'] ?? ucfirst($statusKey) }}</div>
                 </div>
             @endif
         </div>
@@ -977,7 +1079,8 @@
                         </tr>
                     </thead>
                     <tbody>
-                        @php $subtotalDue = 0; $subtotalPaid = 0; @endphp
+                        @php $subtotalDue = 0;
+                        $subtotalPaid = 0; @endphp
                         @foreach($items as $index => $item)
                             @php
                                 $itemType = strtolower($item['type'] ?? 'loan');
@@ -990,19 +1093,24 @@
                                 <td class="text-center font-weight-bold">{{ $index + 1 }}</td>
                                 <td>
                                     <span class="module-tag module-tag-{{ $itemType }}">{{ strtoupper($itemType) }}</span>
-                                    <div style="font-weight: 700; margin-top: 2px;">{{ $item['account_number'] ?? $item['group_code'] ?? 'N/A' }}</div>
+                                    <div style="font-weight: 700; margin-top: 2px;">
+                                        {{ $item['account_number'] ?? $item['group_code'] ?? 'N/A' }}</div>
                                 </td>
                                 <td>{{ $item['client_name'] ?? ($receiptData['client_name'] ?? 'N/A') }}</td>
-                                <td><span style="font-weight: 600;">{{ $item['instalment_no'] ?? $item['item_label'] ?? 'N/A' }}</span></td>
+                                <td><span
+                                        style="font-weight: 600;">{{ $item['instalment_no'] ?? $item['item_label'] ?? 'N/A' }}</span>
+                                </td>
                                 <td class="amount-cell">₹{{ number_format($due, 2) }}</td>
                                 <td class="amount-cell" style="color: #15803d;">₹{{ number_format($paid, 2) }}</td>
                             </tr>
                         @endforeach
 
-                        @if(!empty($receiptData['show_overdue']) && (float)($receiptData['overdue_amount'] ?? 0) > 0)
+                        @if(!empty($receiptData['show_overdue']) && (float) ($receiptData['overdue_amount'] ?? 0) > 0)
                             <tr>
-                                <td colspan="5" class="text-right font-weight-bold" style="color: #b91c1c;">Late Fee / Overdue Penalty Charges</td>
-                                <td class="amount-cell" style="color: #b91c1c;">₹{{ number_format((float)$receiptData['overdue_amount'], 2) }}</td>
+                                <td colspan="5" class="text-right font-weight-bold" style="color: #b91c1c;">Late Fee / Overdue
+                                    Penalty Charges</td>
+                                <td class="amount-cell" style="color: #b91c1c;">
+                                    ₹{{ number_format((float) $receiptData['overdue_amount'], 2) }}</td>
                             </tr>
                         @endif
 
@@ -1012,17 +1120,21 @@
                         </tr>
 
                         <tr class="total-highlight-row" style="font-size: 10px;">
-                            <td colspan="5" class="text-right" style="color: #475569; font-weight: 600;">Total Scheduled Due</td>
-                            <td class="amount-cell" style="color: #475569;">₹{{ number_format(max($subtotalDue, $dueAmount), 2) }}</td>
+                            <td colspan="5" class="text-right" style="color: #475569; font-weight: 600;">Total Scheduled Due
+                            </td>
+                            <td class="amount-cell" style="color: #475569;">
+                                ₹{{ number_format(max($subtotalDue, $dueAmount), 2) }}</td>
                         </tr>
                         @if($previouslyPaid > 0)
-                        <tr style="font-size: 10px;">
-                            <td colspan="5" class="text-right" style="color: #64748b; font-weight: 600;">Previously Paid Amount</td>
-                            <td class="amount-cell" style="color: #64748b;">₹{{ number_format($previouslyPaid, 2) }}</td>
-                        </tr>
+                            <tr style="font-size: 10px;">
+                                <td colspan="5" class="text-right" style="color: #64748b; font-weight: 600;">Previously Paid
+                                    Amount</td>
+                                <td class="amount-cell" style="color: #64748b;">₹{{ number_format($previouslyPaid, 2) }}</td>
+                            </tr>
                         @endif
                         <tr style="font-size: 10px; background-color: #f8fafc;">
-                            <td colspan="5" class="text-right" style="color: #15803d; font-weight: 700;">Total Paid to Date (Previous + Current)</td>
+                            <td colspan="5" class="text-right" style="color: #15803d; font-weight: 700;">Total Paid to Date
+                                (Previous + Current)</td>
                             <td class="amount-cell" style="color: #15803d;">₹{{ number_format($totalPaidToDate, 2) }}</td>
                         </tr>
                         @if($remainingDue > 0.01)
@@ -1048,26 +1160,29 @@
                         <tr>
                             <td>
                                 <div style="font-weight: 700;">Fixed Deposit Transaction</div>
-                                <div style="font-size: 9.5px; color: #64748b;">Scheme: {{ $receiptData['loan_product'] ?? 'Fixed Deposit Scheme' }}</div>
+                                <div style="font-size: 9.5px; color: #64748b;">Scheme:
+                                    {{ $receiptData['loan_product'] ?? 'Fixed Deposit Scheme' }}</div>
                             </td>
                             <td>{{ $receiptData['instalment_label'] ?? 'Deposit' }}</td>
-                            <td class="amount-cell">₹{{ number_format($receiptData['principal_amount'] ?? $currentPayment, 2) }}</td>
+                            <td class="amount-cell">
+                                ₹{{ number_format($receiptData['principal_amount'] ?? $currentPayment, 2) }}</td>
                         </tr>
 
-                        @if(!empty($receiptData['interest_amount']) && (float)$receiptData['interest_amount'] > 0)
-                        <tr>
-                            <td>Interest Credited / Payout</td>
-                            <td>Interest Component</td>
-                            <td class="amount-cell">₹{{ number_format((float)$receiptData['interest_amount'], 2) }}</td>
-                        </tr>
+                        @if(!empty($receiptData['interest_amount']) && (float) $receiptData['interest_amount'] > 0)
+                            <tr>
+                                <td>Interest Credited / Payout</td>
+                                <td>Interest Component</td>
+                                <td class="amount-cell">₹{{ number_format((float) $receiptData['interest_amount'], 2) }}</td>
+                            </tr>
                         @endif
 
-                        @if(!empty($receiptData['show_overdue']) && (float)($receiptData['overdue_amount'] ?? 0) > 0)
-                        <tr>
-                            <td style="color: #b91c1c; font-weight: 600;">Premature Penalty / Deductions</td>
-                            <td style="color: #b91c1c;">Closure Deduction</td>
-                            <td class="amount-cell" style="color: #b91c1c;">- ₹{{ number_format((float)$receiptData['overdue_amount'], 2) }}</td>
-                        </tr>
+                        @if(!empty($receiptData['show_overdue']) && (float) ($receiptData['overdue_amount'] ?? 0) > 0)
+                            <tr>
+                                <td style="color: #b91c1c; font-weight: 600;">Premature Penalty / Deductions</td>
+                                <td style="color: #b91c1c;">Closure Deduction</td>
+                                <td class="amount-cell" style="color: #b91c1c;">-
+                                    ₹{{ number_format((float) $receiptData['overdue_amount'], 2) }}</td>
+                            </tr>
                         @endif
 
                         <tr class="grand-total-row">
@@ -1094,7 +1209,8 @@
                                 <div style="font-size: 9.5px; color: #64748b;">Allocation towards principal reduction</div>
                             </td>
                             <td>Principal</td>
-                            <td class="amount-cell">₹{{ number_format((float)($receiptData['principal_amount'] ?? 0), 2) }}</td>
+                            <td class="amount-cell">₹{{ number_format((float) ($receiptData['principal_amount'] ?? 0), 2) }}
+                            </td>
                         </tr>
                         <tr>
                             <td>
@@ -1102,18 +1218,20 @@
                                 <div style="font-size: 9.5px; color: #64748b;">Scheduled finance interest charge</div>
                             </td>
                             <td>Interest</td>
-                            <td class="amount-cell">₹{{ number_format((float)($receiptData['interest_amount'] ?? 0), 2) }}</td>
+                            <td class="amount-cell">₹{{ number_format((float) ($receiptData['interest_amount'] ?? 0), 2) }}
+                            </td>
                         </tr>
 
-                        @if(!empty($receiptData['show_overdue']) && (float)($receiptData['overdue_amount'] ?? 0) > 0)
-                        <tr>
-                            <td style="color: #b91c1c;">
-                                <div style="font-weight: 700;">Late Payment Penalty / Overdue Fee</div>
-                                <div style="font-size: 9.5px; color: #b91c1c;">Default / late payment assessment</div>
-                            </td>
-                            <td style="color: #b91c1c;">Penalty</td>
-                            <td class="amount-cell" style="color: #b91c1c;">₹{{ number_format((float)$receiptData['overdue_amount'], 2) }}</td>
-                        </tr>
+                        @if(!empty($receiptData['show_overdue']) && (float) ($receiptData['overdue_amount'] ?? 0) > 0)
+                            <tr>
+                                <td style="color: #b91c1c;">
+                                    <div style="font-weight: 700;">Late Payment Penalty / Overdue Fee</div>
+                                    <div style="font-size: 9.5px; color: #b91c1c;">Default / late payment assessment</div>
+                                </td>
+                                <td style="color: #b91c1c;">Penalty</td>
+                                <td class="amount-cell" style="color: #b91c1c;">
+                                    ₹{{ number_format((float) $receiptData['overdue_amount'], 2) }}</td>
+                            </tr>
                         @endif
 
                         <tr class="grand-total-row">
@@ -1122,30 +1240,33 @@
                         </tr>
 
                         <tr class="total-highlight-row" style="font-size: 10px;">
-                            <td colspan="2" class="text-right" style="color: #475569; font-weight: 600;">Due Amount (Total Scheduled Installment)</td>
+                            <td colspan="2" class="text-right" style="color: #475569; font-weight: 600;">Due Amount (Total
+                                Scheduled Installment)</td>
                             <td class="amount-cell" style="color: #475569;">₹{{ number_format($dueAmount, 2) }}</td>
                         </tr>
                         @if($previouslyPaid > 0)
-                        <tr style="font-size: 10px;">
-                            <td colspan="2" class="text-right" style="color: #64748b; font-weight: 600;">Previously Paid Amount</td>
-                            <td class="amount-cell" style="color: #64748b;">₹{{ number_format($previouslyPaid, 2) }}</td>
-                        </tr>
+                            <tr style="font-size: 10px;">
+                                <td colspan="2" class="text-right" style="color: #64748b; font-weight: 600;">Previously Paid
+                                    Amount</td>
+                                <td class="amount-cell" style="color: #64748b;">₹{{ number_format($previouslyPaid, 2) }}</td>
+                            </tr>
                         @endif
                         <tr style="font-size: 10px; background-color: #f8fafc;">
-                            <td colspan="2" class="text-right" style="color: #15803d; font-weight: 700;">Total Paid to Date (Previous + Current)</td>
+                            <td colspan="2" class="text-right" style="color: #15803d; font-weight: 700;">Total Paid to Date
+                                (Previous + Current)</td>
                             <td class="amount-cell" style="color: #15803d;">₹{{ number_format($totalPaidToDate, 2) }}</td>
                         </tr>
 
                         @if($remainingDue > 0.01)
-                        <tr class="partial-alert-row">
-                            <td colspan="2" class="text-right font-weight-bold">Remaining Balance Due on Installment</td>
-                            <td class="amount-cell" style="color: #b91c1c;">₹{{ number_format($remainingDue, 2) }}</td>
-                        </tr>
+                            <tr class="partial-alert-row">
+                                <td colspan="2" class="text-right font-weight-bold">Remaining Balance Due on Installment</td>
+                                <td class="amount-cell" style="color: #b91c1c;">₹{{ number_format($remainingDue, 2) }}</td>
+                            </tr>
                         @else
-                        <tr style="background-color: #f0fdf4; color: #15803d; font-size: 10px;">
-                            <td colspan="2" class="text-right font-weight-bold">&#10003; Installment Status</td>
-                            <td class="amount-cell" style="color: #15803d;">Fully Paid (₹0.00 Balance)</td>
-                        </tr>
+                            <tr style="background-color: #f0fdf4; color: #15803d; font-size: 10px;">
+                                <td colspan="2" class="text-right font-weight-bold">&#10003; Installment Status</td>
+                                <td class="amount-cell" style="color: #15803d;">Fully Paid (₹0.00 Balance)</td>
+                            </tr>
                         @endif
                     </tbody>
                 </table>
@@ -1200,4 +1321,5 @@
         }
     </script>
 </body>
+
 </html>

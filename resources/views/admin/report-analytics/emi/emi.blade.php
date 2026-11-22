@@ -11,16 +11,7 @@
 @endsection
 
 @section('content')
-<div class="row mb-6">
-  <div class="col-12">
-    <div class="d-flex justify-content-between align-items-center">
-      <div>
-        <h4 class="mb-1">EMI Report & Analytics</h4>
-        <p class="text-muted mb-0">Comprehensive overview of EMI collection and performance</p>
-      </div>
-    </div>
-  </div>
-</div>
+@include('admin.report-analytics.partials.loan-report-tabs', ['activeTab' => $activeTab ?? 'emi'])
 
 <!-- Charts Row -->
 <div class="row g-6 mb-6">
@@ -177,7 +168,8 @@
         </div>
       </div>
       <div class="card-body">
-        <form method="GET" action="{{ route('reports-emi') }}" class="row g-3 align-items-end mb-4" id="emiFilterForm">
+        <form method="GET" action="{{ route('reports-loan', ['tab' => 'emi']) }}" class="row g-3 align-items-end mb-4" id="emiFilterForm">
+          <input type="hidden" name="tab" value="emi">
           <div class="col-md-2">
             <label class="form-label">Status</label>
             <select name="status" class="form-select" data-auto-submit="true">
@@ -233,7 +225,7 @@
             ])
           </div>
           <div class="col-md-auto d-flex align-items-end">
-            <a href="{{ route('reports-emi') }}" class="btn btn-outline-secondary" id="resetEmiFilters"><i class="ri-refresh-line me-1"></i>Reset</a>
+            <a href="{{ route('reports-loan', ['tab' => 'emi']) }}" class="btn btn-outline-secondary" id="resetEmiFilters"><i class="ri-refresh-line me-1"></i>Reset</a>
           </div>
         </form>
 

@@ -6,17 +6,26 @@ use App\Helpers\AppearanceHelper;
 use App\Helpers\SettingsHelper;
 use App\Models\Appearance;
 use App\Models\CompanyDetail;
+use App\Models\PageConfiguration;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Str;
+use Illuminate\View\View;
 
 class WebsiteSetupController extends Controller
 {
     /**
      * Homepage Setup - Logo and Text Settings + Company Details
      */
-    public function homepage()
+    public function homepage(Request $request): View
     {
+        $tab = $request->get('tab', 'branding');
+        if (! in_array($tab, ['branding', 'privacy', 'terms', 'legal'], true)) {
+            $tab = 'branding';
+        }
+
         $appearance = Appearance::where('type', 'web')->firstOrCreate(
             ['type' => 'web'],
             [
@@ -52,7 +61,119 @@ class WebsiteSetupController extends Controller
             }
         }
 
-        return view('admin.website-setup.homepage', compact('appearance', 'companyDetail'));
+        $privacyPage = PageConfiguration::firstOrCreate(
+            ['slug' => 'privacy-policy'],
+            [
+                'name' => 'Privacy Policy',
+                'status' => 'active',
+                'order' => 1,
+                'content' => '<h3>Privacy Policy</h3><p>Update this content from Website Setup → Privacy Policy tab.</p>',
+            ]
+        );
+
+        $termsPage = PageConfiguration::firstOrCreate(
+            ['slug' => 'terms-and-conditions'],
+            [
+                'name' => 'Terms and Conditions',
+                'status' => 'active',
+                'order' => 2,
+                'content' => '<h3>Terms and Conditions</h3><p>Update this content from Website Setup → Terms &amp; Conditions tab.</p>',
+            ]
+        );
+
+        $legalPages = PageConfiguration::ordered()->get();
+        $baseUrl = rtrim((string) config('app.url'), '/');
+
+        return view('admin.website-setup.homepage', compact(
+            'appearance',
+            'companyDetail',
+            'tab',
+            'privacyPage',
+            'termsPage',
+            'legalPages',
+            'baseUrl'
+        ));
+    }
+
+    public function storeLegalPage(Request $request): RedirectResponse
+    {
+        $validated = $request->validate([
+            'name' => 'required|string|max:255',
+            'slug' => 'required|string|max:255|regex:/^[a-z0-9]+(?:-[a-z0-9]+)*$/|unique:policy_pages,slug',
+            'content' => 'nullable|string',
+            'status' => 'required|in:active,inactive',
+        ]);
+
+        $content = $validated['content'] ?? $request->input('content_html');
+        if (! is_string($content) || trim(strip_tags($content)) === '') {
+            $content = '<p></p>';
+        }
+
+        PageConfiguration::create([
+            'name' => $validated['name'],
+            'slug' => Str::slug($validated['slug']),
+            'content' => $content,
+            'status' => $validated['status'],
+            'order' => (int) PageConfiguration::max('order') + 1,
+        ]);
+
+        return redirect()
+            ->route('website-homepage', ['tab' => 'legal'])
+            ->with('success', 'Legal page created.');
+    }
+
+    public function updateLegalPage(Request $request, int $id): RedirectResponse
+    {
+        $page = PageConfiguration::findOrFail($id);
+
+        $validated = $request->validate([
+            'name' => 'required|string|max:255',
+            'slug' => 'required|string|max:255|regex:/^[a-z0-9]+(?:-[a-z0-9]+)*$/|unique:policy_pages,slug,' . $id,
+            'content' => 'required|string',
+            'status' => 'required|in:active,inactive',
+        ]);
+
+        $page->update([
+            'name' => $validated['name'],
+            'slug' => Str::slug($validated['slug']),
+            'content' => $validated['content'],
+            'status' => $validated['status'],
+        ]);
+
+        $returnTab = $request->input('return_tab', 'legal');
+        if (! in_array($returnTab, ['privacy', 'terms', 'legal'], true)) {
+            $returnTab = 'legal';
+        }
+
+        return redirect()
+            ->route('website-homepage', ['tab' => $returnTab])
+            ->with('success', $page->name . ' updated.');
+    }
+
+    public function destroyLegalPage(int $id): RedirectResponse
+    {
+        $page = PageConfiguration::findOrFail($id);
+
+        if (in_array($page->slug, ['privacy-policy', 'terms-and-conditions'], true)) {
+            return redirect()
+                ->route('website-homepage', ['tab' => 'legal'])
+                ->with('error', 'Privacy Policy and Terms pages cannot be deleted. Set them to inactive instead.');
+        }
+
+        $page->delete();
+
+        return redirect()
+            ->route('website-homepage', ['tab' => 'legal'])
+            ->with('success', 'Page deleted.');
+    }
+
+    public static function publicUrlForPolicy(PageConfiguration $page): string
+    {
+        return match ($page->slug) {
+            'privacy-policy' => route('public.privacy-policy'),
+            'terms-and-conditions' => route('public.terms-and-conditions'),
+            default => route('public.page', $page->slug),
+        };
     }
 
     /**

@@ -34,7 +34,7 @@ class SMSUtility
         // 3. Prepare SMS body
         $body = $template->sms_body;
         $allVariables = array_merge([
-            'site_name' => \App\Models\CompanyDetail::first()->company_name ?? config('app.name', 'Codepluse Gen PVT Ltd'),
+            'site_name' => \App\Models\CompanyDetail::first()->company_name ?? config('app.name', 'osilinprathab Gen PVT Ltd'),
         ], $variables);
 
         foreach ($allVariables as $key => $value) {

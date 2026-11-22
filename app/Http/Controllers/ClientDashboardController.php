@@ -6,6 +6,7 @@ use App\Models\LoanAccount;
 use App\Models\LoanApplication;
 use App\Models\Emi;
 use App\Models\Client;
+use App\Models\WebsiteLeadApplication;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 
@@ -21,7 +22,7 @@ class ClientDashboardController extends Controller
 
         if (!$client) {
             Auth::logout();
-            return redirect()->route('client.login')->with('error', 'No client profile found for this user.');
+            return redirect()->route('login')->with('error', 'No client profile found for this user.');
         }
 
         // Get active loans
@@ -51,7 +52,18 @@ class ClientDashboardController extends Controller
             ->orderBy('created_at', 'desc')
             ->get();
 
-        return view('client.dashboard.index', compact('client', 'activeLoans', 'stats', 'loanApplications'));
+        $webApplications = WebsiteLeadApplication::query()
+            ->where(function ($q) use ($client) {
+                $q->where('client_id', $client->id)
+                    ->orWhere(function ($q2) use ($client) {
+                        $q2->where('phone', $client->client_phone)->whereNull('client_id');
+                    });
+            })
+            ->orderByDesc('created_at')
+            ->limit(10)
+            ->get();
+
+        return view('client.dashboard.index', compact('client', 'activeLoans', 'stats', 'loanApplications', 'webApplications'));
     }
 
     /**

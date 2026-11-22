@@ -12,8 +12,18 @@
 
   <!-- ! Hide app brand if navbar-full -->
   @if (!isset($navbarFull))
+    @php
+      $brandRoute = url('/dashboard');
+      if ($user) {
+        if ($user->hasRole('CreditVerifier')) {
+          $brandRoute = route('verification-credit-score-history');
+        } elseif ($user->hasRole('Agent') && !$user->hasRole('Admin')) {
+          $brandRoute = route('agent-dashboard');
+        }
+      }
+    @endphp
     <div class="app-brand demo" style="height: 80px;">
-      <a href="{{ auth()->user()->hasRole('CreditVerifier') ? route('verification-credit-score-history') : (auth()->user()->hasRole('Agent') && !auth()->user()->hasRole('Admin') ? route('agent-dashboard') : url('/dashboard')) }}" class="app-brand-link gap-xl-0 gap-2">
+      <a href="{{ $brandRoute }}" class="app-brand-link gap-xl-0 gap-2">
         <span class="app-brand-logo demo">@include('_partials.macros', ['width' => '200', 'height' => '65'])</span>
 
         <span class="app-brand-text demo menu-text fw-semibold ms-3" style="font-size: 1.4rem;">{{ $adminTitle }}</span>

@@ -24,11 +24,12 @@ document.addEventListener('DOMContentLoaded', function () {
   const urlTermUnit = urlParams.get('term_unit');
   const urlLoanMode = urlParams.get('loan_mode');
 
-  if (urlStatus && ['overdue', 'pending', 'upcoming', 'partial', 'paid'].includes(urlStatus)) {
+  if (urlStatus && ['all', 'overdue', 'pending', 'upcoming', 'partial', 'paid'].includes(urlStatus)) {
     $('#statusFilter').val(urlStatus);
     $('#repaymentsTabs button').removeClass('active');
     $(`#repaymentsTabs button[data-status="${urlStatus}"]`).addClass('active');
     const titles = {
+      all: 'All Clients (EMIs To Collect)',
       overdue: 'Overdue Clients',
       pending: 'Pending Clients (This Month)',
       upcoming: 'Upcoming Clients',
@@ -71,7 +72,7 @@ document.addEventListener('DOMContentLoaded', function () {
   };
 
   const repaymentExportTitle = () => {
-    const status = ($('#statusFilter').val() || 'overdue').toLowerCase();
+    const status = ($('#statusFilter').val() || 'all').toLowerCase();
     const titles = {
       overdue: 'Overdue Loans',
       pending: 'Pending Loans',
@@ -116,93 +117,122 @@ document.addEventListener('DOMContentLoaded', function () {
     { key: 'paid', label: 'Paid', color: 'success' },
   ];
 
+  const escapeHtml = (value) =>
+    String(value ?? '').replace(/[&<>"']/g, (ch) =>
+      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]
+    );
+
+  const buildClientActionsDropdown = (clientName, subtitle, menuItemsHtml, uid) => {
+    if (!menuItemsHtml) {
+      return '<span class="text-muted">—</span>';
+    }
+    const header = `
+      <li class="dropdown-header px-3 py-2 border-bottom mb-1">
+        <div class="d-flex align-items-center gap-2">
+          <span class="avatar avatar-xs">
+            <span class="avatar-initial rounded-circle bg-label-primary">
+              <i class="icon-base ri ri-user-3-line"></i>
+            </span>
+          </span>
+          <div class="overflow-hidden">
+            <div class="fw-semibold text-truncate">${escapeHtml(clientName || 'Client')}</div>
+            ${subtitle ? `<small class="text-muted text-truncate d-block">${escapeHtml(subtitle)}</small>` : ''}
+          </div>
+        </div>
+      </li>`;
+    return (
+      '<div class="dropdown">' +
+      `<button type="button" class="btn btn-sm btn-icon btn-text-secondary rounded-pill" data-bs-toggle="dropdown" data-bs-boundary="viewport" aria-expanded="false" id="${uid}">` +
+      '<i class="icon-base ri ri-more-2-line icon-22px"></i>' +
+      '</button>' +
+      `<ul class="dropdown-menu dropdown-menu-end shadow-sm" aria-labelledby="${uid}">${header}${menuItemsHtml}</ul>` +
+      '</div>'
+    );
+  };
+
+  const buildPhoneCommLinks = (clientName, phoneNumber, accountNo, contextLabel, amountDue, dueDate, publicLink, companySlogan, companyPhone, status, paidAmount) => {
+    const empty = { whatsapp: null, sms: null, call: null };
+    if (!phoneNumber || phoneNumber === 'N/A') {
+      return empty;
+    }
+    let cleanPhone = String(phoneNumber).replace(/\D/g, '');
+    if (!cleanPhone) {
+      return empty;
+    }
+    if (cleanPhone.length === 10) {
+      cleanPhone = '91' + cleanPhone;
+    }
+    const linkPart = publicLink && publicLink !== '#' ? `\n\nPlease check your EMI Schedule here: ${publicLink}` : '';
+    const isPartialPayment = status === 'partial' || (paidAmount > 0 && status !== 'paid');
+    let waMessage = '';
+    let smsMessage = '';
+
+    if (status === 'paid' || isPartialPayment) {
+      waMessage = `Dear Customer, your payment for *Loan Account No: ${accountNo}* has been recorded.${linkPart}\n\nThank you, ${companySlogan}.`;
+      smsMessage = `Dear Customer, your payment for Loan Account No: ${accountNo} has been recorded.${linkPart}\n\nThank you, ${companySlogan}.`;
+    } else if (status === 'overdue') {
+      waMessage = `Dear *${clientName}*, your EMI of *Rs.${amountDue}* for *${accountNo}* (${contextLabel}) was due on *${dueDate}*. Please clear at the earliest.${linkPart}\n\nThank you, ${companySlogan}. Queries: ${companyPhone}.`;
+      smsMessage = `Dear ${clientName}, your EMI of Rs.${amountDue} for ${accountNo} (${contextLabel}) was due on ${dueDate}. Please clear at the earliest.${linkPart}\n\nThank you, ${companySlogan}.`;
+    } else {
+      waMessage = `Dear *${clientName}*, your EMI of *Rs.${amountDue}* for *${accountNo}* (${contextLabel}) is due on *${dueDate}*.${linkPart}\n\nThank you, ${companySlogan}. Queries: ${companyPhone}.`;
+      smsMessage = `Dear ${clientName}, your EMI of Rs.${amountDue} for ${accountNo} (${contextLabel}) is due on ${dueDate}.${linkPart}\n\nThank you, ${companySlogan}.`;
+    }
+
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    const smsSeparator = isIOS ? '&' : '?';
+
+    return {
+      call: `tel:${String(phoneNumber).replace(/\s/g, '')}`,
+      whatsapp: `https://wa.me/${cleanPhone}?text=${encodeURIComponent(waMessage)}`,
+      sms: `sms:+${cleanPhone}${smsSeparator}body=${encodeURIComponent(smsMessage)}`,
+    };
+  };
+
   const renderEmiActionButtons = (emi, full) => {
-    const publicToken = emi.application_number ? btoa(emi.application_number) : '';
+    const publicToken = emi.application_number ? btoa(emi.application_number) : (full.application_number ? btoa(full.application_number) : '');
     const publicLink = publicToken ? `${window.location.origin}/view-schedule/${publicToken}` : '#';
     const phoneNumber = full.client_phone && full.client_phone !== 'N/A' ? full.client_phone : '';
-    const callBtn = phoneNumber
-      ? `<a href="tel:${phoneNumber.replace(/\s/g, '')}" class="btn btn-sm btn-icon btn-text-secondary rounded-pill" title="Call Client"><i class="icon-base ri ri-phone-line icon-20px"></i></a>`
-      : '';
-
-    let whatsappBtn = '';
-    let smsBtn = '';
     const status = emi?.status || '';
     const paidAmount = parseFloat(emi?.paid_amount_raw || 0);
     const balance = parseFloat(emi?.balance_raw || emi?.balance || 0);
-    const amountDue = balance > 0 ? balance : parseFloat(emi?.amount_raw || emi?.amount || 0);
-    const clientName = emi?.client_name || full?.client_name || 'Client';
-    const isPartialPayment = status === 'partial' || (paidAmount > 0 && status !== 'paid');
+    const amountDue = balance > 0 ? balance : parseFloat(emi?.pending_amount || emi?.amount_raw || emi?.amount || 0);
+    const clientName = full?.client_name || 'Client';
+    const companySlogan = emi.company_slogan || full.company_slogan || 'osilinprathab Gen PVT Ltd';
+    const companyPhone = emi.company_phone || full.company_phone || '';
+    const accountNo = emi.account_number || full.account_number || '';
+    const period = `EMI #${emi.instalment_number || '—'}`;
+    const dueDate = emi.due_date || emi.due_date_formatted || '—';
+    const uid = 'emi-act-' + String(emi.id || Math.random().toString(36).slice(2, 7)).replace(/[^a-zA-Z0-9_-]/g, '');
 
-    if (phoneNumber && phoneNumber !== 'N/A') {
-      let cleanPhone = phoneNumber.replace(/\D/g, '');
-      if (cleanPhone.length === 10) {
-        cleanPhone = '91' + cleanPhone;
-      }
-      const linkPart = publicLink !== '#' ? `\n\nPlease check your EMI Schedule here: ${publicLink}` : '';
-      const companySlogan = emi.company_slogan || full.company_slogan || 'Codepluse Gen PVT Ltd';
-      const companyPhone = emi.company_phone || full.company_phone || '';
-      const accountNo = emi.account_number || full.account_number || '';
-      const period = emi.period_label || ('EMI Month ' + (emi.month_number || ''));
-      const dueDate = emi.due_date_formatted || emi.due_date || '';
-      const paidDate = emi.paid_date_formatted || emi.paid_date || '';
+    let items = '';
+    items += `<li><button type="button" class="dropdown-item btn-view-emi py-2" data-emi-id="${escapeHtml(emi.id)}" data-application-number="${escapeHtml(emi.application_number || full.application_number || '')}"><i class="icon-base ri ri-eye-line me-2 text-primary"></i>View EMI</button></li>`;
+    const appNo = emi.application_number || full.application_number;
+    if (appNo) {
+      items += `<li><a class="dropdown-item py-2" href="${escapeHtml(baseUrl)}emi/repayments/view/${escapeHtml(appNo)}" target="_blank"><i class="icon-base ri ri-file-list-3-line me-2"></i>View Schedule</a></li>`;
+    }
+    items += `<li><button type="button" class="dropdown-item btn-copy-public-link py-2" data-link="${escapeHtml(publicLink)}"><i class="icon-base ri ri-link me-2"></i>Copy Public Link</button></li>`;
 
-      let waMessage = '';
-      let smsMessage = '';
-      let waTitle = 'Send WhatsApp Message';
-      let smsTitle = 'Send SMS Message';
-
-      if (status === 'paid' || isPartialPayment) {
-        if (isPartialPayment) {
-          waTitle = 'Send WhatsApp Partial Payment Confirmation';
-          smsTitle = 'Send SMS Partial Payment Confirmation';
-          waMessage = `Dear Customer, a partial payment of *Rs.${paidAmount}* for your EMI on *Loan Account No: ${accountNo}* has been successfully received on *${paidDate}*.${linkPart}\n\nThank you for choosing ${companySlogan}. For queries, contact us at ${companyPhone}.`;
-          smsMessage = `Dear Customer, a partial payment of Rs.${paidAmount} for your EMI on Loan Account No: ${accountNo} has been successfully received on ${paidDate}.${linkPart}\n\nThank you for choosing ${companySlogan}. For queries, contact us at ${companyPhone}.`;
-        } else {
-          waTitle = 'Send WhatsApp Payment Confirmation';
-          smsTitle = 'Send SMS Payment Confirmation';
-          waMessage = `Dear Customer, your EMI for *Loan Account No: ${accountNo}* of *Rs.${paidAmount}* has been successfully paid on *${paidDate}*.${linkPart}\n\nThank you for choosing ${companySlogan}. For queries, contact us at ${companyPhone}.`;
-          smsMessage = `Dear Customer, your EMI for Loan Account No: ${accountNo} of Rs.${paidAmount} has been successfully paid on ${paidDate}.${linkPart}\n\nThank you for choosing ${companySlogan}. For queries, contact us at ${companyPhone}.`;
-        }
-      } else if (status === 'overdue') {
-        waTitle = 'Send Overdue Reminder via WhatsApp';
-        smsTitle = 'Send Overdue Reminder via SMS';
-        waMessage = `Dear *${clientName}*, your EMI payment of *Rs.${amountDue}* for *Loan Account No: ${accountNo}* (${period}) was due on *${dueDate}*. Please clear your overdue EMI at the earliest to avoid penalty and credit score impact.${linkPart}\n\nThank you, ${companySlogan}. For queries: ${companyPhone}.`;
-        smsMessage = `Dear ${clientName}, your EMI payment of Rs.${amountDue} for Loan Account No: ${accountNo} (${period}) was due on ${dueDate}. Please clear your overdue EMI at the earliest to avoid penalty.${linkPart}\n\nThank you, ${companySlogan}.`;
-      } else {
-        waTitle = 'Send Pending Reminder via WhatsApp';
-        smsTitle = 'Send Pending Reminder via SMS';
-        waMessage = `Dear *${clientName}*, your upcoming EMI payment of *Rs.${amountDue}* for *Loan Account No: ${accountNo}* (${period}) is due on *${dueDate}*. Kindly arrange payment on or before the due date.${linkPart}\n\nThank you, ${companySlogan}. For queries: ${companyPhone}.`;
-        smsMessage = `Dear ${clientName}, your upcoming EMI payment of Rs.${amountDue} for Loan Account No: ${accountNo} (${period}) is due on ${dueDate}. Kindly arrange payment on or before the due date.${linkPart}\n\nThank you, ${companySlogan}.`;
-      }
-
-      const encodedWaMsg = encodeURIComponent(waMessage);
-      whatsappBtn = `<a href="https://wa.me/${cleanPhone}?text=${encodedWaMsg}" target="_blank" class="btn btn-sm btn-icon btn-text-secondary rounded-pill text-success" title="${waTitle}"><i class="icon-base ri ri-whatsapp-line icon-20px"></i></a>`;
-
-      const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-      const smsSeparator = isIOS ? '&' : '?';
-      const encodedSmsMsg = encodeURIComponent(smsMessage);
-      smsBtn = `<a href="sms:+${cleanPhone}${smsSeparator}body=${encodedSmsMsg}" class="btn btn-sm btn-icon btn-text-secondary rounded-pill text-info" title="${smsTitle}"><i class="icon-base ri ri-message-3-line icon-20px"></i></a>`;
+    const comm = buildPhoneCommLinks(clientName, phoneNumber, accountNo, period, amountDue, dueDate, publicLink, companySlogan, companyPhone, status, paidAmount);
+    if (comm.call || comm.whatsapp || comm.sms) {
+      items += '<li><hr class="dropdown-divider my-1"></li>';
+    }
+    if (comm.call) {
+      items += `<li><a class="dropdown-item py-2" href="${escapeHtml(comm.call)}"><i class="icon-base ri ri-phone-line me-2 text-success"></i>Call Client</a></li>`;
+    }
+    if (comm.whatsapp) {
+      items += `<li><a class="dropdown-item py-2 text-success" href="${escapeHtml(comm.whatsapp)}" target="_blank"><i class="icon-base ri ri-whatsapp-line me-2"></i>WhatsApp</a></li>`;
+    }
+    if (comm.sms) {
+      items += `<li><a class="dropdown-item py-2 text-info" href="${escapeHtml(comm.sms)}"><i class="icon-base ri ri-message-3-line me-2"></i>SMS</a></li>`;
     }
 
-    return (
-      '<div class="d-flex align-items-center gap-1 text-nowrap">' +
-      `<button type="button" class="btn btn-sm btn-icon btn-text-secondary rounded-pill btn-view-emi" data-emi-id="${emi.id}" data-application-number="${emi.application_number || full.application_number || ''}" title="View EMI Details">` +
-      '<i class="icon-base ri ri-eye-line icon-20px"></i>' +
-      '</button>' +
-      `<button type="button" class="btn btn-sm btn-icon btn-text-secondary rounded-pill btn-copy-public-link" data-link="${publicLink}" title="Copy Public Schedule Link">` +
-      '<i class="icon-base ri ri-link icon-20px"></i>' +
-      '</button>' +
-      callBtn +
-      whatsappBtn +
-      smsBtn +
-      '</div>'
-    );
+    return buildClientActionsDropdown(clientName, period + ' · ' + accountNo, items, uid);
   };
 
   const formatClientEmiDetails = (clientRow) => {
     const grouped = clientRow.emis_grouped || {};
     const activeStatus = $('#statusFilter').val();
-    const bulkSelectableStatuses = ['overdue', 'pending', 'partial', 'upcoming', 'paid'];
+    const bulkSelectableStatuses = ['all', 'overdue', 'pending', 'partial', 'upcoming', 'paid'];
     const showCheckbox = window.isAdmin && bulkSelectableStatuses.includes(activeStatus);
 
     let html = '<div class="client-emi-details">';
@@ -373,25 +403,48 @@ document.addEventListener('DOMContentLoaded', function () {
             if (type === 'export') {
               return '';
             }
+            const clientName = full.client_name || 'Client';
+            const accountNo = full.account_number || '—';
             const publicToken = full.application_number ? btoa(full.application_number) : '';
             const publicLink = publicToken ? `${window.location.origin}/view-schedule/${publicToken}` : '#';
             const phoneNumber = full.client_phone && full.client_phone !== 'N/A' ? full.client_phone : '';
-            const callBtn = phoneNumber
-              ? `<a href="tel:${phoneNumber.replace(/\s/g, '')}" class="btn btn-sm btn-icon btn-text-secondary rounded-pill" title="Call Client"><i class="icon-base ri ri-phone-line icon-20px"></i></a>`
-              : '';
             const scheduleTarget = full.application_number
               ? `${baseUrl}emi/repayments/view/${full.application_number}`
               : `${baseUrl}loan/loan-account/${full.loan_account_id}`;
+            const uid = 'row-act-' + String(full.id || Math.random().toString(36).slice(2, 7)).replace(/[^a-zA-Z0-9_-]/g, '');
+            const dueHint = full.total_due_formatted ? `Due ${full.total_due_formatted}` : accountNo;
 
-            return (
-              '<div class="d-flex align-items-center gap-1 text-nowrap">' +
-              `<a href="${scheduleTarget}" class="btn btn-sm btn-icon btn-text-secondary rounded-pill" title="View Full Schedule"><i class="icon-base ri ri-file-list-3-line icon-20px"></i></a>` +
-              `<button type="button" class="btn btn-sm btn-icon btn-text-secondary rounded-pill btn-copy-public-link" data-link="${publicLink}" title="Copy Public Schedule Link">` +
-              '<i class="icon-base ri ri-link icon-20px"></i>' +
-              '</button>' +
-              callBtn +
-              '</div>'
+            let items = '';
+            items += `<li><a class="dropdown-item py-2" href="${escapeHtml(scheduleTarget)}" target="_blank"><i class="icon-base ri ri-file-list-3-line me-2 text-primary"></i>View Schedule</a></li>`;
+            items += `<li><button type="button" class="dropdown-item btn-copy-public-link py-2" data-link="${escapeHtml(publicLink)}"><i class="icon-base ri ri-link me-2"></i>Copy Public Link</button></li>`;
+
+            const comm = buildPhoneCommLinks(
+              clientName,
+              phoneNumber,
+              accountNo,
+              'Loan Account',
+              parseFloat(full.total_due || 0),
+              dueHint,
+              publicLink,
+              full.company_slogan || 'Finance',
+              full.company_phone || '',
+              full.overdue_count > 0 ? 'overdue' : 'pending',
+              0
             );
+            if (comm.call || comm.whatsapp || comm.sms) {
+              items += '<li><hr class="dropdown-divider my-1"></li>';
+            }
+            if (comm.call) {
+              items += `<li><a class="dropdown-item py-2" href="${escapeHtml(comm.call)}"><i class="icon-base ri ri-phone-line me-2 text-success"></i>Call Client</a></li>`;
+            }
+            if (comm.whatsapp) {
+              items += `<li><a class="dropdown-item py-2 text-success" href="${escapeHtml(comm.whatsapp)}" target="_blank"><i class="icon-base ri ri-whatsapp-line me-2"></i>WhatsApp</a></li>`;
+            }
+            if (comm.sms) {
+              items += `<li><a class="dropdown-item py-2 text-info" href="${escapeHtml(comm.sms)}"><i class="icon-base ri ri-message-3-line me-2"></i>SMS</a></li>`;
+            }
+
+            return buildClientActionsDropdown(clientName, accountNo, items, uid);
           }
         }
       ],
@@ -605,6 +658,7 @@ document.addEventListener('DOMContentLoaded', function () {
         $('#stat-overdue-emis').text(parseFloat(stats.overdue_emis).toLocaleString('en-IN'));
 
         // Update tab badges
+        $('#tab-count-all').text(parseFloat(stats.unpaid_accounts || stats.unpaid_emis || 0).toLocaleString('en-IN'));
         $('#tab-count-overdue').text(parseFloat(stats.overdue_emis).toLocaleString('en-IN'));
         $('#tab-count-pending').text(parseFloat(stats.pending_emis).toLocaleString('en-IN'));
         $('#tab-count-upcoming').text(parseFloat(stats.upcoming_emis || 0).toLocaleString('en-IN'));
@@ -798,7 +852,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
       window.syncSelectAllMatchingVisibility = function () {
         const activeStatus = $('#statusFilter').val();
-        const canBulkAct = ['overdue', 'pending', 'partial', 'upcoming', 'paid'].includes(activeStatus);
+        const canBulkAct = ['all', 'overdue', 'pending', 'partial', 'upcoming', 'paid'].includes(activeStatus);
         $('#selectAllMatchingEmis').toggleClass('d-none', !canBulkAct);
         $('#selectAllMatchingEmis').html(activeStatus === 'paid'
           ? '<i class="icon-base ri ri-checkbox-multiple-line me-1"></i>Select all matching paid EMIs'
@@ -978,20 +1032,31 @@ document.addEventListener('DOMContentLoaded', function () {
     }
   }
 
-  // Handle tab clicks to filter by status
-  $('#repaymentsTabs button').on('shown.bs.tab', function (e) {
+  // Handle tab clicks to filter by status (same pattern as EMI Collections)
+  $('#repaymentsTabs button').on('click', function () {
+    $('#repaymentsTabs .nav-link').removeClass('active');
+    $(this).addClass('active');
     const status = $(this).attr('data-status');
     $('#statusFilter').val(status);
-    
-    // Update table title
+
     const titles = {
-      'overdue': 'Overdue Clients',
-      'pending': 'Pending Clients (This Month)',
-      'upcoming': 'Upcoming Clients',
-      'partial': 'Partial Paid Clients',
-      'paid': 'Paid Clients'
+      all: 'All Clients (EMIs To Collect)',
+      overdue: 'Overdue Clients',
+      pending: 'Pending Clients (This Month)',
+      upcoming: 'Upcoming Clients',
+      partial: 'Partial Paid Clients',
+      paid: 'Paid Clients',
     };
     $('#tableTitle').text(titles[status] || 'EMI Repayments List');
+
+    if (status === 'upcoming' && window.DateRangeFilter) {
+      const root = document.querySelector('[data-date-range-filter]');
+      if (root) {
+        window.DateRangeFilter.applyPreset(root, 'all');
+      }
+      $('#fromDateFilter').val('');
+      $('#toDateFilter').val('');
+    }
 
     if (window.isAdmin && selectedEmis) {
       selectedEmis.clear();
@@ -1028,7 +1093,13 @@ document.addEventListener('DOMContentLoaded', function () {
   });
 
   $('#resetFilters').on('click', function () {
-    $('#statusFilter').val('overdue');
+    if (window.DateRangeFilter) {
+      const root = document.querySelector('[data-date-range-filter]');
+      if (root) {
+        window.DateRangeFilter.applyPreset(root, 'all');
+      }
+    }
+    $('#statusFilter').val('all');
     $('#fromDateFilter').val('');
     $('#toDateFilter').val('');
     $('#areaFilter').val('');
@@ -1036,12 +1107,11 @@ document.addEventListener('DOMContentLoaded', function () {
     $('#loanModeFilter').val('');
     $('#loanTypeFilter').val('');
     $('#accountNumberFilter').val('');
-    
-    // Reset active tab in UI
+
     $('#repaymentsTabs button').removeClass('active');
-    $('#repaymentsTabs button[data-status="overdue"]').addClass('active');
-    $('#tableTitle').text('Overdue Clients');
-    
+    $('#repaymentsTabs button[data-status="all"]').addClass('active');
+    $('#tableTitle').text('All Clients (EMIs To Collect)');
+
     table.ajax.reload();
   });
 

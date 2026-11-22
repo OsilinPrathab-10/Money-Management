@@ -50,7 +50,7 @@ class PushNotificationService
      */
     public function sendPushNotification($deviceToken, string $title, string $body, array $data = []): array
     {
-        if (! $this->isConfigured()) {
+        if (!$this->isConfigured()) {
             return ['success' => false, 'status' => 0, 'error' => 'Firebase is not configured. Check FIREBASE_CREDENTIALS and FIREBASE_PROJECT_ID.'];
         }
 
@@ -60,7 +60,7 @@ class PushNotificationService
         }
 
         $accessToken = $this->getAccessToken();
-        if (! $accessToken) {
+        if (!$accessToken) {
             return ['success' => false, 'status' => 0, 'error' => 'Failed to acquire OAuth2 access token'];
         }
 
@@ -100,7 +100,7 @@ class PushNotificationService
                 ],
             ];
 
-            if (! empty($data)) {
+            if (!empty($data)) {
                 $payload['message']['data'] = $this->stringifyData($data);
             }
 
@@ -109,7 +109,7 @@ class PushNotificationService
             $json = json_decode((string) $res->getBody(), true);
 
             $ok = $status === 200 && isset($json['name']);
-            if (! $ok) {
+            if (!$ok) {
                 $err = $json['error']['status'] ?? ($json['error']['message'] ?? '');
                 if ($status === 404 || in_array($err, ['UNREGISTERED', 'INVALID_ARGUMENT', 'NOT_FOUND'], true)) {
                     $invalid[] = $t;
@@ -143,7 +143,7 @@ class PushNotificationService
 
     public function sendDataMessage($deviceToken, array $data = []): array
     {
-        if (! $this->isConfigured()) {
+        if (!$this->isConfigured()) {
             return ['success' => false, 'status' => 0, 'error' => 'Firebase is not configured'];
         }
 
@@ -153,7 +153,7 @@ class PushNotificationService
         }
 
         $accessToken = $this->getAccessToken();
-        if (! $accessToken) {
+        if (!$accessToken) {
             return ['success' => false, 'status' => 0, 'error' => 'Failed to acquire OAuth2 access token'];
         }
 
@@ -191,7 +191,7 @@ class PushNotificationService
             $status = $res->getStatusCode();
             $json = json_decode((string) $res->getBody(), true);
             $ok = $status === 200 && isset($json['name']);
-            if (! $ok) {
+            if (!$ok) {
                 $allOk = false;
             }
 
@@ -212,7 +212,7 @@ class PushNotificationService
     public function sendToUser(int $userId, string $title, string $body, string $type = 'general', array $data = []): array
     {
         $user = User::with(['userDevice', 'client', 'agent'])->find($userId);
-        if (! $user) {
+        if (!$user) {
             return ['success' => false, 'error' => 'User not found'];
         }
 
@@ -298,15 +298,15 @@ class PushNotificationService
             ->all();
 
         $tokens = [];
-        if (! empty($deviceTokens)) {
+        if (!empty($deviceTokens)) {
             $tokens[] = $deviceTokens[0];
         }
 
-        if (! empty($user->fcm_token)) {
+        if (!empty($user->fcm_token)) {
             $tokens[] = $user->fcm_token;
         }
 
-        if (! empty(optional($user->client)->fcm_token)) {
+        if (!empty(optional($user->client)->fcm_token)) {
             $tokens[] = $user->client->fcm_token;
         }
 
@@ -320,14 +320,14 @@ class PushNotificationService
             $configured,
             storage_path('app/firebase/fintronixmicrofinance-c2656-firebase-adminsdk-fbsvc-7d456d1b6f.json'),
             base_path('fintronixmicrofinance-c2656-firebase-adminsdk-fbsvc-7d456d1b6f.json'),
-            storage_path('app/firebase/codepluse-gen-pvt-ltd-firebase-adminsdk-fbsvc-0bc81559d6.json'),
+            storage_path('app/firebase/osilinprathab-gen-pvt-ltd-firebase-adminsdk-fbsvc-0bc81559d6.json'),
         ]);
 
         foreach ($candidates as $path) {
             if ($path === '') {
                 continue;
             }
-            if (! str_starts_with($path, '/') && ! preg_match('/^[A-Za-z]:[\\\\\\/]/', $path)) {
+            if (!str_starts_with($path, '/') && !preg_match('/^[A-Za-z]:[\\\\\\/]/', $path)) {
                 $path = base_path($path);
             }
             if (is_file($path) && is_readable($path)) {
@@ -335,7 +335,7 @@ class PushNotificationService
             }
         }
 
-        Log::error('Firebase Admin SDK credentials file not found');
+        Log::warning('Firebase Admin SDK credentials file not found: push notifications disabled until FIREBASE_CREDENTIALS is provided.');
 
         return null;
     }
@@ -371,11 +371,11 @@ class PushNotificationService
         $arr = is_array($deviceToken) ? $deviceToken : [$deviceToken];
         $out = [];
         foreach ($arr as $t) {
-            if (! is_string($t)) {
+            if (!is_string($t)) {
                 continue;
             }
             $t = trim($t);
-            if (! self::isLikelyFcmToken($t)) {
+            if (!self::isLikelyFcmToken($t)) {
                 continue;
             }
             $out[$t] = true;

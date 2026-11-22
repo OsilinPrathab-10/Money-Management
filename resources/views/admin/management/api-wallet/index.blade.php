@@ -240,39 +240,133 @@
         <div class="card-body">
           <p class="mb-1 text-muted">Total API Hits</p>
           <h3 class="mb-0">{{ $counts['total'] }}</h3>
+          <small class="text-muted d-block mt-2">Est. Cost: <strong class="text-dark">₹{{ number_format($costs['total'] ?? 0, 2) }}</strong></small>
         </div>
       </div>
     </div>
     <div class="col-sm-6 col-xl">
       <div class="card h-100">
         <div class="card-body">
-          <p class="mb-1 text-muted">Aadhaar Hits</p>
+          <div class="d-flex justify-content-between align-items-center mb-1">
+            <span class="text-muted">Aadhaar Hits</span>
+            <span class="badge bg-label-primary">₹{{ number_format($pricing['aadhaar'] ?? 5, 2) }}/hit</span>
+          </div>
           <h3 class="mb-0 text-primary">{{ $counts['aadhaar'] }}</h3>
+          <small class="text-muted d-block mt-2">Est. Cost: <strong>₹{{ number_format($costs['aadhaar'] ?? 0, 2) }}</strong></small>
         </div>
       </div>
     </div>
     <div class="col-sm-6 col-xl">
       <div class="card h-100">
         <div class="card-body">
-          <p class="mb-1 text-muted">PAN Hits</p>
+          <div class="d-flex justify-content-between align-items-center mb-1">
+            <span class="text-muted">PAN Hits</span>
+            <span class="badge bg-label-info">₹{{ number_format($pricing['pan'] ?? 4, 2) }}/hit</span>
+          </div>
           <h3 class="mb-0 text-info">{{ $counts['pan'] }}</h3>
+          <small class="text-muted d-block mt-2">Est. Cost: <strong>₹{{ number_format($costs['pan'] ?? 0, 2) }}</strong></small>
         </div>
       </div>
     </div>
     <div class="col-sm-6 col-xl">
       <div class="card h-100">
         <div class="card-body">
-          <p class="mb-1 text-muted">Bank Hits</p>
+          <div class="d-flex justify-content-between align-items-center mb-1">
+            <span class="text-muted">Bank Hits</span>
+            <span class="badge bg-label-success">₹{{ number_format($pricing['bank'] ?? 5, 2) }}/hit</span>
+          </div>
           <h3 class="mb-0 text-success">{{ $counts['bank'] }}</h3>
+          <small class="text-muted d-block mt-2">Est. Cost: <strong>₹{{ number_format($costs['bank'] ?? 0, 2) }}</strong></small>
         </div>
       </div>
     </div>
     <div class="col-sm-6 col-xl">
       <div class="card h-100">
         <div class="card-body">
-          <p class="mb-1 text-muted">CIBIL Hits</p>
+          <div class="d-flex justify-content-between align-items-center mb-1">
+            <span class="text-muted">CIBIL Hits</span>
+            <span class="badge bg-label-warning">₹{{ number_format($pricing['cibil'] ?? 118, 2) }}/hit</span>
+          </div>
           <h3 class="mb-0 text-warning">{{ $counts['cibil'] ?? 0 }}</h3>
+          <small class="text-muted d-block mt-2">Est. Cost: <strong>₹{{ number_format($costs['cibil'] ?? 0, 2) }}</strong></small>
         </div>
+      </div>
+    </div>
+  </div>
+
+  {{-- API Pricing Tariff Strip --}}
+  <div class="card bg-primary-subtle border-0 shadow-none mb-4">
+    <div class="card-body p-3">
+      <div class="d-flex flex-wrap align-items-center justify-content-between gap-3">
+        <div class="d-flex align-items-center gap-2">
+          <div class="avatar avatar-sm bg-primary text-white rounded-2 d-flex align-items-center justify-content-center">
+            <i class="ri-price-tag-3-line"></i>
+          </div>
+          <div>
+            <h6 class="mb-0 fw-bold text-primary">API Hit Pricing Tariff</h6>
+            <small class="text-muted">Standard billed charges applied per third-party verification query</small>
+          </div>
+        </div>
+        <div class="d-flex flex-wrap align-items-center gap-2">
+          <span class="badge bg-white text-dark border px-3 py-2 shadow-xs">
+            <i class="ri-shield-user-line text-warning me-1"></i> CIBIL Report: <strong class="text-warning">₹{{ number_format($pricing['cibil'] ?? 118, 2) }}</strong>
+          </span>
+          <span class="badge bg-white text-dark border px-3 py-2 shadow-xs">
+            <i class="ri-fingerprint-line text-primary me-1"></i> Aadhaar: <strong class="text-primary">₹{{ number_format($pricing['aadhaar'] ?? 5, 2) }}</strong>
+          </span>
+          <span class="badge bg-white text-dark border px-3 py-2 shadow-xs">
+            <i class="ri-id-card-line text-info me-1"></i> PAN: <strong class="text-info">₹{{ number_format($pricing['pan'] ?? 4, 2) }}</strong>
+          </span>
+          <span class="badge bg-white text-dark border px-3 py-2 shadow-xs">
+            <i class="ri-bank-line text-success me-1"></i> Bank: <strong class="text-success">₹{{ number_format($pricing['bank'] ?? 5, 2) }}</strong>
+          </span>
+          <button type="button" class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#editApiPricingModal">
+            <i class="ri-pencil-line me-1"></i> Edit
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal fade" id="editApiPricingModal" tabindex="-1" aria-labelledby="editApiPricingModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <form method="POST" action="{{ route('api-wallet.pricing.update') }}">
+          @csrf
+          <div class="modal-header">
+            <h5 class="modal-title" id="editApiPricingModalLabel">Edit API Hit Pricing</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body">
+            <p class="text-muted small mb-3">These rates are used to estimate API usage cost on this page.</p>
+            <div class="row g-3">
+              <div class="col-sm-6">
+                <label class="form-label" for="price_cibil">CIBIL Report (₹)</label>
+                <input type="number" step="0.01" min="0" class="form-control @error('cibil') is-invalid @enderror" id="price_cibil" name="cibil" value="{{ old('cibil', $pricing['cibil'] ?? 118) }}" required>
+                @error('cibil')<div class="invalid-feedback">{{ $message }}</div>@enderror
+              </div>
+              <div class="col-sm-6">
+                <label class="form-label" for="price_aadhaar">Aadhaar (₹)</label>
+                <input type="number" step="0.01" min="0" class="form-control @error('aadhaar') is-invalid @enderror" id="price_aadhaar" name="aadhaar" value="{{ old('aadhaar', $pricing['aadhaar'] ?? 5) }}" required>
+                @error('aadhaar')<div class="invalid-feedback">{{ $message }}</div>@enderror
+              </div>
+              <div class="col-sm-6">
+                <label class="form-label" for="price_pan">PAN (₹)</label>
+                <input type="number" step="0.01" min="0" class="form-control @error('pan') is-invalid @enderror" id="price_pan" name="pan" value="{{ old('pan', $pricing['pan'] ?? 4) }}" required>
+                @error('pan')<div class="invalid-feedback">{{ $message }}</div>@enderror
+              </div>
+              <div class="col-sm-6">
+                <label class="form-label" for="price_bank">Bank (₹)</label>
+                <input type="number" step="0.01" min="0" class="form-control @error('bank') is-invalid @enderror" id="price_bank" name="bank" value="{{ old('bank', $pricing['bank'] ?? 5) }}" required>
+                @error('bank')<div class="invalid-feedback">{{ $message }}</div>@enderror
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+            <button type="submit" class="btn btn-primary">Save pricing</button>
+          </div>
+        </form>
       </div>
     </div>
   </div>
@@ -391,6 +485,7 @@
           <tr>
             <th>#</th>
             <th>Service</th>
+            <th>Price</th>
             <th>Endpoint</th>
             <th>Status</th>
             <th>HTTP</th>
@@ -409,10 +504,14 @@
                     'aadhaar' => 'primary',
                     'pan' => 'info',
                     'bank' => 'success',
+                    'cibil' => 'warning',
                     default => 'secondary',
                   };
                 @endphp
                 <span class="badge bg-label-{{ $badge }}">{{ strtoupper($hit->service) }}</span>
+              </td>
+              <td>
+                <span class="fw-semibold text-dark">₹{{ number_format($hit->price, 2) }}</span>
               </td>
               <td><code class="small">{{ $hit->endpoint }}</code></td>
               <td>
@@ -429,7 +528,7 @@
             </tr>
           @empty
             <tr>
-              <td colspan="8" class="text-center text-muted py-5">No API hits recorded yet.</td>
+              <td colspan="9" class="text-center text-muted py-5">No API hits recorded yet.</td>
             </tr>
           @endforelse
         </tbody>
@@ -532,6 +631,13 @@ document.addEventListener('DOMContentLoaded', function() {
       }
     });
   });
+
+  @if($errors->hasAny(['cibil', 'aadhaar', 'pan', 'bank']))
+  var pricingModalEl = document.getElementById('editApiPricingModal');
+  if (pricingModalEl && window.bootstrap) {
+    new bootstrap.Modal(pricingModalEl).show();
+  }
+  @endif
 });
 </script>
 @endsection

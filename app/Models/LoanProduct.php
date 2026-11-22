@@ -34,6 +34,30 @@ class LoanProduct extends Model
         'default_term',
         'description',
         'status',
+        'web_slug',
+        'short_description',
+        'web_description',
+        'show_on_website',
+        'is_featured',
+        'sort_order',
+        'seo_title',
+        'seo_description',
+        'features_json',
+        'benefits_json',
+        'documents_json',
+        'min_age',
+        'max_age',
+        'min_monthly_income',
+        'online_application_enabled',
+    ];
+
+    protected $casts = [
+        'show_on_website' => 'boolean',
+        'is_featured' => 'boolean',
+        'online_application_enabled' => 'boolean',
+        'features_json' => 'array',
+        'benefits_json' => 'array',
+        'documents_json' => 'array',
     ];
 
     protected $appends = [

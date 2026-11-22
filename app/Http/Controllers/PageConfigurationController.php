@@ -4,8 +4,10 @@ namespace App\Http\Controllers;
 
 use App\Http\Controllers\Controller;
 use App\Models\PageConfiguration;
+use App\Services\WebsiteService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
+use Illuminate\View\View;
 
 class PageConfigurationController extends Controller
 {
@@ -53,8 +55,9 @@ class PageConfigurationController extends Controller
         return view('admin.setup-configuration.page-configuration.page-configuration-edit', [
             'pageId' => $page->id,
             'pageName' => $page->name,
+            'pageSlug' => $page->slug,
             'pageContent' => $page->content,
-            'pageStatus' => $page->status
+            'pageStatus' => $page->status,
         ]);
     }
 
@@ -65,11 +68,14 @@ class PageConfigurationController extends Controller
 
             $validated = $request->validate([
                 'name' => 'required|string|max:255',
+                'slug' => 'nullable|string|max:255',
                 'content' => 'required',
-                'status' => 'required|in:active,inactive'
+                'status' => 'required|in:active,inactive',
             ]);
 
-            $validated['slug'] = Str::slug($request->name);
+            $validated['slug'] = filled($request->input('slug'))
+                ? Str::slug($request->input('slug'))
+                : $page->slug;
 
             $page->update($validated);
 
@@ -94,17 +100,18 @@ class PageConfigurationController extends Controller
     /**
      * Display a policy page for public access
      */
-    public function show($slug)
+    public function show($slug, WebsiteService $website): View
     {
-        try {
-            $page = PageConfiguration::where('slug', $slug)
-                ->where('status', 'active')
-                ->firstOrFail();
+        $page = PageConfiguration::query()
+            ->where('slug', $slug)
+            ->where('status', 'active')
+            ->firstOrFail();
 
-            return view('public.public-page', compact('page'));
-        } catch (\Exception $e) {
-            abort(404, 'Page not found');
-        }
+        return view('website.pages.legal', [
+            'page' => $page,
+            'brand' => $website->brand(),
+            'policyPages' => PageConfiguration::active()->ordered()->get(),
+        ]);
     }
 
 }

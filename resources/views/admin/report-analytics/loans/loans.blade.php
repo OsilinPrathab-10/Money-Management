@@ -11,16 +11,7 @@
 @endsection
 
 @section('content')
-<div class="row mb-6">
-  <div class="col-12">
-    <div class="d-flex justify-content-between align-items-center">
-      <div>
-        <h4 class="mb-1">Loans Report & Analytics</h4>
-        <p class="text-muted mb-0">Comprehensive overview of loan portfolio and performance</p>
-      </div>
-    </div>
-  </div>
-</div>
+@include('admin.report-analytics.partials.loan-report-tabs', ['activeTab' => $activeTab ?? 'loans'])
 
 <!-- Charts Row -->
 <div class="row g-6 mb-6">
@@ -154,7 +145,8 @@
         </div>
       </div>
       <div class="card-body">
-        <form method="GET" action="{{ route('reports-loans') }}" class="mb-4" id="loansFilterForm">
+        <form method="GET" action="{{ route('reports-loan', ['tab' => 'loans']) }}" class="mb-4" id="loansFilterForm">
+          <input type="hidden" name="tab" value="loans">
           <div class="bg-label-secondary p-4 rounded-3 border">
             <div class="row g-3 align-items-end">
               <!-- Loan Product Filter -->
@@ -212,7 +204,7 @@
                 <button type="submit" class="btn btn-primary flex-grow-1 shadow-sm">
                   <i class="ri-filter-3-line me-1"></i>Filter
                 </button>
-                <a href="{{ route('reports-loans') }}" class="btn btn-outline-danger shadow-sm" id="resetLoansFilters" title="Reset Filters">
+                <a href="{{ route('reports-loan', ['tab' => 'loans']) }}" class="btn btn-outline-danger shadow-sm" id="resetLoansFilters" title="Reset Filters">
                   <i class="ri-refresh-line"></i>
                 </a>
               </div>

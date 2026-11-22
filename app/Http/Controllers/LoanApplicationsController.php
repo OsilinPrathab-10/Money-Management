@@ -389,7 +389,7 @@ class LoanApplicationsController extends Controller
                 'utr_number' => 'nullable|string|max:100',
                 'disbursed_at' => 'nullable|date',
                 'emi_start_date' => 'nullable|date',
-                'internal_bank_account_id' => 'required|exists:bank_accounts,id',
+                'internal_bank_account_id' => 'nullable|exists:bank_accounts,id',
                 'collateral_document' => 'nullable|file|mimes:pdf,jpg,jpeg,png,doc,docx|max:10240',
                 'other_document'      => 'nullable|file|mimes:pdf,jpg,jpeg,png,doc,docx|max:10240',
             ]);
@@ -425,20 +425,15 @@ class LoanApplicationsController extends Controller
             $processingFee = $request->has('processing_fee') ? (float)$request->processing_fee : (optional($product)->processing_fee ?? 0);
             $documentCharges = $request->has('document_charges') ? (float)$request->document_charges : (optional($product)->document_charges ?? 0);
             $otherCharges = $request->has('other_charges') ? (float)$request->other_charges : (optional($product)->other_charges ?? 0);
-            $bankingCharges = $request->has('banking_charges') ? (float)$request->banking_charges : (optional($product)->banking_charges ?? 0);
-            // Banking charges are a company bank cost — do not reduce the client handover amount.
+            $bankingCharges = 0;
             $clientDeductions = $processingFee + $documentCharges + $otherCharges;
             $netDisbursedAmount = max($principal - $clientDeductions, 0);
-            $companyOutflow = $netDisbursedAmount + max(0, $bankingCharges);
+            $companyOutflow = $netDisbursedAmount;
 
-            $internalBank = \App\Models\Account\BankAccount::find($validated['internal_bank_account_id']);
-            if (!$internalBank) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Please select a valid internal bank account.'
-                ], 422);
-            }
-            if ($internalBank->current_balance < $companyOutflow) {
+            $internalBank = ! empty($validated['internal_bank_account_id'])
+                ? \App\Models\Account\BankAccount::find($validated['internal_bank_account_id'])
+                : null;
+            if ($internalBank && $internalBank->current_balance < $companyOutflow) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Insufficient funds. The selected bank account (' . $internalBank->bank_name . ') has a balance of ₹' . number_format($internalBank->current_balance, 2) . ', which is less than the required outflow of ₹' . number_format($companyOutflow, 2) . ' (client payout ₹' . number_format($netDisbursedAmount, 2) . ($bankingCharges > 0 ? ' + bank transfer charges ₹' . number_format($bankingCharges, 2) : '') . ').'
@@ -571,8 +566,7 @@ class LoanApplicationsController extends Controller
             $processingFee = $request->has('processing_fee') ? (float)$request->processing_fee : (optional($product)->processing_fee ?? 0);
             $documentCharges = $request->has('document_charges') ? (float)$request->document_charges : (optional($product)->document_charges ?? 0);
             $otherCharges = $request->has('other_charges') ? (float)$request->other_charges : (optional($product)->other_charges ?? 0);
-            $bankingCharges = $request->has('banking_charges') ? (float)$request->banking_charges : (optional($product)->banking_charges ?? 0);
-            // Banking charges are company bank cost — excluded from client net disbursed.
+            $bankingCharges = 0;
             $totalCharges = $processingFee + $documentCharges + $otherCharges;
             $netDisbursedAmount = max($principal - $totalCharges, 0);
 
@@ -631,41 +625,43 @@ class LoanApplicationsController extends Controller
                 'ifsc_code' => $ifscCode,
                 'disbursement_amount' => $netDisbursedAmount,
                 'disburse_at' => $disburseAt,
-                'internal_bank_account_id' => $internalBank->id,
+                'internal_bank_account_id' => $internalBank?->id,
                 'collateral_document' => $collateralPath,
                 'other_document' => $otherPath,
             ]);
-
-            // Create bank transaction debit (client handover only)
-            $bankTxService = app(\App\Services\Account\BankTransactionsService::class);
-            $txDescription = 'Loan Disbursement for Account ' . $account->customer_loan_account_number . ' - ' . $client->client_name;
-            $bankTxService->createLoanDisbursementTransaction(
-                $internalBank->id,
-                $netDisbursedAmount,
-                $utrNumber,
-                $txDescription,
-                $disburseAt,
-                \App\Services\Account\AccountingTags::MODULE_LOAN,
-                \App\Services\Account\AccountingTags::ENTRY_DISBURSEMENT
-            );
 
             $bankAccounting = app(\App\Services\Account\SocietyBankAccountingService::class);
             $disburseDate = $disburseAt instanceof \Carbon\Carbon
                 ? $disburseAt->toDateString()
                 : (string) $disburseAt;
 
-            // Company bank transfer charges — separate bank debit + expense, not deducted from client.
-            $bankAccounting->recordBankTransferCharges(
-                (int) $internalBank->id,
-                (float) $bankingCharges,
-                ($utrNumber ?: $account->customer_loan_account_number) . '-BANKCHG',
-                $disburseDate,
-                \App\Services\Account\AccountingTags::MODULE_LOAN,
-                'Loan',
-                (string) $account->customer_loan_account_number,
-                (string) $client->client_name,
-                (float) $netDisbursedAmount
-            );
+            if ($internalBank) {
+                // Create bank transaction debit (client handover only)
+                $bankTxService = app(\App\Services\Account\BankTransactionsService::class);
+                $txDescription = 'Loan Disbursement for Account ' . $account->customer_loan_account_number . ' - ' . $client->client_name;
+                $bankTxService->createLoanDisbursementTransaction(
+                    $internalBank->id,
+                    $netDisbursedAmount,
+                    $utrNumber,
+                    $txDescription,
+                    $disburseAt,
+                    \App\Services\Account\AccountingTags::MODULE_LOAN,
+                    \App\Services\Account\AccountingTags::ENTRY_DISBURSEMENT
+                );
+
+                // Company bank transfer charges — separate bank debit + expense, not deducted from client.
+                $bankAccounting->recordBankTransferCharges(
+                    (int) $internalBank->id,
+                    (float) $bankingCharges,
+                    ($utrNumber ?: $account->customer_loan_account_number) . '-BANKCHG',
+                    $disburseDate,
+                    \App\Services\Account\AccountingTags::MODULE_LOAN,
+                    'Loan',
+                    (string) $account->customer_loan_account_number,
+                    (string) $client->client_name,
+                    (float) $netDisbursedAmount
+                );
+            }
 
             // Retained disbursement fees → Day Book revenues (tagged). Banking charges are a bank debit + expense.
             $loanFeeLines = [
@@ -706,7 +702,7 @@ class LoanApplicationsController extends Controller
                         "Loan {$fee['label']} — {$account->customer_loan_account_number} — {$client->client_name}",
                         ($utrNumber ?: $account->customer_loan_account_number) . '-' . $fee['suffix'],
                         $disburseDate,
-                        $internalBank->id,
+                        $internalBank?->id,
                         \App\Services\Account\AccountingTags::MODULE_LOAN,
                         $fee['entry']
                     );

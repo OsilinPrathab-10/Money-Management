@@ -2,10 +2,12 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\AdminSetting;
 use App\Models\SmsOtpLog;
 use App\Models\VerificationApiHit;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Carbon\Carbon;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\View\View;
 
@@ -38,6 +40,24 @@ class VerificationApiWalletController extends Controller
         return $this->exportSms($request, $format);
     }
 
+    public function updatePricing(Request $request): RedirectResponse
+    {
+        $validated = $request->validate([
+            'cibil' => ['required', 'numeric', 'min:0', 'max:999999'],
+            'aadhaar' => ['required', 'numeric', 'min:0', 'max:999999'],
+            'pan' => ['required', 'numeric', 'min:0', 'max:999999'],
+            'bank' => ['required', 'numeric', 'min:0', 'max:999999'],
+        ]);
+
+        foreach (VerificationApiHit::PRICE_SETTING_KEYS as $service => $settingKey) {
+            AdminSetting::set($settingKey, (string) round((float) $validated[$service], 2), 'number');
+        }
+
+        return redirect()
+            ->route('api-wallet.index', ['tab' => 'verification'])
+            ->with('success', 'API hit pricing updated successfully.');
+    }
+
     protected function verificationTab(Request $request, string $tab): View
     {
         [$service, $status, $from, $to] = $this->verificationFilters($request);
@@ -60,6 +80,16 @@ class VerificationApiWalletController extends Controller
             'total' => (clone $baseCountsQuery)->count(),
         ];
 
+        $pricing = VerificationApiHit::resolvePricing();
+
+        $costs = [
+            'aadhaar' => $counts['aadhaar'] * ($pricing['aadhaar'] ?? 5),
+            'pan' => $counts['pan'] * ($pricing['pan'] ?? 4),
+            'bank' => $counts['bank'] * ($pricing['bank'] ?? 5),
+            'cibil' => $counts['cibil'] * ($pricing['cibil'] ?? 118),
+        ];
+        $costs['total'] = $costs['aadhaar'] + $costs['pan'] + $costs['bank'] + $costs['cibil'];
+
         $hits = $this->verificationQuery($request, true)
             ->with('user')
             ->latest()
@@ -76,6 +106,8 @@ class VerificationApiWalletController extends Controller
             'tab',
             'hits',
             'counts',
+            'costs',
+            'pricing',
             'service',
             'status',
             'from',
@@ -109,6 +141,14 @@ class VerificationApiWalletController extends Controller
             'failed' => 0,
             'total' => 0,
         ];
+        $pricing = VerificationApiHit::resolvePricing();
+        $costs = [
+            'aadhaar' => 0,
+            'pan' => 0,
+            'bank' => 0,
+            'cibil' => 0,
+            'total' => 0,
+        ];
         $service = 'all';
         $status = 'all';
 
@@ -116,6 +156,8 @@ class VerificationApiWalletController extends Controller
             'tab',
             'hits',
             'counts',
+            'costs',
+            'pricing',
             'service',
             'status',
             'from',
@@ -290,6 +332,7 @@ class VerificationApiWalletController extends Controller
             ->map(fn (VerificationApiHit $hit) => [
                 'Date' => $hit->created_at?->format('d-m-Y h:i A'),
                 'Service' => strtoupper((string) $hit->service),
+                'Unit Price (₹)' => '₹' . number_format($hit->price, 2),
                 'Endpoint' => $hit->endpoint,
                 'Status' => $hit->success ? 'Success' : 'Failed',
                 'HTTP' => $hit->http_status,

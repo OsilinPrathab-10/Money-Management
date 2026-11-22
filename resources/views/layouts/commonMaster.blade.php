@@ -141,6 +141,16 @@
     </style>
   @endif
 
+  <style>
+    .customizer-hide #template-customizer,
+    .customizer-hide .template-customizer-open-btn,
+    .customizer-hide .template-customizer-theme {
+      display: none !important;
+      visibility: hidden !important;
+      pointer-events: none !important;
+    }
+  </style>
+
   <!-- Include Scripts for customizer, helper, analytics, config -->
   <!-- $isFront is used to append the front layout scriptsIncludes only on the front layout otherwise the variable will be blank -->
   @include('layouts/sections/scriptsIncludes' . $isFront)

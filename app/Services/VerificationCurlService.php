@@ -25,6 +25,7 @@ class VerificationCurlService
     protected $sandboxApiKey;
     protected $sandboxApiSecret;
     protected $bankUrl;
+    protected $panUrl;
     protected $panAadhaarLinkStatus;
     protected $gridlinesApiKey;
     protected $apiHubKey;
@@ -41,12 +42,12 @@ class VerificationCurlService
     {
         $apihub = config('services.apihub', []);
 
-        $this->apiHubKey = $apihub['client_id'] ?? env('APIHUB_CLIENT_API_ID', env('APIHUB_API_KEY', env('API_KEY')));
-        $this->apiHubSecret = $apihub['client_secret'] ?? env('APIHUB_CLIENT_API_SECRET', env('APIHUB_API_SECRET', env('SECRET_KEY')));
+        $this->apiHubKey = $apihub['client_id'] ?? env('APIHUB_CLIENT_API_ID', env('APIHUB_API_KEY', 'CAPI-FVWAMDFLWAZJJIE9'));
+        $this->apiHubSecret = $apihub['client_secret'] ?? env('APIHUB_CLIENT_API_SECRET', env('APIHUB_API_SECRET', '3wDOBhdy4jU1d4CIs9VAODY7bZaqPhwB0whHfmyg'));
         $this->apihubApiKey = $this->apiHubKey;
         $this->apihubApiSecret = $this->apiHubSecret;
-        $this->apihubApiMode = $apihub['mode'] ?? env('APIHUB_API_MODE', env('MODE', 'production'));
-        $this->apihubBaseUrl = rtrim($apihub['base_url'] ?? env('APIHUB_BASE_URL', 'http://apihub.services'), '/');
+        $this->apihubApiMode = $apihub['mode'] ?? env('APIHUB_API_MODE', 'production');
+        $this->apihubBaseUrl = rtrim($apihub['base_url'] ?? env('APIHUB_BASE_URL', 'https://apihub.services'), '/');
         $this->sandboxApiSecret = env('SANDBOX_SECRET_KEY');
         $this->sandboxApiKey = env('SANDBOX_API_KEY');
         $this->sandboxApiVersion = env('SANDBOX_API_VERSION', '1.0.0');
@@ -59,7 +60,8 @@ class VerificationCurlService
         $this->apiKey = $this->apiHubKey;
         $this->apiSecret = $this->apiHubSecret;
         $this->mode = $this->apihubApiMode;
-        $this->bankUrl = $this->apihubBaseUrl . '/' . ltrim($apihub['bank_path'] ?? 'v5/bank-verify', '/');
+        $this->panUrl = $this->apihubBaseUrl . '/' . ltrim($apihub['pan_path'] ?? 'v5/pan-verify', '/');
+        $this->bankUrl = $this->apihubBaseUrl . '/' . ltrim($apihub['bank_path'] ?? 'v4/bank-hybrid', '/');
         $this->gridlinesApiKey = env('GRIDLINES_API_KEY');
     }
 
@@ -283,6 +285,24 @@ class VerificationCurlService
             'endpoint' => $endpoint,
             'account_number' => $this->maskAccountNumber($accountNumber),
             'ifsc' => $ifsc,
+            'status_code' => $statusCode,
+            'api_response' => $rawResponse,
+            'parsed_result' => $parsedResult,
+        ]);
+    }
+
+    private function logPanApiResponse(
+        string $provider,
+        string $endpoint,
+        string $panNumber,
+        int $statusCode,
+        ?array $rawResponse,
+        ?array $parsedResult = null
+    ): void {
+        Log::info('[PAN API] Response', [
+            'provider' => $provider,
+            'endpoint' => $endpoint,
+            'pan' => strlen($panNumber) > 4 ? substr($panNumber, 0, 3) . '****' . substr($panNumber, -1) : '****',
             'status_code' => $statusCode,
             'api_response' => $rawResponse,
             'parsed_result' => $parsedResult,
@@ -817,7 +837,7 @@ class VerificationCurlService
         }
 
         try {
-            $endpoint = config('services.apihub.aadhaar_send', 'v5/aadhar/send');
+            $endpoint = config('services.apihub.aadhaar_send', 'v5/okyc/inititate');
             $response = $this->apihubPost($endpoint, [
                 'aadhar_number' => $aadhaarNumber,
             ], 'aadhaar');
@@ -1427,41 +1447,70 @@ class VerificationCurlService
         $panNumber = strtoupper(trim($panNumber));
 
         if ($aadhaarNumber === null) {
+            if (!$this->hasApiHubCredentials()) {
+                return [
+                    'status' => false,
+                    'message' => 'PAN verification service is not configured. Please set APIHUB credentials in .env.',
+                ];
+            }
+
             try {
-                $endpoint = config('services.apihub.pan_path', 'v5/pan');
+                $endpoint = config('services.apihub.pan_path', 'v5/pan-verify');
                 $response = $this->apihubPost($endpoint, [
+                    'pan' => $panNumber,
                     'pan_number' => $panNumber,
                 ], 'pan');
 
                 $resData = $response->json();
-
-                Log::info('ApiHub verifyPan response', [
-                    'pan' => substr($panNumber, 0, 3) . '****' . substr($panNumber, -1),
-                    'status_code' => $response->status(),
-                    'response' => $resData,
-                ]);
-
                 $isSuccess = $this->isApiHubSuccess($resData, $response);
 
                 if ($isSuccess) {
                     $panData = $resData['data']['data'] ?? $resData['data'] ?? [];
+                    $fullName = $panData['fullName']
+                        ?? $panData['full_name']
+                        ?? $panData['name']
+                        ?? $panData['registered_name']
+                        ?? trim(($panData['firstName'] ?? '') . ' ' . ($panData['lastName'] ?? ''));
 
-                    return [
+                    $verifiedPan = $panData['pan'] ?? $panData['pan_number'] ?? $panNumber;
+
+                    $result = [
                         'status' => true,
-                        'message' => $resData['message'] ?? 'PAN verified successfully.',
+                        'message' => $panData['message'] ?? $resData['message'] ?? 'PAN verified successfully.',
                         'data' => [
-                            'full_name' => $panData['full_name'] ?? $panData['name'] ?? $panData['registered_name'] ?? null,
-                            'pan' => $panData['pan'] ?? $panData['pan_number'] ?? $panNumber,
-                            'status' => $panData['status'] ?? 'valid',
+                            'full_name' => $fullName,
+                            'pan' => $verifiedPan,
+                            'pan_number' => $verifiedPan,
+                            'pan_type' => $panData['panType'] ?? $panData['pan_type'] ?? null,
+                            'first_name' => $panData['firstName'] ?? $panData['first_name'] ?? null,
+                            'middle_name' => $panData['middleName'] ?? $panData['middle_name'] ?? null,
+                            'last_name' => $panData['lastName'] ?? $panData['last_name'] ?? null,
+                            'gender' => $panData['gender'] ?? null,
+                            'dob' => $panData['dob'] ?? null,
+                            'aadhaar_number' => $panData['aadhaarNumber'] ?? $panData['aadhaar_number'] ?? null,
+                            'aadhaar_linked' => $panData['aadhaarLinked'] ?? $panData['aadhaar_linked'] ?? null,
+                            'address_details' => $panData['addressDetails'] ?? $panData['address_details'] ?? null,
+                            'status' => $panData['status'] ?? 'SUCCESS',
+                            'result_code' => $panData['resultCode'] ?? null,
+                            'transaction_id' => $panData['transactionId'] ?? $resData['requestId'] ?? null,
+                            'raw' => $panData,
                         ],
                     ];
+
+                    $this->logPanApiResponse('apihub', $endpoint, $panNumber, $response->status(), $resData, $result);
+
+                    return $result;
                 }
 
-                return [
+                $failure = [
                     'status' => false,
                     'message' => $resData['message'] ?? $resData['data']['message'] ?? 'PAN verification failed.',
                     'data' => $resData,
                 ];
+
+                $this->logPanApiResponse('apihub', $endpoint, $panNumber, $response->status(), $resData, $failure);
+
+                return $failure;
             } catch (\Throwable $e) {
                 Log::error('PAN verification exception', ['error' => $e->getMessage()]);
 

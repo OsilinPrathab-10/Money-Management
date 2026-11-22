@@ -1,13 +1,18 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{ \App\Helpers\SettingsHelper::get('admin_title', \App\Models\CompanyDetail::first()->company_name ?? config('app.name', 'Codepluse Gen PVT Ltd')) }} - Repayment Schedule</title>
+    <title>
+        {{ \App\Helpers\SettingsHelper::get('admin_title', \App\Models\CompanyDetail::first()->company_name ?? config('app.name', 'osilinprathab Gen PVT Ltd')) }}
+        - Repayment Schedule</title>
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet">
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@500;600;700;800&display=swap"
+        rel="stylesheet">
     <!-- Remix Icons -->
     <link href="https://cdn.jsdelivr.net/npm/remixicon@3.5.0/fonts/remixicon.css" rel="stylesheet">
     <!-- Bootstrap CSS -->
@@ -41,7 +46,12 @@
             overflow-x: hidden;
         }
 
-        h1, h2, h3, h4, h5, h6 {
+        h1,
+        h2,
+        h3,
+        h4,
+        h5,
+        h6 {
             font-family: 'Outfit', sans-serif;
             color: var(--dark);
             font-weight: 700;
@@ -152,6 +162,7 @@
                 opacity: 0;
                 transform: translateY(20px);
             }
+
             to {
                 opacity: 1;
                 transform: translateY(0);
@@ -423,26 +434,32 @@
             .hero-overview {
                 padding: 1.5rem;
             }
+
             .brand-header {
                 flex-direction: column;
                 gap: 12px;
                 align-items: flex-start;
             }
+
             .secure-badge {
                 align-self: flex-start;
             }
+
             .stat-grid {
                 grid-template-columns: repeat(2, 1fr);
                 gap: 1.25rem;
                 padding-top: 1.25rem;
                 margin-top: 1.25rem;
             }
+
             .filter-tabs {
                 padding: 1rem;
             }
+
             .table-custom th {
                 padding: 0.9rem 1rem;
             }
+
             .table-custom td {
                 padding: 0.9rem 1rem;
             }
@@ -455,37 +472,51 @@
                 color: black;
                 padding: 0;
             }
-            .bg-decorations, .bg-circle-1, .bg-circle-2, .filter-tabs, .btn-premium, .btn-premium-outline, .secure-badge {
+
+            .bg-decorations,
+            .bg-circle-1,
+            .bg-circle-2,
+            .filter-tabs,
+            .btn-premium,
+            .btn-premium-outline,
+            .secure-badge {
                 display: none !important;
             }
+
             .container {
                 max-width: 100%;
                 margin-top: 0;
             }
+
             .brand-logo {
                 color: black !important;
             }
+
             .brand-logo i {
                 color: black !important;
                 background: none !important;
                 border: none !important;
             }
+
             .premium-card {
                 border: none !important;
                 box-shadow: none !important;
                 margin-bottom: 1rem !important;
             }
+
             .table-custom th {
                 background: #f1f5f9 !important;
                 color: black !important;
                 border-bottom: 2px solid black !important;
             }
+
             .table-custom td {
                 border-bottom: 1px solid #ddd !important;
             }
         }
     </style>
 </head>
+
 <body>
     <!-- Decorative Gradients -->
     <div class="bg-decorations">
@@ -495,12 +526,12 @@
 
     @php
         $isKandhuvatti = ($loan->loan_mode ?? 'emi') === 'interest_only';
-        
+
         // Calculations for progress
         $totalEmis = $loan->emis->count();
         $paidEmis = $loan->emis->where('status', 'paid')->count();
         $progressPercent = $totalEmis > 0 ? round(($paidEmis / $totalEmis) * 100) : 0;
-        
+
         $totalPaidAmount = $loan->emis->where('status', 'paid')->sum('total_amount');
 
         // The public link lists dues only: unpaid instalments up to the end of the
@@ -508,10 +539,10 @@
         // future-month instalments are not shown.
         $dueEmis = $dueEmis ?? $loan->currentlyDueEmis();
         $endOfMonth = \Carbon\Carbon::now()->endOfMonth();
-        $overdueCount = $dueEmis->filter(fn ($e) => $e->due_date && \Carbon\Carbon::parse($e->due_date)->startOfDay()->lt(\Carbon\Carbon::now()->startOfMonth()))->count();
+        $overdueCount = $dueEmis->filter(fn($e) => $e->due_date && \Carbon\Carbon::parse($e->due_date)->startOfDay()->lt(\Carbon\Carbon::now()->startOfMonth()))->count();
         $currentDueCount = $dueEmis->count() - $overdueCount;
-        $totalDueAmount = $dueEmis->sum(fn ($e) => max(0, (float) $e->total_amount - (float) $e->paid_amount));
-        
+        $totalDueAmount = $dueEmis->sum(fn($e) => max(0, (float) $e->total_amount - (float) $e->paid_amount));
+
         // Setup status mapping
         $statusColors = [
             'active' => 'badge-paid',
@@ -527,7 +558,7 @@
             @php
                 $adminLogo = \App\Helpers\SettingsHelper::get('admin_logo');
                 $company = \App\Models\CompanyDetail::first();
-                $companyName = \App\Helpers\SettingsHelper::get('admin_title', $company->company_name ?? config('app.name', 'Codepluse Gen PVT Ltd'));
+                $companyName = \App\Helpers\SettingsHelper::get('admin_title', $company->company_name ?? config('app.name', 'osilinprathab Gen PVT Ltd'));
                 $companySlogan = $company->company_slogan ?? \App\Helpers\SettingsHelper::get('admin_subtitle', '');
                 $logoExists = $adminLogo && \Illuminate\Support\Facades\Storage::disk('public')->exists($adminLogo);
                 if (!$logoExists && !empty($company->logo_path) && \Illuminate\Support\Facades\Storage::disk('public')->exists($company->logo_path)) {
@@ -537,14 +568,17 @@
             @endphp
             <a href="#" class="brand-logo d-flex align-items-center">
                 @if($logoExists)
-                    <img src="{{ asset('storage/' . $adminLogo) }}" alt="{{ $companyName }}" style="max-height: 52px; max-width: 180px; object-fit: contain;" class="rounded bg-white p-1.5 shadow-sm me-2_5">
+                    <img src="{{ asset('storage/' . $adminLogo) }}" alt="{{ $companyName }}"
+                        style="max-height: 52px; max-width: 180px; object-fit: contain;"
+                        class="rounded bg-white p-1.5 shadow-sm me-2_5">
                 @else
                     <i class="ri-bank-card-line me-2"></i>
                 @endif
                 <div class="d-flex flex-column">
                     <span class="fs-4 fw-bold text-white lh-1">{{ $companyName }}</span>
                     @if(!empty($companySlogan))
-                        <small class="text-white-50 mt-1" style="font-size: 0.8rem; font-weight: 500; letter-spacing: 0.3px;">{{ $companySlogan }}</small>
+                        <small class="text-white-50 mt-1"
+                            style="font-size: 0.8rem; font-weight: 500; letter-spacing: 0.3px;">{{ $companySlogan }}</small>
                     @endif
                 </div>
             </a>
@@ -556,7 +590,8 @@
 
         <!-- Loan Overview Section -->
         <section class="premium-card hero-overview">
-            <div class="d-flex flex-column flex-md-row justify-content-between align-items-start align-items-md-center gap-3">
+            <div
+                class="d-flex flex-column flex-md-row justify-content-between align-items-start align-items-md-center gap-3">
                 <div class="d-flex align-items-center gap-3">
                     <div class="client-avatar">
                         {{ strtoupper(substr($loan->client->client_name, 0, 1)) }}
@@ -568,11 +603,12 @@
                         </div>
                         <p class="text-muted mb-0 mt-1">
                             <i class="ri-wallet-3-line me-1"></i>
-                            {{ $loan->loanApplication->product->loan_name ?? 'Personal Loan' }} &bull; Account: <strong>{{ $loan->account_number }}</strong>
+                            {{ $loan->loanApplication->product->loan_name ?? 'Personal Loan' }} &bull; Account:
+                            <strong>{{ $loan->account_number }}</strong>
                         </p>
                     </div>
                 </div>
-                
+
                 <div class="action-btn-group">
                     <button onclick="window.print()" class="btn-premium-outline">
                         <i class="ri-printer-line"></i>
@@ -585,7 +621,8 @@
             <div class="progress-container">
                 <div class="progress-label-wrap">
                     <span class="text-muted">Repayment Progress</span>
-                    <span class="text-primary">{{ $progressPercent }}% Completed ({{ $paidEmis }}/{{ $totalEmis }} Installments)</span>
+                    <span class="text-primary">{{ $progressPercent }}% Completed ({{ $paidEmis }}/{{ $totalEmis }}
+                        Installments)</span>
                 </div>
                 <div class="progress-custom">
                     <div class="progress-bar-custom" style="width: {{ $progressPercent }}%"></div>
@@ -604,7 +641,8 @@
                 </div>
                 <div class="stat-item">
                     <span class="stat-label">Repayment Mode</span>
-                    <span class="stat-value text-capitalize">{{ $isKandhuvatti ? 'Interest Only' : 'Regular EMI' }}</span>
+                    <span
+                        class="stat-value text-capitalize">{{ $isKandhuvatti ? 'Interest Only' : 'Regular EMI' }}</span>
                 </div>
             </div>
         </section>
@@ -622,7 +660,8 @@
                 <button class="filter-btn" data-filter="current">
                     <i class="ri-time-line"></i> Due This Month ({{ $currentDueCount }})
                 </button>
-                <span class="ms-auto d-flex align-items-center text-muted" style="font-size: 0.78rem; font-weight: 600;">
+                <span class="ms-auto d-flex align-items-center text-muted"
+                    style="font-size: 0.78rem; font-weight: 600;">
                     <i class="ri-information-line me-1"></i>
                     Showing dues up to {{ $endOfMonth->format('M Y') }} only
                 </span>
@@ -649,28 +688,28 @@
 
                                 $finalStatus = $hasInProgress ? 'unverified' : ($isOverdue ? 'overdue' : $emiStatus);
                                 $emiBalance = max(0, (float) $emi->total_amount - (float) $emi->paid_amount);
-                                
+
                                 $badgeMap = [
                                     'paid' => 'badge-paid',
                                     'pending' => 'badge-pending',
                                     'overdue' => 'badge-overdue',
                                     'unverified' => 'badge-unverified'
                                 ];
-                                
+
                                 $iconMap = [
                                     'paid' => 'ri-checkbox-circle-fill',
                                     'pending' => 'ri-time-fill',
                                     'overdue' => 'ri-error-warning-fill',
                                     'unverified' => 'ri-loader-4-fill'
                                 ];
-                                
+
                                 $labelMap = [
                                     'paid' => 'Paid',
                                     'pending' => 'Pending',
                                     'overdue' => 'Overdue',
                                     'unverified' => 'Verifying'
                                 ];
-                                
+
                                 $badgeClass = $badgeMap[$finalStatus] ?? 'badge-pending';
                                 $statusIcon = $iconMap[$finalStatus] ?? 'ri-time-fill';
                                 $statusLabel = $labelMap[$finalStatus] ?? ucfirst($emi->status);
@@ -695,9 +734,11 @@
                         @empty
                             <tr>
                                 <td colspan="5" class="text-center py-5">
-                                    <i class="ri-checkbox-circle-fill text-success d-block mb-2" style="font-size: 2.25rem;"></i>
+                                    <i class="ri-checkbox-circle-fill text-success d-block mb-2"
+                                        style="font-size: 2.25rem;"></i>
                                     <span class="fw-bold d-block" style="color: var(--dark);">No dues pending</span>
-                                    <small class="text-muted">Nothing is outstanding up to {{ $endOfMonth->format('F Y') }}.</small>
+                                    <small class="text-muted">Nothing is outstanding up to
+                                        {{ $endOfMonth->format('F Y') }}.</small>
                                 </td>
                             </tr>
                         @endforelse
@@ -728,24 +769,28 @@
                 @endif
                 <span>{{ \App\Helpers\SettingsHelper::get('admin_subtitle', 'Finance Made Simple') }}</span>
             </div>
-            <p class="mb-1">&copy; {{ date('Y') }} {{ \App\Helpers\SettingsHelper::get('admin_title', $loanCompany->company_name ?? config('app.name', 'Codepluse Gen PVT Ltd')) }}. All rights reserved.</p>
+            <p class="mb-1">&copy; {{ date('Y') }}
+                {{ \App\Helpers\SettingsHelper::get('admin_title', $loanCompany->company_name ?? config('app.name', 'osilinprathab Gen PVT Ltd')) }}.
+                All rights reserved.</p>
             @if($loanCompanyMobile)
-                <p class="mb-1"><i class="ri-phone-line me-1"></i>Contact: <a href="tel:{{ $loanCompanyMobile }}" class="text-primary" style="font-weight: 600;">{{ $loanCompanyMobile }}</a></p>
+                <p class="mb-1"><i class="ri-phone-line me-1"></i>Contact: <a href="tel:{{ $loanCompanyMobile }}"
+                        class="text-primary" style="font-weight: 600;">{{ $loanCompanyMobile }}</a></p>
             @endif
-            <p class="text-slate-400">For inquiries or support, please contact your authorized agent or reach out to our service office.</p>
+            <p class="text-slate-400">For inquiries or support, please contact your authorized agent or reach out to our
+                service office.</p>
         </footer>
     </div>
 
     <!-- Bootstrap JS -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
     <script>
-        document.addEventListener('DOMContentLoaded', function() {
+        document.addEventListener('DOMContentLoaded', function () {
             // Interactive Filtering
             const filterButtons = document.querySelectorAll('.filter-btn');
             const tableRows = document.querySelectorAll('#scheduleTable tbody tr');
 
             filterButtons.forEach(button => {
-                button.addEventListener('click', function() {
+                button.addEventListener('click', function () {
                     // Toggle active button class
                     filterButtons.forEach(btn => btn.classList.remove('active'));
                     this.classList.add('active');
@@ -763,5 +808,5 @@
         });
     </script>
 </body>
+
 </html>
- 

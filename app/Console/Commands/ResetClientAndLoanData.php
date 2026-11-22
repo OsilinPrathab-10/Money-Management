@@ -9,12 +9,14 @@ use Illuminate\Support\Facades\Schema;
 class ResetClientAndLoanData extends Command
 {
     protected $signature = 'db:reset-client-data {--force : Force the reset without confirmation prompt}';
-    protected $description = 'Reset all client, loan, collection and related transactional data to scratch, and remove leftover chit columns/data';
+
+    protected $description = 'Reset all client, loan, collection and related transactional data to scratch; keep today\'s API hits/SMS OTP usage only';
 
     public function handle(): int
     {
         if (! $this->option('force') && ! $this->confirm('Are you sure you want to reset all client and loan data to scratch?')) {
             $this->warn('Action aborted.');
+
             return self::SUCCESS;
         }
 
@@ -67,6 +69,7 @@ class ResetClientAndLoanData extends Command
         }
 
         // 3. Tables to truncate and reset AUTO_INCREMENT to 1
+        // (API usage tables handled separately — keep today's rows only)
         $tablesToReset = [
             'clients',
             'kyc_details',
@@ -120,14 +123,12 @@ class ResetClientAndLoanData extends Command
             'customer_notifications',
             'admin_notifications',
             'agent_notifications',
-            'sms_otp_logs',
             'user_otps',
             'user_devices',
             'user_call_logs',
             'user_contacts',
             'user_live_locations',
             'user_sms_messages',
-            'verification_api_hits',
             'login_logs',
             'agent_activities',
             'agent_visit_logs',
@@ -144,6 +145,11 @@ class ResetClientAndLoanData extends Command
             'districts',
             'states',
             'staffs',
+            'website_contact_enquiries',
+            'website_lead_applications',
+            'loan_assignment_trackers',
+            'loan_products',
+            'loan_types',
         ];
 
         foreach ($tablesToReset as $table) {
@@ -155,10 +161,14 @@ class ResetClientAndLoanData extends Command
             }
         }
 
+        // 3b. API usage: keep today only, renumber IDs from 1
+        $this->keepTodayApiUsageAndRenumber('verification_api_hits', $keepUserIds);
+        $this->keepTodayApiUsageAndRenumber('sms_otp_logs', $keepUserIds);
+
         // 4. Reset bank balances and bank transactions
         if (Schema::hasTable('bank_accounts') && Schema::hasTable('bank_transactions')) {
             DB::table('bank_transactions')->truncate();
-            DB::statement("ALTER TABLE `bank_transactions` AUTO_INCREMENT = 1");
+            DB::statement('ALTER TABLE `bank_transactions` AUTO_INCREMENT = 1');
 
             // Reset current balance to opening balance
             DB::statement('UPDATE `bank_accounts` SET `current_balance` = `opening_balance`');
@@ -222,5 +232,50 @@ class ResetClientAndLoanData extends Command
 
         return self::SUCCESS;
     }
-}
 
+    /**
+     * Keep only rows created today (app timezone), clear orphan FKs, renumber ids from 1.
+     *
+     * @param  array<int, int|string>  $keepUserIds
+     */
+    private function keepTodayApiUsageAndRenumber(string $table, array $keepUserIds): void
+    {
+        if (! Schema::hasTable($table)) {
+            return;
+        }
+
+        $startOfToday = now()->timezone(config('app.timezone', 'Asia/Kolkata'))->startOfDay();
+
+        $before = DB::table($table)->count();
+        $deleted = DB::table($table)->where('created_at', '<', $startOfToday)->delete();
+        $kept = DB::table($table)->count();
+
+        if (Schema::hasColumn($table, 'user_id') && ! empty($keepUserIds)) {
+            DB::table($table)->whereNotNull('user_id')->whereNotIn('user_id', $keepUserIds)->update(['user_id' => null]);
+        } elseif (Schema::hasColumn($table, 'user_id')) {
+            DB::table($table)->whereNotNull('user_id')->update(['user_id' => null]);
+        }
+
+        if (Schema::hasColumn($table, 'client_id')) {
+            DB::table($table)->whereNotNull('client_id')->update(['client_id' => null]);
+        }
+
+        if ($kept > 0) {
+            // Shift out of the way, then renumber 1..N to avoid unique collisions
+            DB::statement("UPDATE `{$table}` SET `id` = `id` + 1000000");
+            $rows = DB::table($table)->orderBy('id')->pluck('id');
+            $nextId = 1;
+            foreach ($rows as $oldId) {
+                DB::table($table)->where('id', $oldId)->update(['id' => $nextId]);
+                $nextId++;
+            }
+            DB::statement("ALTER TABLE `{$table}` AUTO_INCREMENT = {$nextId}");
+        } else {
+            DB::statement("ALTER TABLE `{$table}` AUTO_INCREMENT = 1");
+        }
+
+        $this->line(
+            "API usage [{$table}]: removed {$deleted} older row(s) of {$before}; kept {$kept} from today; IDs reset from 1."
+        );
+    }
+}

@@ -19,6 +19,26 @@ use App\Support\ReportExporter;
 class ReportsAnalyticsController extends Controller
 {
     /**
+     * Tab-wise loan reports hub (clients, applications, loans, EMI).
+     */
+    public function index(Request $request)
+    {
+        $tab = $this->resolveLoanReportTab($request->input('tab', 'clients'));
+
+        return match ($tab) {
+            'applications' => $this->applications($request),
+            'loans' => $this->loans($request),
+            'emi' => $this->emi($request),
+            default => $this->clients($request),
+        };
+    }
+
+    protected function resolveLoanReportTab(?string $tab): string
+    {
+        return in_array($tab, ['clients', 'applications', 'loans', 'emi'], true) ? $tab : 'clients';
+    }
+
+    /**
      * Clients Report
      */
     public function clients(Request $request)
@@ -155,7 +175,10 @@ class ReportsAnalyticsController extends Controller
 
         $locations = Location::orderBy('name')->get();
 
+        $activeTab = 'clients';
+
         return view('admin.report-analytics.clients.clients', compact(
+            'activeTab',
             'totalClients',
             'activeClients',
             'inactiveClients',
@@ -524,7 +547,10 @@ class ReportsAnalyticsController extends Controller
         // Locations for Area filter dropdown
         $locations = Location::all();
 
+        $activeTab = 'loans';
+
         return view('admin.report-analytics.loans.loans', compact(
+            'activeTab',
             'totalLoans',
             'activeLoans',
             'closedLoans',
@@ -821,7 +847,10 @@ class ReportsAnalyticsController extends Controller
         $locations = Location::orderBy('name')->get();
         $products = LoanProduct::orderBy('loan_name')->get();
 
+        $activeTab = 'applications';
+
         return view('admin.report-analytics.applications.applications', compact(
+            'activeTab',
             'totalApplications',
             'pendingApplications',
             'approvedApplications',
@@ -1150,7 +1179,10 @@ class ReportsAnalyticsController extends Controller
         $locations = Location::orderBy('name')->get();
         $products = LoanProduct::orderBy('loan_name')->get();
 
+        $activeTab = 'emi';
+
         return view('admin.report-analytics.emi.emi', compact(
+            'activeTab',
             'totalEmis',
             'paidEmis',
             'pendingEmis',

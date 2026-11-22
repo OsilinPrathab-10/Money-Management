@@ -212,7 +212,14 @@ window.SDS_SESSION = {
             openAdminNotificationPopup();
         @endif
 
-        @if(session('error'))
+        @php
+            $isAuthOrLogin = request()->routeIs('login', 'login.*', 'client.login', 'portal.login', 'password.*')
+                || !empty($disableErrorPopup)
+                || (($configData['myLayout'] ?? '') === 'blank')
+                || !empty($customizerHidden);
+        @endphp
+
+        @if(session('error') && !$isAuthOrLogin)
             Swal.fire({
                 icon: 'error',
                 title: 'Error!',
@@ -222,7 +229,7 @@ window.SDS_SESSION = {
             });
         @endif
 
-        @if(isset($errors) && $errors->any())
+        @if(isset($errors) && $errors->any() && !$isAuthOrLogin)
             Swal.fire({
                 icon: 'error',
                 title: 'Validation Failed',

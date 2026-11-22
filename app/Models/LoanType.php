@@ -11,11 +11,23 @@ class LoanType extends Model
 
     protected $fillable = [
         'name',
+        'slug',
         'description',
         'loan_type_icon',
         'loan_type_image',
         'loan_type_banner',
-        'status'
+        'status',
+        'seo_title',
+        'seo_description',
+        'sort_order',
+        'show_on_website',
+        'is_featured',
+    ];
+
+    protected $casts = [
+        'status' => 'boolean',
+        'show_on_website' => 'boolean',
+        'is_featured' => 'boolean',
     ];
 
     protected $appends = [
@@ -78,8 +90,4 @@ class LoanType extends Model
     {
         return $this->hasMany(LoanProduct::class, 'loan_type_id');
     }
-
-    protected $casts = [
-        'status' => 'boolean',
-    ];
 }

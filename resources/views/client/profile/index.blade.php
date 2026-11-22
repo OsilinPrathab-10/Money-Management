@@ -1,13 +1,9 @@
 @php
-  $isMenu = false;
-  $navbarFull = true;
-  
-  // Extract initials for avatar
   $nameParts = explode(' ', $client->client_name);
   $initials = strtoupper(substr($nameParts[0], 0, 1) . (isset($nameParts[1]) ? substr($nameParts[1], 0, 1) : ''));
 @endphp
 
-@extends('layouts/layoutMaster')
+@extends('client.layouts.portal')
 
 @section('title', 'My Profile')
 
@@ -150,6 +146,23 @@
                                 <i class="ri-mail-line text-info me-2"></i> {{ $client->client_email }}
                             </span>
                         </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Change password -->
+            <div class="col-12">
+                <div class="card border-0 shadow-sm">
+                    <div class="card-header border-bottom py-4"><h5 class="mb-0 fw-bold">Change password</h5></div>
+                    <div class="card-body">
+                        @if(session('success'))<div class="alert alert-success">{{ session('success') }}</div>@endif
+                        @if(auth()->user()->must_change_password)<div class="alert alert-warning">Please change your default password (your mobile number).</div>@endif
+                        <form method="POST" action="{{ route('client.password.update') }}">@csrf
+                            <div class="mb-3"><label class="form-label">Current password</label><input type="password" name="current_password" class="form-control" required></div>
+                            <div class="mb-3"><label class="form-label">New password</label><input type="password" name="password" class="form-control" required minlength="8"></div>
+                            <div class="mb-3"><label class="form-label">Confirm</label><input type="password" name="password_confirmation" class="form-control" required></div>
+                            <button class="btn btn-primary" type="submit">Update password</button>
+                        </form>
                     </div>
                 </div>
             </div>

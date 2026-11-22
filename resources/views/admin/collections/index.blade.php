@@ -109,7 +109,8 @@ document.addEventListener('DOMContentLoaded', function () {
   let module = 'all';
   let status = 'all';
   const titles = {
-    all: 'All Accounts',
+    all: 'All Accounts (EMIs To Collect)',
+    unpaid: 'EMIs To Collect',
     overdue: 'Overdue Accounts',
     pending: 'Pending Accounts',
     upcoming: 'Upcoming Accounts',
@@ -117,7 +118,8 @@ document.addEventListener('DOMContentLoaded', function () {
     paid: 'Paid Accounts'
   };
   const dueHeaders = {
-    all: 'Total Due',
+    all: 'Collectible Due',
+    unpaid: 'Collectible Due',
     overdue: 'Overdue Due',
     pending: 'Pending Due',
     upcoming: 'Upcoming Due',
@@ -276,10 +278,17 @@ document.addEventListener('DOMContentLoaded', function () {
       if (!menuItems) {
         actions = '<span class="text-muted">—</span>';
       } else {
+        const emiHeader = '<li class="dropdown-header px-3 py-2 border-bottom mb-1">' +
+          '<div class="d-flex align-items-center gap-2">' +
+          '<span class="avatar avatar-xs"><span class="avatar-initial rounded-circle bg-label-primary"><i class="ri-user-3-line"></i></span></span>' +
+          '<div class="overflow-hidden">' +
+          '<div class="fw-semibold text-truncate">' + escapeHtml(row.client_name || 'Client') + '</div>' +
+          '<small class="text-muted text-truncate d-block">' + escapeHtml(emi.label || ('EMI #' + (emi.instalment_number || ''))) + '</small>' +
+          '</div></div></li>';
         actions = '<div class="dropdown">' +
           '<button type="button" class="btn btn-sm btn-icon btn-text-secondary rounded-pill" data-bs-toggle="dropdown" data-bs-boundary="viewport" aria-expanded="false" id="' + uid + '">' +
           '<i class="icon-base ri ri-more-2-line icon-20px"></i></button>' +
-          '<ul class="dropdown-menu dropdown-menu-end shadow-sm" aria-labelledby="' + uid + '">' + menuItems + '</ul></div>';
+          '<ul class="dropdown-menu dropdown-menu-end shadow-sm" style="min-width:15rem" aria-labelledby="' + uid + '">' + emiHeader + menuItems + '</ul></div>';
       }
 
       let reminderBadge = '';
@@ -420,7 +429,7 @@ document.addEventListener('DOMContentLoaded', function () {
           }
           if (row.is_open_loan) {
             html += '<small class="text-muted mt-1">Remaining Principal: <strong class="text-dark">' + escapeHtml(row.principal_outstanding_formatted || '—') + '</strong></small>';
-          
+          }
           html += '</div>';
           return html;
         }
@@ -504,10 +513,18 @@ document.addEventListener('DOMContentLoaded', function () {
             return '<span class="text-muted">—</span>';
           }
 
+          const menuHeader = '<li class="dropdown-header px-3 py-2 border-bottom mb-1">' +
+            '<div class="d-flex align-items-center gap-2">' +
+            '<span class="avatar avatar-xs"><span class="avatar-initial rounded-circle bg-label-primary"><i class="ri-user-3-line"></i></span></span>' +
+            '<div class="overflow-hidden">' +
+            '<div class="fw-semibold text-truncate">' + escapeHtml(row.client_name || 'Client') + '</div>' +
+            '<small class="text-muted text-truncate d-block">' + escapeHtml(row.account_number || '') + '</small>' +
+            '</div></div></li>';
+
           return '<div class="dropdown">' +
             '<button type="button" class="btn btn-sm btn-icon btn-text-secondary rounded-pill" data-bs-toggle="dropdown" data-bs-boundary="viewport" aria-expanded="false" id="' + uid + '">' +
             '<i class="icon-base ri ri-more-2-line icon-22px"></i></button>' +
-            '<ul class="dropdown-menu dropdown-menu-end" aria-labelledby="' + uid + '">' + items + '</ul></div>';
+            '<ul class="dropdown-menu dropdown-menu-end shadow-sm" style="min-width:15rem" aria-labelledby="' + uid + '">' + menuHeader + items + '</ul></div>';
         }
       }
     ],
@@ -606,7 +623,8 @@ document.addEventListener('DOMContentLoaded', function () {
     $('#stat-pending').text(parseFloat(stats.pending || 0).toLocaleString('en-IN'));
     $('#stat-total-pending').text(fmt(stats.pending_amount));
     $('#stat-overdue').text(parseFloat(stats.overdue || 0).toLocaleString('en-IN'));
-    $('#tab-count-all').text(parseFloat(stats.total || 0).toLocaleString('en-IN'));
+    const collectibleCount = (stats.collectible ?? stats.unpaid_accounts ?? stats.total) || 0;
+    $('#tab-count-all').text(parseFloat(collectibleCount).toLocaleString('en-IN'));
     $('#tab-count-overdue').text(parseFloat(stats.overdue || 0).toLocaleString('en-IN'));
     $('#tab-count-pending').text(parseFloat(stats.pending || 0).toLocaleString('en-IN'));
     $('#tab-count-upcoming').text(parseFloat(stats.upcoming || 0).toLocaleString('en-IN'));
@@ -652,6 +670,14 @@ document.addEventListener('DOMContentLoaded', function () {
     $(this).addClass('active');
     status = $(this).attr('data-status');
     $('#statusFilter').val(status);
+    if (status === 'upcoming' && window.DateRangeFilter) {
+      const root = document.querySelector('[data-date-range-filter]');
+      if (root) {
+        window.DateRangeFilter.applyPreset(root, 'all');
+      }
+      $('#fromDateFilter').val('');
+      $('#toDateFilter').val('');
+    }
     setTitle();
     table.ajax.reload();
   });
@@ -1516,7 +1542,7 @@ document.addEventListener('DOMContentLoaded', function () {
       <ul class="nav nav-tabs nav-fill" role="tablist" id="collectionsTabs">
         <li class="nav-item">
           <button type="button" class="nav-link active" role="tab" data-status="all">
-            <i class="icon-base ri ri-file-list-3-line me-1_5 text-primary"></i>
+            <i class="icon-base ri ri-wallet-3-line me-1_5 text-primary"></i>
             All
             <span class="badge rounded-pill bg-primary ms-1" id="tab-count-all">0</span>
           </button>
@@ -1563,7 +1589,7 @@ document.addEventListener('DOMContentLoaded', function () {
   <div class="card-body border-bottom py-3">
     <div class="d-flex flex-column flex-md-row justify-content-between align-items-start align-items-md-center gap-3">
       <h5 class="mb-0 fw-semibold text-primary text-nowrap d-flex align-items-center" id="tableTitle">
-        <i class="icon-base ri ri-file-list-3-line me-2 text-primary"></i>All Accounts
+        <i class="icon-base ri ri-wallet-3-line me-2 text-primary"></i>All Accounts (EMIs To Collect)
       </h5>
       <div class="d-flex flex-wrap align-items-center gap-2 w-100 justify-content-md-end">
         <input type="hidden" id="statusFilter" value="all" />
@@ -1575,6 +1601,9 @@ document.addEventListener('DOMContentLoaded', function () {
           'fromId' => 'fromDateFilter',
           'toId' => 'toDateFilter',
           'presetId' => 'clientCollectionsDatePreset',
+          'presetValue' => 'all',
+          'fromValue' => '',
+          'toValue' => '',
         ])
         <button type="button" id="resetFilters" class="btn btn-sm btn-outline-secondary text-nowrap">
           <i class="icon-base ri ri-refresh-line me-1"></i>Reset

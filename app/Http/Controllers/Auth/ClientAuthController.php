@@ -28,7 +28,81 @@ class ClientAuthController extends Controller
             // but usually we redirect to their respective dashboard.
             return redirect('/dashboard'); 
         }
-        return view('authentications.auth-login', ['defaultTab' => 'customer']);
+        return view('client.auth.star-login');
+    }
+
+    public function showRegisterForm()
+    {
+        if (Auth::check()) {
+            return redirect()->route('client.dashboard');
+        }
+
+        return view('client.auth.register');
+    }
+
+    public function register(Request $request)
+    {
+        $data = $request->validate([
+            'client_name' => 'required|string|max:255',
+            'email' => 'required|email|max:255|unique:users,email',
+            'phone' => ['required', 'regex:/^[6-9]\d{9}$/', 'unique:users,phone'],
+            'consent' => 'accepted',
+        ]);
+
+        $phone = $data['phone'];
+
+        $user = User::create([
+            'name' => $data['client_name'],
+            'email' => $data['email'],
+            'phone' => $phone,
+            'password' => Hash::make($phone),
+            'status' => 'active',
+            'must_change_password' => true,
+        ]);
+
+        if (method_exists($user, 'assignRole')) {
+            $user->assignRole('Client');
+        }
+
+        $client = Client::create([
+            'user_id' => $user->id,
+            'client_name' => $data['client_name'],
+            'client_email' => $data['email'],
+            'client_phone' => $phone,
+            'status' => 'active',
+            'accepted_terms' => true,
+            'accepted_privacy' => true,
+        ]);
+
+        Client::assignCustomerId($client);
+
+        Auth::login($user);
+
+        return redirect()
+            ->route('client.dashboard')
+            ->with('info', __('Welcome! Your login is your email and your temporary password is your mobile number. Please change your password in Profile.'));
+    }
+
+    public function updatePassword(Request $request)
+    {
+        $user = $request->user();
+        abort_unless($user && $user->hasRole('Client'), 403);
+
+        $data = $request->validate([
+            'current_password' => 'required|string',
+            'password' => 'required|string|min:8|confirmed',
+        ]);
+
+        $phoneOk = trim($data['current_password']) === trim((string) $user->phone);
+        if (! Hash::check($data['current_password'], $user->password) && ! $phoneOk) {
+            return back()->withErrors(['current_password' => __('Current password is incorrect.')]);
+        }
+
+        $user->password = Hash::make($data['password']);
+        $user->must_change_password = false;
+        $user->save();
+
+        return back()->with('success', __('Password updated successfully.'));
     }
 
     /**
@@ -136,67 +210,39 @@ class ClientAuthController extends Controller
      */
     public function login(Request $request)
     {
-        Log::info("Client Login Attempt", ['login' => $request->login]);
-
         $request->validate([
             'login' => 'required|string',
             'password' => 'required',
         ]);
 
-        $login = $request->login;
-        $password = $request->password;
+        $auth = app(AuthenticatedSessionController::class);
+        $user = $auth->resolveUserForLogin($request->input('login'));
 
-        // Find user by Email or Phone
-        $user = User::where('email', $login)
-                    ->orWhere('phone', $login)
-                    ->first();
-        
-        Log::info("User lookup result", ['found' => $user ? 'Yes' : 'No', 'user_id' => $user->id ?? 'N/A']);
-
-        if (!$user) {
-            // Check clients table as fallback (only to find user if user_id was set, do not create)
-            $client = Client::where('client_email', $login)
-                            ->orWhere('client_phone', $login)
-                            ->first();
-            
-            if ($client && $client->user_id) {
-                $user = User::find($client->user_id);
-            }
-        }
-
-        if (!$user) {
+        if (! $user || ! $auth->passwordMatches($user, $request->input('password'))) {
             return response()->json([
                 'success' => false,
-                'message' => 'Invalid email or password.'
+                'message' => 'Invalid email or password.',
             ], 401);
         }
 
-        // The user wants: "client_phone --> password"
-        // So we check if the entered password matches the hashed password OR the literal phone number.
-        $passwordMatches = Hash::check($password, $user->password) || (trim($password) === trim($user->phone));
-
-        if (!$passwordMatches) {
-            Log::warning("Login Failed: Password mismatch", ['login' => $login]);
-            return response()->json([
-                'success' => false,
-                'message' => 'Invalid email or password.'
-            ], 401);
-        }
-
-        Log::info("Login Success: Authenticating user", ['user_id' => $user->id]);
-
-        // Login user
         Auth::login($user);
+        $request->session()->regenerate();
 
-        // Ensure user has 'Client' role
-        if (method_exists($user, 'hasRole') && !$user->hasRole('Client')) {
-            $user->assignRole('Client');
+        if (method_exists($user, 'hasRole') && ! $user->hasRole('Client') && ! $user->hasAnyRole(['Admin', 'Staff', 'Agent', 'CreditVerifier'])) {
+            return response()->json([
+                'success' => false,
+                'message' => 'This account is not enabled for portal access.',
+            ], 403);
         }
+
+        $redirect = $user->hasRole('Client')
+            ? ($user->must_change_password ? route('client.profile') : route('client.dashboard'))
+            : route('dashboard');
 
         return response()->json([
             'success' => true,
             'message' => 'Login successful.',
-            'redirect' => route('client.dashboard')
+            'redirect' => $redirect,
         ]);
     }
 
@@ -208,6 +254,6 @@ class ClientAuthController extends Controller
         Auth::logout();
         $request->session()->invalidate();
         $request->session()->regenerateToken();
-        return redirect()->route('client.login');
+        return redirect()->route('login');
     }
 }

@@ -284,7 +284,7 @@ document.addEventListener('DOMContentLoaded', function () {
       let msgText = d.sms_message || '';
       let waMsgText = d.whatsapp_message || '';
 
-      const companySlogan = d.company_slogan || 'Codepluse Gen PVT Ltd';
+      const companySlogan = d.company_slogan || 'osilinprathab Gen PVT Ltd';
 
       if (!msgText || !waMsgText) {
         let fallbackMsgText = '';
